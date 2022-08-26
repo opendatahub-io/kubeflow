@@ -230,19 +230,18 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				if pod.Status.ContainerStatuses[i].State == instance.Status.ContainerState {
 					continue
 				}
-
 				log.Info("Updating Notebook CR state: ", "namespace", instance.Namespace, "name", instance.Name)
 				cs := pod.Status.ContainerStatuses[i].State
 				instance.Status.ContainerState = cs
-				oldConditions := instance.Status.Conditions
-				newCondition := getNextCondition(cs)
-				// Append new condition
-				if len(oldConditions) == 0 || oldConditions[0].Type != newCondition.Type ||
-					oldConditions[0].Reason != newCondition.Reason ||
-					oldConditions[0].Message != newCondition.Message {
-					log.Info("Appending to conditions: ", "namespace", instance.Namespace, "name", instance.Name, "type", newCondition.Type, "reason", newCondition.Reason, "message", newCondition.Message)
-					instance.Status.Conditions = append([]v1beta1.NotebookCondition{newCondition}, oldConditions...)
+				notebookConditions := []v1beta1.NotebookCondition{}
+				for i := range pod.Status.Conditions {
+					log.Info("Updating Notebook CR state: ", "namespace", instance.Namespace, "name", instance.Name)
+					// Mirroring pod condition
+					condition := PodCondToNotebookCond(pod.Status.Conditions[i])
+					log.Info("Mirroring pod condition: ", "namespace", instance.Namespace, "name", instance.Name, "type", condition.Type, "status", condition.Status, "reason", condition.Reason, "message", condition.Message)
+					notebookConditions = append(notebookConditions, condition)
 				}
+				instance.Status.Conditions = notebookConditions
 				err = r.Status().Update(ctx, instance)
 				if err != nil {
 					return ctrl.Result{}, err
@@ -314,85 +313,6 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{RequeueAfter: culler.GetRequeueTime()}, nil
 }
 
-func getNextCondition(cs corev1.ContainerState) v1beta1.NotebookCondition {
-	var nbtype = ""
-	var nbreason = ""
-	var nbmsg = ""
-
-	log := r.Log.WithValues("notebook", req.NamespacedName)
-	ctx := context.Background()
-
-	status, err := createNotebookStatus(r, nb, sts, pod, req)
-	if err != nil {
-		return err
-	}
-
-	log.Info("Updating Notebook CR Status", "status", status)
-	nb.Status = status
-	return r.Status().Update(ctx, nb)
-}
-
-func createNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
-	sts *appsv1.StatefulSet, pod *corev1.Pod, req ctrl.Request) (v1beta1.NotebookStatus, error) {
-
-	log := r.Log.WithValues("notebook", req.NamespacedName)
-
-	// Initialize Notebook CR Status
-	log.Info("Initializing Notebook CR Status")
-	status := v1beta1.NotebookStatus{
-		Conditions:     make([]v1beta1.NotebookCondition, 0),
-		ReadyReplicas:  sts.Status.ReadyReplicas,
-		ContainerState: corev1.ContainerState{},
-	}
-
-	// Update the status based on the Pod's status
-	if reflect.DeepEqual(pod.Status, corev1.PodStatus{}) {
-		log.Info("No pod.Status found. Won't update notebook conditions and containerState")
-		return status, nil
-	}
-
-	// Update status of the CR using the ContainerState of
-	// the container that has the same name as the CR.
-	// If no container of same name is found, the state of the CR is not updated.
-	notebookContainerFound := false
-	log.Info("Calculating Notebook's  containerState")
-	for i := range pod.Status.ContainerStatuses {
-		if pod.Status.ContainerStatuses[i].Name != nb.Name {
-			continue
-		}
-
-		if pod.Status.ContainerStatuses[i].State == nb.Status.ContainerState {
-			continue
-		}
-
-		// Update Notebook CR's status.ContainerState
-		cs := pod.Status.ContainerStatuses[i].State
-		log.Info("Updating Notebook CR state: ", "state", cs)
-
-		status.ContainerState = cs
-		notebookContainerFound = true
-		break
-	}
-
-	if !notebookContainerFound {
-		log.Error(nil, "Could not find container with the same name as Notebook "+
-			"in containerStates of Pod. Will not update notebook's "+
-			"status.containerState ")
-	}
-
-	// Mirroring pod condition
-	notebookConditions := []v1beta1.NotebookCondition{}
-	log.Info("Calculating Notebook's Conditions")
-	for i := range pod.Status.Conditions {
-		condition := PodCondToNotebookCond(pod.Status.Conditions[i])
-		notebookConditions = append(notebookConditions, condition)
-	}
-
-	status.Conditions = notebookConditions
-
-	return status, nil
-}
-
 func PodCondToNotebookCond(podc corev1.PodCondition) v1beta1.NotebookCondition {
 
 	condition := v1beta1.NotebookCondition{}
@@ -413,24 +333,15 @@ func PodCondToNotebookCond(podc corev1.PodCondition) v1beta1.NotebookCondition {
 		condition.Reason = podc.Reason
 	}
 
-	// check if podc.LastProbeTime is null. If so initialize
-	// the field with metav1.Now()
-	check := podc.LastProbeTime.Time.Equal(time.Time{})
-	if !check {
+	if !(podc.LastProbeTime.IsZero()) {
 		condition.LastProbeTime = podc.LastProbeTime
-	} else {
-		nbtype = "Terminated"
-		nbreason = cs.Terminated.Reason
-		nbmsg = cs.Terminated.Reason
 	}
 
-	newCondition := v1beta1.NotebookCondition{
-		Type:          nbtype,
-		LastProbeTime: metav1.Now(),
-		Reason:        nbreason,
-		Message:       nbmsg,
+	if !(podc.LastTransitionTime.IsZero()) {
+		condition.LastTransitionTime = podc.LastTransitionTime
 	}
-	return newCondition
+
+	return condition
 }
 
 func setPrefixEnvVar(instance *v1beta1.Notebook, container *corev1.Container) {
