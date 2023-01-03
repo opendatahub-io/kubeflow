@@ -109,6 +109,12 @@ func safeToApplyPodDefaultsOnPod(pod *corev1.Pod, podDefaults []*settingsapi.Pod
 		errs = append(errs, err)
 	}
 
+	// imagePullSecrets attribute is defined at the Pod level, so determine if volumes
+	// injection is causing any conflict.
+	if _, err := mergeImagePullSecrets(pod.Spec.ImagePullSecrets, podDefaults); err != nil {
+		errs = append(errs, err)
+	}
+
 	for _, ctr := range pod.Spec.Containers {
 		if err := safeToApplyPodDefaultsOnContainer(&ctr, podDefaults); err != nil {
 			errs = append(errs, err)
@@ -146,6 +152,53 @@ func safeToApplyPodDefaultsOnContainer(ctr *corev1.Container, podDefaults []*set
 	}
 
 	return utilerrors.NewAggregate(errs)
+}
+
+// mergeImagePullSecrets merges a list of imagePullSecrets with the imagePullSecrets injected by given list podDefaults.
+// It returns an error if it detects any conflict during the merge.
+func mergeImagePullSecrets(
+	imagePullSecrets []corev1.LocalObjectReference,
+	podDefaults []*settingsapi.PodDefault) ([]corev1.LocalObjectReference, error) {
+
+	var errs []error
+
+	origMap := map[string]corev1.LocalObjectReference{}
+	for _, ips := range imagePullSecrets {
+		origMap[ips.Name] = ips
+	}
+
+	merged := make([]corev1.LocalObjectReference, len(imagePullSecrets))
+	copy(merged, imagePullSecrets)
+
+	for _, pd := range podDefaults {
+		for _, ips := range pd.Spec.ImagePullSecrets {
+			found, ok := origMap[ips.Name]
+			if !ok {
+				// if we don't have it already, append it and continue
+				origMap[ips.Name] = ips
+				merged = append(merged, ips)
+				continue
+			}
+
+			// make sure they are identical or throw an error
+			if !reflect.DeepEqual(found, ips) {
+				errs = append(
+					errs,
+					fmt.Errorf(
+						"merging imagePullSecret for %s has a conflict on %s: \n%#v\ndoes not match\n%#v\n in container",
+						pd.GetName(), ips.Name, ips, found),
+				)
+			}
+		}
+	}
+
+	err := utilerrors.NewAggregate(errs)
+	if err != nil {
+		klog.Error(err)
+		return nil, err
+	}
+
+	return merged, err
 }
 
 // mergeEnv merges a list of env vars with the env vars injected by given list podDefaults.
@@ -385,6 +438,12 @@ func applyPodDefaultsOnPod(pod *corev1.Pod, podDefaults []*settingsapi.PodDefaul
 	}
 	pod.Spec.Tolerations = tolerations
 
+	imagePullSecrets, err := mergeImagePullSecrets(pod.Spec.ImagePullSecrets, podDefaults)
+	if err != nil {
+		klog.Error(err)
+	}
+	pod.Spec.ImagePullSecrets = imagePullSecrets
+
 	var (
 		defaultAnnotations = make([]*map[string]string, len(podDefaults))
 		defaultLabels      = make([]*map[string]string, len(podDefaults))
@@ -541,6 +600,7 @@ func mutatePods(ar v1.AdmissionReview) *v1.AdmissionResponse {
 	// detect merge conflict
 	err = safeToApplyPodDefaultsOnPod(&pod, matchingPDs)
 	if err != nil {
+		// This code doesn't ignore the error but rejects the Pod.
 		// conflict, ignore the error, but raise an event
 		msg := fmt.Errorf("conflict occurred while applying poddefaults: %s on pod: %v err: %v",
 			strings.Join(defaultNames, ","), pod.GetName(), err)
@@ -624,15 +684,17 @@ func serveMutatePods(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	var config Config
+	var port int
 	flag.StringVar(&config.CertFile, "tlsCertFile", "/etc/webhook/certs/cert.pem", "File containing the x509 Certificate for HTTPS.")
 	flag.StringVar(&config.KeyFile, "tlsKeyFile", "/etc/webhook/certs/key.pem", "File containing the x509 private key to --tlsCertFile.")
+	flag.IntVar(&port, "webhookPort", 4443, "Port number on which the webhook listens.")
 	flag.Parse()
 	klog.InitFlags(nil)
 
 	http.HandleFunc("/apply-poddefault", serveMutatePods)
 
 	server := &http.Server{
-		Addr:      ":4443",
+		Addr:      fmt.Sprintf(":%d", port),
 		TLSConfig: configTLS(config),
 	}
 	klog.Info(fmt.Sprintf("About to start serving webhooks: %#v", server))

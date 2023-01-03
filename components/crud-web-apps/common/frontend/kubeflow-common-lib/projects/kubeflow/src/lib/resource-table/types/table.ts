@@ -25,6 +25,9 @@ export interface TableColumn {
     | TemplateValue;
   textAlignment?: TextAlignment;
   style?: { [prop: string]: string };
+  sort?: boolean;
+  sortingPreprocessorFn?: (prop: any) => any;
+  filteringPreprocessorFn?: (prop: any) => any;
 }
 
 export interface TableConfig {
@@ -33,6 +36,7 @@ export interface TableConfig {
   newButtonText?: string;
   width?: string;
   theme?: TABLE_THEME;
+  dynamicNamespaceColumn?: boolean;
 }
 
 export enum TABLE_THEME {

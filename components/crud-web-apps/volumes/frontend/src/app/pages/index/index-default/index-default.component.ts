@@ -1,23 +1,22 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
 import {
   NamespaceService,
   ActionEvent,
   ConfirmDialogService,
-  ExponentialBackoff,
   STATUS_TYPE,
   DIALOG_RESP,
   DialogConfig,
   SnackBarService,
   SnackType,
   ToolbarButton,
+  PollerService,
 } from 'kubeflow';
 import { defaultConfig } from './config';
 import { environment } from '@app/environment';
 import { VWABackendService } from 'src/app/services/backend.service';
 import { PVCResponseObject, PVCProcessedObject } from 'src/app/types';
-import { Subscription, Observable, Subject } from 'rxjs';
-import { isEqual } from 'lodash';
+import { Subscription } from 'rxjs';
 import { FormDefaultComponent } from '../../form/form-default/form-default.component';
 
 @Component({
@@ -25,28 +24,26 @@ import { FormDefaultComponent } from '../../form/form-default/form-default.compo
   templateUrl: './index-default.component.html',
   styleUrls: ['./index-default.component.scss'],
 })
-export class IndexDefaultComponent implements OnInit {
+export class IndexDefaultComponent implements OnInit, OnDestroy {
+  private nsSub = new Subscription();
+  private pollSub = new Subscription();
+
   public env = environment;
-  public poller: ExponentialBackoff;
-
-  public currNamespace = '';
-  public subs = new Subscription();
-
   public config = defaultConfig;
-  public rawData: PVCResponseObject[] = [];
+  public currNamespace: string | string[];
   public processedData: PVCProcessedObject[] = [];
   public pvcsWaitingViewer = new Set<string>();
 
-  buttons: ToolbarButton[] = [
-    new ToolbarButton({
-      text: `New Volume`,
-      icon: 'add',
-      stroked: true,
-      fn: () => {
-        this.newResourceClicked();
-      },
-    }),
-  ];
+  private newVolumeButton = new ToolbarButton({
+    text: $localize`New Volume`,
+    icon: 'add',
+    stroked: true,
+    fn: () => {
+      this.newResourceClicked();
+    },
+  });
+
+  buttons: ToolbarButton[] = [this.newVolumeButton];
 
   constructor(
     public ns: NamespaceService,
@@ -54,38 +51,32 @@ export class IndexDefaultComponent implements OnInit {
     public backend: VWABackendService,
     public dialog: MatDialog,
     public snackBar: SnackBarService,
+    public poller: PollerService,
   ) {}
 
   ngOnInit() {
-    this.poller = new ExponentialBackoff({ interval: 1000, retries: 3 });
+    this.nsSub = this.ns.getSelectedNamespace2().subscribe(ns => {
+      this.currNamespace = ns;
+      this.pvcsWaitingViewer = new Set<string>();
+      this.poll(ns);
+      this.newVolumeButton.namespaceChanged(ns, $localize`Volume`);
+    });
+  }
 
-    // Poll for new data and reset the poller if different data is found
-    this.subs.add(
-      this.poller.start().subscribe(() => {
-        if (!this.currNamespace) {
-          return;
-        }
+  ngOnDestroy() {
+    this.nsSub.unsubscribe();
+    this.pollSub.unsubscribe();
+  }
 
-        this.backend.getPVCs(this.currNamespace).subscribe(pvcs => {
-          if (!isEqual(this.rawData, pvcs)) {
-            this.rawData = pvcs;
+  public poll(ns: string | string[]) {
+    this.pollSub.unsubscribe();
+    this.processedData = [];
 
-            // Update the frontend's state
-            this.processedData = this.parseIncomingData(pvcs);
-            this.poller.reset();
-          }
-        });
-      }),
-    );
+    const request = this.backend.getPVCs(ns);
 
-    // Reset the poller whenever the selected namespace changes
-    this.subs.add(
-      this.ns.getSelectedNamespace().subscribe(ns => {
-        this.currNamespace = ns;
-        this.pvcsWaitingViewer = new Set<string>();
-        this.poller.reset();
-      }),
-    );
+    this.pollSub = this.poller.exponential(request).subscribe(pvcs => {
+      this.processedData = this.parseIncomingData(pvcs);
+    });
   }
 
   public reactToAction(a: ActionEvent) {
@@ -110,7 +101,7 @@ export class IndexDefaultComponent implements OnInit {
           SnackType.Success,
           2000,
         );
-        this.poller.reset();
+        this.poll(this.currNamespace);
       }
     });
   }
@@ -134,9 +125,11 @@ export class IndexDefaultComponent implements OnInit {
       }
 
       // Close the open dialog only if the DELETE request succeeded
-      this.backend.deletePVC(this.currNamespace, pvc.name).subscribe({
+      this.backend.deletePVC(pvc.namespace, pvc.name).subscribe({
         next: _ => {
-          this.poller.reset();
+          // We don't want to poll based on the namespace of the PVC since this
+          // might override the all-namespaces selection
+          this.poll(this.currNamespace);
           ref.close(DIALOG_RESP.ACCEPT);
         },
         error: err => {

@@ -1,10 +1,33 @@
 # Kubeflow Roadmap
 
-## Kubeflow 1.6 Release, Due: July 2022
-* Kubeflow 1.6 [milestones and timelines](https://github.com/kubeflow/community/pull/558)
+## Kubeflow 1.7 Release, Planned: March 2023 
+The Kubeflow Community plans to deliver its v1.7 release in March 2023, per this [timeline](https://github.com/kubeflow/community/pull/573).   The high level deliveries are being tracked in this [Project Board](https://github.com/orgs/kubeflow/projects/50/views/1).   The v1.7 release process will be managed by the v1.7 [Release Team](https://github.com/kubeflow/internal-acls/pull/576) using the best practices in the [Release Handbook](https://github.com/kubeflow/community/blob/master/releases/handbook.md)
+
+Notable feature candidates in the [Project Board](https://github.com/orgs/kubeflow/projects/50/views/1) are:
+* Support for Kubernetes 1.25
+* Improved user isolation especially for the Kubeflow pipelines user interface, database, and artifacts
+* Update Kubeflow Notebooks naming from Notebooks to Workbenches
+* Delivery of KFP V2 beta with its new front-end, backend and SDK 
+* Simplified creation of Katib and Training Operator experiments using SDKs
+* Simplified hyperparameter trial and log access from the Katib user interface.  Katib plans to add filtering and sorting of hyperparameter trial lists, and to speed user debugging by exposing logs from previous and running trials
+* Distributed Training Operator support for PaddlePaddle
+
+### Detailed features, bug fixes and enhancements are identified in these long term Working Group Roadmaps:
+
+* [Training Operators](https://github.com/kubeflow/common/blob/master/ROADMAP.md)
+* [KFServing](https://github.com/kubeflow/kfserving/blob/master/ROADMAP.md)
+* [Katib](https://github.com/kubeflow/katib/blob/master/ROADMAP.md)
+* [Kubeflow Pipelines](https://github.com/kubeflow/pipelines/blob/master/ROADMAP.md)
+* [Notebooks](https://github.com/kubeflow/kubeflow/issues/5978)
+
+Please join the Kubeflow Community Meetings on Tuesdays for updates and for opportunities to contribute.  
+
+## Kubeflow 1.6 Release, Delivered: September 2022
+* Kubeflow 1.6 [milestones and timelines](https://github.com/kubeflow/community/tree/master/releases/release-1.6)
 
 #### Themes
 * Kubernetes 1.22 support
+* Kubeflow Pipelines v2 (alpha)
 
 ### Major Features from each Working Group (note: Individual WG versions are independent of Kubeflow's)
 
@@ -12,7 +35,6 @@
 * V2 Preview: Support running pipeline in Argo-agnostic approach
 * New DAG visualization based on Pipeline Template and MLMD
 * SDK to change from `kfp.v2` to `kfp`
-* KFP SDK CLI [design](https://docs.google.com/document/d/1Z79ebKaf3hjyadSRsme1Qo7F-Tqu4qM1cyKuLeu2PgA/edit#heading=h.x9snb54sjlu9)
 
 #### Katib
 * Support for Population based training
