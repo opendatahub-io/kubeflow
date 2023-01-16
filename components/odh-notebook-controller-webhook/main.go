@@ -19,6 +19,7 @@ var (
 
 func main() {
 
+	// Set variable based on odh-nbc
 	var metricsAddr string
 	var webhookPort int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
@@ -26,20 +27,20 @@ func main() {
 	flag.IntVar(&webhookPort, "webhook-port", 8443,
 		"Port that the webhook server serves at.")
 
+	// Setup logger
 	opts := zap.Options{
 		Development: true,
 		TimeEncoder: zapcore.TimeEncoderOfLayout(time.RFC3339),
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
-	// Setup logger
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	var oauthProxyImage string
 	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
 		"Image of the OAuth proxy sidecar container.")
 
+	// Get k8s Config and Client
 	config, err := ctrlruntime.GetConfig()
 	if err != nil {
 		webhookLog.Error(err, "Error creating the config object")

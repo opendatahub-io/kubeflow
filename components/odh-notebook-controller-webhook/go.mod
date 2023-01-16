@@ -3,6 +3,7 @@ module github.com/opendatahub-io/kubeflow/components/odh-notebook-controller-web
 go 1.19
 
 require (
+	github.com/openshift/api v3.9.1-0.20190924102528-32369d4db2ad+incompatible
 	go.uber.org/zap v1.24.0
 	k8s.io/client-go v0.26.0
 	sigs.k8s.io/controller-runtime v0.14.1
@@ -25,16 +26,18 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
-	github.com/google/gofuzz v1.1.0 // indirect
+	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
-	github.com/imdario/mergo v0.3.6 // indirect
+	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/opendatahub-io/kubeflow/components/odh-notebook-controller v0.0.0-20221209211025-9cb4b57cc147 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.14.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
