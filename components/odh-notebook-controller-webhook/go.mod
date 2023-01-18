@@ -1,6 +1,6 @@
 module github.com/opendatahub-io/kubeflow/components/odh-notebook-controller-webhook
 
-go 1.19
+go 1.17
 
 require (
 	github.com/openshift/api v3.9.1-0.20190924102528-32369d4db2ad+incompatible

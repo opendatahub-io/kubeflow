@@ -6,16 +6,35 @@ import (
 
 	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 	"go.uber.org/zap/zapcore"
-	k8sclient "k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntime "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	webhook "sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	//placeholder, I do not know which shcemes are necessary yet
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	configv1 "github.com/openshift/api/config/v1"
+	routev1 "github.com/openshift/api/route/v1"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 )
 
 var (
 	webhookLog = ctrl.Log.WithName("webhook")
+	scheme     = runtime.NewScheme()
 )
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+
+	utilruntime.Must(nbv1.AddToScheme(scheme))
+	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(configv1.AddToScheme(scheme))
+
+	//+kubebuilder:scaffold:scheme
+}
 
 func main() {
 
@@ -46,11 +65,18 @@ func main() {
 		webhookLog.Error(err, "Error creating the config object")
 	}
 
-	kc, err := k8sclient.NewForConfig(config)
+	cliOpts := client.Options{
+		Scheme: scheme,
+	}
+
+	// kc, err := k8sclient.NewForConfig(config)
+	// if err != nil {
+	// 	webhookLog.Error(err, "Failed to initialize Kubernetes client")
+	// }
+	cli, err := client.New(config, cliOpts)
 	if err != nil {
 		webhookLog.Error(err, "Failed to initialize Kubernetes client")
 	}
-
 	// Setup notebook mutating webhook
 	hookServer := webhook.Server{
 		Host: metricsAddr,
@@ -58,7 +84,7 @@ func main() {
 	}
 	notebookWebhook := &webhook.Admission{
 		Handler: &controllers.NotebookWebhook{
-			Client: kc,
+			Client: cli,
 			OAuthConfig: controllers.OAuthConfig{
 				ProxyImage: oauthProxyImage,
 			},
