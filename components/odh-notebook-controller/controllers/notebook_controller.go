@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -215,7 +216,8 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&routev1.Route{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
-		Owns(&corev1.Secret{})
+		Owns(&corev1.Secret{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10})
 
 	err := builder.Complete(r)
 	if err != nil {
