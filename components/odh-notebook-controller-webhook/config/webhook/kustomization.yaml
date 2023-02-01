@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - manifests.yaml
   - service.yaml
+  - webhook_manager.yaml
 commonAnnotations:
   service.beta.openshift.io/inject-cabundle: "true"
 configurations:
