@@ -40,11 +40,14 @@ func main() {
 
 	// Set variable based on odh-nbc
 	var metricsAddr string
+	var certDir string
 	var webhookPort int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.IntVar(&webhookPort, "webhook-port", 8443,
 		"Port that the webhook server serves at.")
+	flag.StringVar(&certDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
+		"The directory containing the cert files for the webhook.")
 
 	// Setup logger
 	opts := zap.Options{
@@ -79,8 +82,9 @@ func main() {
 	}
 	// Setup notebook mutating webhook
 	hookServer := webhook.Server{
-		Host: metricsAddr,
-		Port: webhookPort,
+		Host:    metricsAddr,
+		Port:    webhookPort,
+		CertDir: certDir,
 	}
 	notebookWebhook := &webhook.Admission{
 		Handler: &controllers.NotebookWebhook{
