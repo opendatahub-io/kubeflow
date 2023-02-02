@@ -18,6 +18,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"k8s.io/client-go/util/workqueue"
 	"reflect"
 	"strconv"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
 const (
@@ -215,7 +217,10 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&routev1.Route{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
-		Owns(&corev1.Secret{})
+		Owns(&corev1.Secret{}).WithOptions(controller.Options{
+		MaxConcurrentReconciles: 10,
+		RateLimiter:             workqueue.NewItemExponentialFailureRateLimiter(1*time.Second, 1000*time.Second),
+	})
 
 	err := builder.Complete(r)
 	if err != nil {
