@@ -17,9 +17,6 @@ package controllers
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
-	"net"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -85,10 +81,6 @@ var _ = BeforeSuite(func() {
 			ErrorIfPathMissing: true,
 			CleanUpAfterUse:    false,
 		},
-		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			Paths:                    []string{filepath.Join("..", "config", "webhook")},
-			IgnoreErrorIfPathMissing: false,
-		},
 	}
 
 	cfg, err := envTest.Start()
@@ -127,17 +119,17 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
-	// Setup notebook mutating webhook
-	hookServer := mgr.GetWebhookServer()
-	notebookWebhook := &webhook.Admission{
-		Handler: &NotebookWebhook{
-			Client: mgr.GetClient(),
-			OAuthConfig: OAuthConfig{
-				ProxyImage: OAuthProxyImage,
-			},
-		},
-	}
-	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
+	// // Setup notebook mutating webhook
+	// hookServer := mgr.GetWebhookServer()
+	// notebookWebhook := &webhook.Admission{
+	// 	Handler: &NotebookWebhook{
+	// 		Client: mgr.GetClient(),
+	// 		OAuthConfig: OAuthConfig{
+	// 			ProxyImage: OAuthProxyImage,
+	// 		},
+	// 	},
+	// }
+	// hookServer.Register("/mutate-notebook-v1", notebookWebhook)
 
 	// Start the manager
 	go func() {
@@ -146,17 +138,17 @@ var _ = BeforeSuite(func() {
 		Expect(err).ToNot(HaveOccurred(), "Failed to run manager")
 	}()
 
-	// Wait for the webhook server to get ready
-	dialer := &net.Dialer{Timeout: time.Second}
-	addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
-	Eventually(func() error {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true})
-		if err != nil {
-			return err
-		}
-		conn.Close()
-		return nil
-	}).Should(Succeed())
+	// // Wait for the webhook server to get ready
+	// dialer := &net.Dialer{Timeout: time.Second}
+	// addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
+	// Eventually(func() error {
+	// 	conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	conn.Close()
+	// 	return nil
+	// }).Should(Succeed())
 
 	// Verify kubernetes client is working
 	cli = mgr.GetClient()

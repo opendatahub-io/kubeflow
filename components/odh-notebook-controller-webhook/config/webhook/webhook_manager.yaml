@@ -2,11 +2,34 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: odh-notebook-controller-webhook-manager
+  labels:
+    app: odh-notebook-controller-webhook
+    app.kubernetes.io/part-of: odh-notebook-controller
+    component.opendatahub.io/name: odh-notebook-controller-webhook
+    kustomize.component: odh-notebook-controller-webhook
+    opendatahub.io/component: 'true'
 spec:
+  replicas: 1  
+  selector:
+    matchLabels:
+      app: odh-notebook-controller-webhook
+      app.kubernetes.io/part-of: odh-notebook-controller
+      component.opendatahub.io/name: odh-notebook-controller-webhook
+      kustomize.component: odh-notebook-controller-webhook
+      opendatahub.io/component: 'true'
   template:
+    metadata:
+      labels:
+        app: odh-notebook-controller-webhook
+        app.kubernetes.io/part-of: odh-notebook-controller
+        component.opendatahub.io/name: odh-notebook-controller-webhook
+        kustomize.component: odh-notebook-controller-webhook
+        opendatahub.io/component: 'true'
     spec:
       containers:
         - name: manager
+          securityContext:
+            allowPrivilegeEscalation: false
           image: quay.io/opendatahub/odh-notebook-controller-webhook:latest
           ports:
             - containerPort: 8443

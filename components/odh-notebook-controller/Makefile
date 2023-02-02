@@ -101,11 +101,11 @@ run: manifests generate fmt vet certificates ktunnel ## Run a controller from yo
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	cd ../ && docker build . -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
+	cd ../ && podman build . -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}:${TAG}
+	podman push ${IMG}:${TAG}
 
 .PHONY: image
 image: docker-build docker-push ## Build and push docker image with the manager.

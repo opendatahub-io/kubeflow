@@ -3,7 +3,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
-namespace: notebook-controller-system
+namespace: odh-notebook-controller-system
 commonLabels:
   app.kubernetes.io/part-of: odh-notebook-controller
   component.opendatahub.io/name: kf-notebook-controller

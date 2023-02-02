@@ -5,7 +5,6 @@ bases:
   # - ../crd
   - ../rbac
   - ../manager
-  - ../webhook
 
 # Adds namespace to all resources.
 namespace: odh-notebook-controller-system
@@ -22,6 +21,3 @@ commonLabels:
   kustomize.component: odh-notebook-controller
   component.opendatahub.io/name: odh-notebook-controller
   opendatahub.io/component: "true"
-
-patchesStrategicMerge:
-  - webhook_manager_patch.yaml

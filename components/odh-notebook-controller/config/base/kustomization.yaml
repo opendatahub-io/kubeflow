@@ -5,5 +5,5 @@ resources:
   - ../default
 images:
   - name: quay.io/opendatahub/odh-notebook-controller
-    newName: quay.io/opendatahub/odh-notebook-controller
-    newTag: latest
+    newName: quay.io/mroman_redhat/odh-notebook-controller
+    newTag: dev-1
