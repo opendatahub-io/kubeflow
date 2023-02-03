@@ -2,6 +2,7 @@ CONTAINER_ENGINE = podman
 IMG ?= quay.io/opendatahub/odh-notebook-controller-webhook
 TAG ?= $(shell git describe --tags --always)
 WEBHOOK_CERT_DIR = /tmp/k8s-webhook-server/serving-certs
+K8S_NAMESPACE = odh-notebook-controller-system
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -27,6 +28,9 @@ push: ## Push docker image with the webhook.
 
 .PHONY: image
 image: build push ## Build and push docker image with the webhook.
+
+.PHONY: deploy
+deploy: kustomize build config/webhook/ | kubectl apply -f -
 
 ##@ Build Dependencies
 

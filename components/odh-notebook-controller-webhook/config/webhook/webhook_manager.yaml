@@ -27,7 +27,7 @@ spec:
         opendatahub.io/component: 'true'
     spec:
       containers:
-        - name: manager
+        - name: webhook
           securityContext:
             allowPrivilegeEscalation: false
           image: quay.io/opendatahub/odh-notebook-controller-webhook:latest
@@ -39,6 +39,9 @@ spec:
             - mountPath: /tmp/k8s-webhook-server/serving-certs
               name: webhook-cert
               readOnly: true
+          command:
+            - /webhook
+          args: ["--oauth-proxy-image", "registry.redhat.io/openshift4/ose-oauth-proxy:v4.10"]
       volumes:
         - name: webhook-cert
           secret:

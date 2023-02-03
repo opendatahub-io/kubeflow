@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntime "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	signals "sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	webhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	//placeholder, I do not know which shcemes are necessary yet
@@ -42,12 +43,15 @@ func main() {
 	var metricsAddr string
 	var certDir string
 	var webhookPort int
+	var oauthProxyImage string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.IntVar(&webhookPort, "webhook-port", 8443,
 		"Port that the webhook server serves at.")
 	flag.StringVar(&certDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
 		"The directory containing the cert files for the webhook.")
+	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
+		"Image of the OAuth proxy sidecar container.")
 
 	// Setup logger
 	opts := zap.Options{
@@ -57,10 +61,6 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-
-	var oauthProxyImage string
-	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
-		"Image of the OAuth proxy sidecar container.")
 
 	// Get k8s Config and Client
 	config, err := ctrlruntime.GetConfig()
@@ -82,7 +82,7 @@ func main() {
 	}
 	// Setup notebook mutating webhook
 	hookServer := webhook.Server{
-		Host:    metricsAddr,
+		Host:    "",
 		Port:    webhookPort,
 		CertDir: certDir,
 	}
@@ -95,5 +95,9 @@ func main() {
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
+	err = hookServer.StartStandalone(signals.SetupSignalHandler(), scheme)
+	if err != nil {
+		webhookLog.Error(err, "Failed to start webhook")
+	}
 
 }

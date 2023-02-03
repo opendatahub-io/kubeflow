@@ -10,3 +10,9 @@ spec:
     - name: webhook
       port: 443
       targetPort: webhook
+  selector:
+    app: odh-notebook-controller-webhook
+    app.kubernetes.io/part-of: odh-notebook-controller
+    component.opendatahub.io/name: odh-notebook-controller-webhook
+    kustomize.component: odh-notebook-controller-webhook
+    opendatahub.io/component: 'true'
