@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	webhook "github.com/opendatahub.io/kubeflow/components/odh-notebook-controller-webhook"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -130,7 +131,7 @@ var _ = BeforeSuite(func() {
 	// Setup notebook mutating webhook
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
-		Handler: &NotebookWebhook{
+		Handler: &webhook.NotebookWebhook{
 			Client: mgr.GetClient(),
 			OAuthConfig: OAuthConfig{
 				ProxyImage: OAuthProxyImage,

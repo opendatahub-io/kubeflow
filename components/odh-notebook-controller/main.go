@@ -34,7 +34,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
@@ -58,15 +57,13 @@ func init() {
 }
 
 func main() {
-	var metricsAddr, probeAddr, oauthProxyImage string
+	var metricsAddr, probeAddr string
 	var webhookPort int
 	var enableLeaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
-	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
-		"Image of the OAuth proxy sidecar container.")
 	flag.IntVar(&webhookPort, "webhook-port", 8443,
 		"Port that the webhook server serves at.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -107,18 +104,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Notebook")
 		os.Exit(1)
 	}
-
-	// Setup notebook mutating webhook
-	hookServer := mgr.GetWebhookServer()
-	notebookWebhook := &webhook.Admission{
-		Handler: &controllers.NotebookWebhook{
-			Client: mgr.GetClient(),
-			OAuthConfig: controllers.OAuthConfig{
-				ProxyImage: oauthProxyImage,
-			},
-		},
-	}
-	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
 
 	//+kubebuilder:scaffold:builder
 

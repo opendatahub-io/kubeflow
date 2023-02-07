@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook
+spec:
+  replicas: 1  
+  selector:
+    matchLabels:
+      app: odh-notebook-controller-webhook
+      app.kubernetes.io/part-of: odh-notebook-controller
+      component.opendatahub.io/name: odh-notebook-controller-webhook
+      kustomize.component: odh-notebook-controller-webhook
+      opendatahub.io/component: 'true'
+  template:
+    metadata:
+      labels:
+        app: odh-notebook-controller-webhook
+        app.kubernetes.io/part-of: odh-notebook-controller
+        component.opendatahub.io/name: odh-notebook-controller-webhook
+        kustomize.component: odh-notebook-controller-webhook
+        opendatahub.io/component: 'true'
+    spec:
+      containers:
+        - name: webhook
+          securityContext:
+            allowPrivilegeEscalation: false
+          image: quay.io/opendatahub/odh-notebook-controller-webhook:latest
+          ports:
+            - containerPort: 8443
+              name: webhook
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /tmp/k8s-webhook-server/serving-certs
+              name: webhook-cert
+              readOnly: true
+          command:
+            - /webhook
+          args: ["--oauth-proxy-image", "registry.redhat.io/openshift4/ose-oauth-proxy:v4.10"]
+      volumes:
+        - name: webhook-cert
+          secret:
+            defaultMode: 420
+            secretName: odh-notebook-controller-webhook-cert
