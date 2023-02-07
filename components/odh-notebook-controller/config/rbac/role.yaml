@@ -11,6 +11,7 @@ rules:
   - secrets
   - serviceaccounts
   - services
+  - configmap
   verbs:
   - create
   - get
@@ -50,3 +51,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+    - config.openshift.io
+  resources:
+    - proxies
+  verbs:
+    - get
+    - list
+    - watch
