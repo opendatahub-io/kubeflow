@@ -131,12 +131,12 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
+				"cpu":    resource.MustParse("250m"),
 				"memory": resource.MustParse("64Mi"),
 			},
 			Limits: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
-				"memory": resource.MustParse("64Mi"),
+				"cpu":    resource.MustParse("500m"),
+				"memory": resource.MustParse("128Mi"),
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
