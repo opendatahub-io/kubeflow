@@ -18,6 +18,11 @@ namespace: odh-notebook-controller-system
 # also match with the prefix (text before '-') of the namespace field above.
 namePrefix: odh-notebook-controller-
 
+images:
+  - name: quay.io/opendatahub/odh-notebook-controller-webhook
+    newName: quay.io/opendatahub/odh-notebook-controller-webhook
+    newTag: latest
+
 # Labels to add to all resources and selectors.
 commonLabels:
   app: odh-notebook-controller-webhook

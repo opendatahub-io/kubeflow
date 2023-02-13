@@ -4,6 +4,7 @@ TAG ?= $(shell git describe --tags --always)
 WEBHOOK_CERT_DIR = /tmp/k8s-webhook-server/serving-certs
 K8S_NAMESPACE = odh-notebook-controller-system
 GO_VERSION = go
+KUSTOMIZE = kustomize
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -31,4 +32,21 @@ push: ## Push docker image with the webhook.
 image: build push ## Build and push docker image with the webhook.
 
 .PHONY: deploy
-deploy: kustomize build config/webhook/ | kubectl apply -f -
+deploy: 
+	$(KUSTOMIZE) build ./config/webhook | kubectl apply -f -
+
+.PHONY: undeploy
+undeploy: 
+	$(KUSTOMIZE) build ./config/webhook | kubectl delete --ignore-not-found=true -f -
+
+##@ Build Dependencies
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN): ## Ensure that the directory exists
+	mkdir -p $(LOCALBIN)
+
+KUSTOMIZE = $(LOCALBIN)/kustomize
+.PHONY: kustomize
+kustomize: ## Download kustomize locally if necessary.
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0
