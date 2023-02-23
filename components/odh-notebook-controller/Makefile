@@ -7,6 +7,9 @@ TAG ?= $(shell git describe --tags --always)
 WEBHOOK_IMG ?= quay.io/opendatahub/odh-notebook-controller-webhook
 WEBHOOK_TAG ?= latest
 
+KF_IMG ?= quay.io/opendatahub/kubeflow-notebook-controller
+KF_TAG ?= 1.6-9ae9413
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
@@ -122,17 +125,22 @@ endif
 
 .PHONY: setup-kf
 setup-kf: kustomize ## Replace Kustomize manifests with your environment configuration.
-	sed -i'' -e 's@namespace: .*@namespace: '"${K8S_NAMESPACE}"'@' \
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' \
 		../notebook-controller/config/overlays/openshift/kustomization.yaml
+	sed -i'' -e 's,newName: .*,newName: '"${KF_IMG}"',' \
+		../notebook-controller/config/overlays/openshift/kustomization.yaml
+	sed -i'' -e 's,newTag: .*,newTag: '"${KF_TAG}"',' \
+ 	../notebook-controller/config/overlays/openshift/kustomization.yaml
 
 .PHONY: setup
 setup: manifests kustomize ## Replace Kustomize manifests with your environment configuration.
-	sed -i'' -e 's@namespace: .*@namespace: '"${K8S_NAMESPACE}"'@' ./config/default/kustomization.yaml
-	sed -i'' -e 's@namespace: .*@namespace: '"${K8S_NAMESPACE}"'@' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
-	sed -i'' -e 's@newName: .*@newName: '"${IMG}"'@' ./config/base/kustomization.yaml
-	sed -i'' -e 's@newTag: .*@newTag: '"${TAG}"'@' ./config/base/kustomization.yaml
-	sed -i'' -e 's@newName: .*@newName: '"${WEBHOOK_IMG}"'@' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
-	sed -i'' -e 's@newTag: .*@newTag: '"${WEBHOOK_TAG}"'@' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
+	sed -i'' -e 's,newName: .*,newName: '"${WEBHOOK_IMG}"',' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
+	sed -i'' -e 's,newTag: .*,newTag: '"${WEBHOOK_TAG}"',' ../odh-notebook-controller-webhook/config/webhook/kustomization.yaml
+
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ./config/default/kustomization.yaml
+	sed -i'' -e 's,newName: .*,newName: '"${IMG}"',' ./config/base/kustomization.yaml
+	sed -i'' -e 's,newTag: .*,newTag: '"${TAG}"',' ./config/base/kustomization.yaml
 
 
 .PHONY: deploy-webhook
