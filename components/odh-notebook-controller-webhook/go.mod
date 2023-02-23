@@ -6,6 +6,8 @@ require (
 	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
 	github.com/opendatahub-io/kubeflow/components/odh-notebook-controller v0.0.0-20221209211025-9cb4b57cc147
 	github.com/openshift/api v3.9.1-0.20190924102528-32369d4db2ad+incompatible
+	github.com/pkg/errors v0.9.1
+	github.com/stretchr/testify v1.7.0
 	go.uber.org/zap v1.19.1
 	k8s.io/api v0.24.3
 	k8s.io/apimachinery v0.24.3
@@ -43,7 +45,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect

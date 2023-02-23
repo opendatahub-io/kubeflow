@@ -23,6 +23,7 @@ spec:
             - /manager
           securityContext:
             allowPrivilegeEscalation: false
+            runAsNonRoot: false
           ports:
             - name: metrics
               containerPort: 8080

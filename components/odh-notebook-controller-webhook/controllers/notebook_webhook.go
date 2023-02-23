@@ -19,11 +19,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
+
+	configv1 "github.com/openshift/api/config/v1"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -40,7 +42,7 @@ import (
 type NotebookWebhook struct {
 	Client      client.Client
 	decoder     *admission.Decoder
-	OAuthConfig OAuthConfig
+	OAuthConfig controllers.OAuthConfig
 }
 
 var proxyEnvVars = make(map[string]string, 4)
@@ -54,10 +56,10 @@ var proxyEnvVars = make(map[string]string, 4)
 // reconcilitation is completed (see RemoveReconciliationLock).
 func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 	if meta.Annotations != nil {
-		meta.Annotations[culler.STOP_ANNOTATION] = AnnotationValueReconciliationLock
+		meta.Annotations[culler.STOP_ANNOTATION] = controllers.AnnotationValueReconciliationLock
 	} else {
 		meta.SetAnnotations(map[string]string{
-			culler.STOP_ANNOTATION: AnnotationValueReconciliationLock,
+			culler.STOP_ANNOTATION: controllers.AnnotationValueReconciliationLock,
 		})
 	}
 	return nil
@@ -65,7 +67,7 @@ func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 
 // InjectOAuthProxy injects the OAuth proxy sidecar container in the Notebook
 // spec
-func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
+func InjectOAuthProxy(notebook *nbv1.Notebook, oauth controllers.OAuthConfig) error {
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
 		Name:            "oauth-proxy",
@@ -97,7 +99,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
 		},
 		Ports: []corev1.ContainerPort{{
-			Name:          OAuthServicePortName,
+			Name:          controllers.OAuthServicePortName,
 			ContainerPort: 8443,
 			Protocol:      corev1.ProtocolTCP,
 		}},
@@ -105,7 +107,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Port:   intstr.FromString(controllers.OAuthServicePortName),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -119,7 +121,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Port:   intstr.FromString(controllers.OAuthServicePortName),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -152,9 +154,9 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 	}
 
 	// Add logout url if logout annotation is present in the notebook
-	if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
+	if notebook.ObjectMeta.Annotations[controllers.AnnotationLogoutUrl] != "" {
 		proxyContainer.Args = append(proxyContainer.Args,
-			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
+			"--logout-url="+notebook.ObjectMeta.Annotations[controllers.AnnotationLogoutUrl])
 	}
 
 	// Add the sidecar container to the notebook
@@ -241,7 +243,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// Inject the OAuth proxy if the annotation is present
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+	if controllers.OAuthInjectionIsEnabled(notebook.ObjectMeta) {
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
