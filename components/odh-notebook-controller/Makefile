@@ -185,7 +185,10 @@ undeploy-dev: setup undeploy-kf undeploy-webhook ## Undeploy controller from the
 
 .PHONY: e2e-test
 e2e-test: ## Run e2e tests for the controller
+	@echo "Testing notebook controller...\n"
 	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+	@echo "Testing notebook controller webhook...\n"
+	make e2e-test -C ../odh-notebook-controller-webhook K8S_NAMESPACE=${K8S_NAMESPACE} E2E_TEST_FLAGS=${E2E_TEST_FLAGS}
 
 ##@ Build Dependencies
 

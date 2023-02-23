@@ -39,10 +39,9 @@ deploy:
 undeploy: 
 	$(KUSTOMIZE) build ./config/webhook | kubectl delete --ignore-not-found=true -f -
 
-# TODO: Get rid of the go1.17.13 binary and use a var instead
 .PHONY: e2e-test
 e2e-test: ## Run e2e tests for the controller
-	go1.17.13 test ./e2e/ -run ^TestE2EWebhook -v --namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+	go test ./e2e/ -run ^TestE2EWebhook -v --namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
 
 ##@ Build Dependencies
 
