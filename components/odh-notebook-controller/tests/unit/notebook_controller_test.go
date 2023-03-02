@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package unit
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -103,7 +104,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, route)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should reconcile the Route when modified", func() {
@@ -121,7 +122,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				}
 				return route.Spec.To.Name, nil
 			}, timeout, interval).Should(Equal(Name))
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should recreate the Route when deleted", func() {
@@ -134,7 +135,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, route)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should delete the Openshift Route", func() {
@@ -232,7 +233,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							},
 							{
 								Name:            "oauth-proxy",
-								Image:           OAuthProxyImage,
+								Image:           controllers.OAuthProxyImage,
 								ImagePullPolicy: corev1.PullAlways,
 								Env: []corev1.EnvVar{{
 									Name: "NAMESPACE",
@@ -261,7 +262,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 									"--logout-url=https://example.notebook-url/notebook/" + Namespace + "/" + Name,
 								},
 								Ports: []corev1.ContainerPort{{
-									Name:          OAuthServicePortName,
+									Name:          controllers.OAuthServicePortName,
 									ContainerPort: 8443,
 									Protocol:      corev1.ProtocolTCP,
 								}},
@@ -269,7 +270,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 									ProbeHandler: corev1.ProbeHandler{
 										HTTPGet: &corev1.HTTPGetAction{
 											Path:   "/oauth/healthz",
-											Port:   intstr.FromString(OAuthServicePortName),
+											Port:   intstr.FromString(controllers.OAuthServicePortName),
 											Scheme: corev1.URISchemeHTTPS,
 										},
 									},
@@ -283,7 +284,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 									ProbeHandler: corev1.ProbeHandler{
 										HTTPGet: &corev1.HTTPGetAction{
 											Path:   "/oauth/healthz",
-											Port:   intstr.FromString(OAuthServicePortName),
+											Port:   intstr.FromString(controllers.OAuthServicePortName),
 											Scheme: corev1.URISchemeHTTPS,
 										},
 									},
@@ -356,7 +357,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			time.Sleep(interval)
 
 			By("By checking that the webhook has injected the sidecar container")
-			Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
+			Expect(controllers.CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
 		})
 
 		It("Should remove the reconciliation lock annotation", func() {
@@ -368,7 +369,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				if err != nil {
 					return false
 				}
-				return CompareNotebooks(*notebook, expectedNotebook)
+				return controllers.CompareNotebooks(*notebook, expectedNotebook)
 			}, timeout, interval).Should(BeTrue())
 		})
 
@@ -385,7 +386,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
 			}, timeout, interval).Should(Succeed())
-			Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
+			Expect(controllers.CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
 		})
 
 		serviceAccount := &corev1.ServiceAccount{}
@@ -409,7 +410,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, serviceAccount)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookServiceAccounts(*serviceAccount, expectedServiceAccount)).Should(BeTrue())
+			Expect(controllers.CompareNotebookServiceAccounts(*serviceAccount, expectedServiceAccount)).Should(BeTrue())
 		})
 
 		It("Should recreate the Service Account when deleted", func() {
@@ -422,7 +423,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, serviceAccount)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookServiceAccounts(*serviceAccount, expectedServiceAccount)).Should(BeTrue())
+			Expect(controllers.CompareNotebookServiceAccounts(*serviceAccount, expectedServiceAccount)).Should(BeTrue())
 		})
 
 		service := &corev1.Service{}
@@ -439,9 +440,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 			Spec: corev1.ServiceSpec{
 				Ports: []corev1.ServicePort{{
-					Name:       OAuthServicePortName,
-					Port:       OAuthServicePort,
-					TargetPort: intstr.FromString(OAuthServicePortName),
+					Name:       controllers.OAuthServicePortName,
+					Port:       controllers.OAuthServicePort,
+					TargetPort: intstr.FromString(controllers.OAuthServicePortName),
 					Protocol:   corev1.ProtocolTCP,
 				}},
 			},
@@ -453,7 +454,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name + "-tls", Namespace: Namespace}
 				return cli.Get(ctx, key, service)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookServices(*service, expectedService)).Should(BeTrue())
+			Expect(controllers.CompareNotebookServices(*service, expectedService)).Should(BeTrue())
 		})
 
 		It("Should recreate the Service when deleted", func() {
@@ -466,7 +467,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name + "-tls", Namespace: Namespace}
 				return cli.Get(ctx, key, service)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookServices(*service, expectedService)).Should(BeTrue())
+			Expect(controllers.CompareNotebookServices(*service, expectedService)).Should(BeTrue())
 		})
 
 		secret := &corev1.Secret{}
@@ -510,7 +511,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					Weight: pointer.Int32Ptr(100),
 				},
 				Port: &routev1.RoutePort{
-					TargetPort: intstr.FromString(OAuthServicePortName),
+					TargetPort: intstr.FromString(controllers.OAuthServicePortName),
 				},
 				TLS: &routev1.TLSConfig{
 					Termination:                   routev1.TLSTerminationReencrypt,
@@ -529,7 +530,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, route)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should recreate the Route when deleted", func() {
@@ -542,7 +543,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, route)
 			}, timeout, interval).ShouldNot(HaveOccurred())
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should reconcile the Route when modified", func() {
@@ -560,7 +561,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				}
 				return route.Spec.To.Name, nil
 			}, timeout, interval).Should(Equal(Name + "-tls"))
-			Expect(CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
+			Expect(controllers.CompareNotebookRoutes(*route, expectedRoute)).Should(BeTrue())
 		})
 
 		It("Should delete the OAuth proxy objects", func() {

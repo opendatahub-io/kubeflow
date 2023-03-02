@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package unit
 
 import (
 	"context"
@@ -30,9 +30,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	webhookcontrollers "github.com/opendatahub-io/kubeflow/components/odh-notebook-controller-webhook/controllers"
+	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 	routev1 "github.com/openshift/api/route/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -81,12 +82,12 @@ var _ = BeforeSuite(func() {
 	By("Bootstrapping test environment")
 	envTest = &envtest.Environment{
 		CRDInstallOptions: envtest.CRDInstallOptions{
-			Paths:              []string{filepath.Join("..", "config", "crd", "external")},
+			Paths:              []string{filepath.Join("..", "..", "config", "crd", "external")},
 			ErrorIfPathMissing: true,
 			CleanUpAfterUse:    false,
 		},
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			Paths:                    []string{filepath.Join("..", "config", "webhook")},
+			Paths:                    []string{filepath.Join("..", "..", "..", "odh-notebook-controller-webhook", "config", "webhook")},
 			IgnoreErrorIfPathMissing: false,
 		},
 	}
@@ -120,7 +121,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	// Setup notebook controller
-	err = (&OpenshiftNotebookReconciler{
+	err = (&controllers.OpenshiftNotebookReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 		Scheme: mgr.GetScheme(),
@@ -130,10 +131,10 @@ var _ = BeforeSuite(func() {
 	// Setup notebook mutating webhook
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
-		Handler: &NotebookWebhook{
+		Handler: &webhookcontrollers.NotebookWebhook{
 			Client: mgr.GetClient(),
-			OAuthConfig: OAuthConfig{
-				ProxyImage: OAuthProxyImage,
+			OAuthConfig: controllers.OAuthConfig{
+				ProxyImage: controllers.OAuthProxyImage,
 			},
 		},
 	}

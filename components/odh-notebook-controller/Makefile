@@ -92,7 +92,7 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	ACK_GINKGO_DEPRECATIONS=1.16.5 \
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
-		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover.out
+		go test ./tests/unit... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover.out
 
 ##@ Build
 
@@ -186,7 +186,7 @@ undeploy-dev: setup undeploy-kf undeploy-webhook ## Undeploy controller from the
 .PHONY: e2e-test
 e2e-test: ## Run e2e tests for the controller
 	@echo "Testing notebook controller...\n"
-	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+	go test ./tests/e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
 	@echo "Testing notebook controller webhook...\n"
 	make e2e-test -C ../odh-notebook-controller-webhook K8S_NAMESPACE=${K8S_NAMESPACE} E2E_TEST_FLAGS=${E2E_TEST_FLAGS}
 

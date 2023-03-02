@@ -8,16 +8,24 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
   - secrets
   - serviceaccounts
   - services
-  - configmap
   verbs:
   - create
   - get
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - proxies
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - kubeflow.org
@@ -51,11 +59,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-    - config.openshift.io
-  resources:
-    - proxies
-  verbs:
-    - get
-    - list
-    - watch

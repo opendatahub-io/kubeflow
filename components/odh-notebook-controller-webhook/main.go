@@ -4,6 +4,7 @@ import (
 	"flag"
 	"time"
 
+	webhookcontrollers "github.com/opendatahub-io/kubeflow/components/odh-notebook-controller-webhook/controllers"
 	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,7 +67,7 @@ func main() {
 		CertDir: certDir,
 	}
 	notebookWebhook := &webhook.Admission{
-		Handler: &controllers.NotebookWebhook{
+		Handler: &webhookcontrollers.NotebookWebhook{
 			Client: cli,
 			OAuthConfig: controllers.OAuthConfig{
 				ProxyImage: oauthProxyImage,
