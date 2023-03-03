@@ -24,7 +24,7 @@ spec:
         - name: webhook
           securityContext:
             allowPrivilegeEscalation: false
-          image: quay.io/opendatahub/odh-notebook-controller-webhook:latest
+          image: quay.io/mroman_redhat/odh-notebook-controller-webhook:dev-2
           ports:
             - containerPort: 8443
               name: webhook
