@@ -17,8 +17,11 @@ package controllers
 
 import (
 	"context"
-	netv1 "k8s.io/api/networking/v1"
+	"encoding/json"
+	"fmt"
 	"time"
+
+	netv1 "k8s.io/api/networking/v1"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -271,6 +274,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name + "-ctrl-np", Namespace: Namespace}
 				return cli.Get(ctx, key, notebookNetworkPolicy)
 			}, timeout, interval).ShouldNot(HaveOccurred())
+
+			npStr, _ := json.MarshalIndent(notebookNetworkPolicy, "", "  ")
+			fmt.Println("##################################################")
+			fmt.Println(string(npStr))
+			fmt.Println("##################################################")
+
 			Expect(CompareNotebookNetworkPolicies(*notebookNetworkPolicy, expectedNotebookNetworkPolicy)).Should(BeTrue())
 
 			By("By checking that the controller has created Network policy to allow all requests on OAuth port")
