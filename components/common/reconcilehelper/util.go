@@ -141,8 +141,6 @@ func CopyStatefulSetFields(from, to *appsv1.StatefulSet, isImageChangeTriggerSet
           }
         }
 
-        if !reflect.DeepEqual(to.Spec.Template.Spec, from.Spec.Template.Spec) {
-
 	if !reflect.DeepEqual(to.Spec.Template.Spec, from.Spec.Template.Spec) {
 		requireUpdate = true
 	}
