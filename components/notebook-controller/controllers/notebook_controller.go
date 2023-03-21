@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -53,11 +54,47 @@ const AnnotationRewriteURI = "notebooks.kubeflow.org/http-rewrite-uri"
 const AnnotationHeadersRequestSet = "notebooks.kubeflow.org/http-headers-request-set"
 const AnnotationNotebookRestart = "notebooks.opendatahub.io/notebook-restart"
 
+// annotation that makes OpenShift ImagePolicy admission plug-in resolve the image-field from an imagestream name:tag reference
+const AnnotationImageChangeTrigger = "image.openshift.io/triggers"
+
 const PrefixEnvVar = "NB_PREFIX"
 
 // The default fsGroup of PodSecurityContext.
 // https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#podsecuritycontext-v1-core
 const DefaultFSGroup = int64(100)
+
+func getContainerNamesFromAnnotationImageChangeFieldPaths(dataJson string, log logr.Logger) []string {
+	annotationImageChangeContent := AnnotationImageChangeContent{}
+	err := json.Unmarshal([]byte(dataJson), &annotationImageChangeContent)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("Notebook image change trigger annotation image.openshift.io/triggers JSON array decode error, check for correct annotation value JSON format : %s", dataJson))
+		return nil
+	}
+
+	containerNameSlice := make([]string, len(annotationImageChangeContent))
+
+	for i := 0; i < len(annotationImageChangeContent); i++ {
+		re := regexp.MustCompile(`"[^"]+"`)
+		newStrs := re.FindAllString(annotationImageChangeContent[i].FieldPath, -1)
+		for _, s := range newStrs {
+			containerNameSlice[i] = (s[1 : len(s)-1])
+		}
+	}
+
+	return containerNameSlice
+}
+
+func getImageChangeTriggerReferencedContainerNames(meta metav1.ObjectMeta, log logr.Logger) []string {
+	if meta.GetAnnotations() == nil {
+		return nil
+	}
+
+	if valAnnotationImageChangeTrigger, ok := meta.GetAnnotations()[AnnotationImageChangeTrigger]; ok {
+		return getContainerNamesFromAnnotationImageChangeFieldPaths(valAnnotationImageChangeTrigger, log)
+	} else {
+		return nil
+	}
+}
 
 /*
 We generally want to ignore (not requeue) NotFound errors, since we'll get a
@@ -69,6 +106,15 @@ func ignoreNotFound(err error) error {
 		return nil
 	}
 	return err
+}
+
+type AnnotationImageChangeContent []struct {
+	From struct {
+		Kind      string `json:"kind"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"from"`
+	FieldPath string `json:"fieldPath"`
 }
 
 // NotebookReconciler reconciles a Notebook object
@@ -159,8 +205,12 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Error(err, "error getting Statefulset")
 		return ctrl.Result{}, err
 	}
+
+	isImageChangeTriggerSet := metav1.HasAnnotation(instance.ObjectMeta, AnnotationImageChangeTrigger)
+	imageChangeTriggerReferencedContainerNames := getImageChangeTriggerReferencedContainerNames(instance.ObjectMeta, log)
+
 	// Update the foundStateful object and write the result back if there are any changes
-	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful) {
+	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful, isImageChangeTriggerSet, imageChangeTriggerReferencedContainerNames, log) {
 		log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
 		err = r.Update(ctx, foundStateful)
 		if err != nil {
@@ -402,10 +452,19 @@ func generateStatefulSet(instance *v1beta1.Notebook) *appsv1.StatefulSet {
 		replicas = 0
 	}
 
+	annotations := make(map[string]string)
+	meta := instance.ObjectMeta
+
+	// keep Notebook image change trigger annotation key and value and use it later in StatefulSet metadata
+	if annotationImageChangeTriggerVal, ok := meta.GetAnnotations()[AnnotationImageChangeTrigger]; ok {
+		annotations[AnnotationImageChangeTrigger] = annotationImageChangeTriggerVal
+	}
+
 	ss := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name,
-			Namespace: instance.Namespace,
+			Name:        instance.Name,
+			Namespace:   instance.Namespace,
+			Annotations: annotations,
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas: &replicas,

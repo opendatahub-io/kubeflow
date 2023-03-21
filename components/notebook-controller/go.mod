@@ -2,6 +2,11 @@ module github.com/kubeflow/kubeflow/components/notebook-controller
 
 go 1.19
 
+// use our version of kubeflow/components/common module for reconcilehelper utility differences related to image-field reconciliation and affected containers exclude
+replace (
+	github.com/kubeflow/kubeflow/components/common => ../common
+)
+
 require (
 	github.com/go-logr/logr v1.2.0
 	github.com/kubeflow/kubeflow/components/common v0.0.0-20220218084159-4ad0158e955e
