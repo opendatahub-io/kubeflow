@@ -134,8 +134,7 @@ func CopyStatefulSetFields(from, to *appsv1.StatefulSet, isImageChangeTriggerSet
           for containerNameFromAnnotation := range imageChangeTriggerReferencedContainerNames {
               for container := range to.Spec.Template.Spec.Containers {
                  if (to.Spec.Template.Spec.Containers[container].Name == imageChangeTriggerReferencedContainerNames[containerNameFromAnnotation]) {
-                   log.Info("Image Change Trigger Annotation is set", "excluding new container image-field value", to.Spec.Template.Spec.Containers[container].Image, "from DeepEqual and making it 
-the single version of truth by making from/image equal to to/image for container name", to.Spec.Template.Spec.Containers[container].Name)
+                   log.Info("Image Change Trigger Annotation is set", "excluding new container image-field value", to.Spec.Template.Spec.Containers[container].Image, "from DeepEqual and making it the single version of truth by making from/image equal to to/image for container name", to.Spec.Template.Spec.Containers[container].Name)
                    from.Spec.Template.Spec.Containers[container].Image = to.Spec.Template.Spec.Containers[container].Image
                  }
              }
