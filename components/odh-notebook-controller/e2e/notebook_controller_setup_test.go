@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	netv1 "k8s.io/api/networking/v1"
 	"os"
 	"testing"
 	"time"
@@ -99,6 +100,7 @@ func TestE2ENotebookController(t *testing.T) {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(netv1.AddToScheme(scheme))
 
 	// individual test suites after the operator is running
 	if !t.Run("validate controllers", testNotebookControllerValidation) {

@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	netv1 "k8s.io/api/networking/v1"
 	"log"
 	"testing"
 
@@ -88,6 +89,29 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	})
 	if err != nil {
 		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
+	}
+
+	// Verify Notebook Network Policies are deleted
+	nbNetworkPolicyList := netv1.NetworkPolicyList{}
+	opts := []client.ListOption{
+		client.InNamespace(nbMeta.Namespace)}
+	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
+		if nperr != nil {
+			if errors.IsNotFound(nperr) {
+				return true, nil
+			}
+			log.Printf("Failed to get Network policies for %v", nbMeta.Name)
+			return false, err
+
+		}
+		if len(nbNetworkPolicyList.Items) == 0 {
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
 	return nil
 }

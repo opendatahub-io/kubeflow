@@ -11,6 +11,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,6 +32,12 @@ func creationTestSuite(t *testing.T) {
 				err = testCtx.testNotebookRouteCreation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Route for Notebook ")
 			})
+
+			t.Run("Notebook Network Policies Validation", func(t *testing.T) {
+				err = testCtx.testNetworkPolicyCreation(nbContext.nbObjectMeta)
+				require.NoError(t, err, "error testing Network Policies for Notebook ")
+			})
+
 			t.Run("Notebook Statefulset Validation", func(t *testing.T) {
 				err = testCtx.testNotebookValidation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing StatefulSet for Notebook ")
@@ -103,6 +110,59 @@ func (tc *testContext) testNotebookRouteCreation(nbMeta *metav1.ObjectMeta) erro
 	}
 	if !isReady {
 		return fmt.Errorf("Notebook Route %s is not Ready.", nbRoute.Name)
+	}
+	return err
+}
+
+func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) error {
+	// Test Notebook Network Policy that allows access only to Notebook Controller
+	notebookNetworkPolicy, err := tc.getNotebookNetworkpolicy(nbMeta, nbMeta.Name+"-ctrl-np")
+	if err != nil {
+		return fmt.Errorf("error getting network policy for Notebook %v: %v", notebookNetworkPolicy.Name, err)
+	}
+
+	if len(notebookNetworkPolicy.Spec.PolicyTypes) == 0 || notebookNetworkPolicy.Spec.PolicyTypes[0] != netv1.PolicyTypeIngress {
+		return fmt.Errorf("invalid policy type. Expected value :%v", netv1.PolicyTypeIngress)
+	}
+
+	if len(notebookNetworkPolicy.Spec.Ingress) == 0 {
+		return fmt.Errorf("invalid network policy, should contain ingress rule")
+	} else if len(notebookNetworkPolicy.Spec.Ingress[0].Ports) != 0 {
+		isNotebookPort := false
+		for _, notebookport := range notebookNetworkPolicy.Spec.Ingress[0].Ports {
+			if notebookport.Port.IntVal == 8888 {
+				isNotebookPort = true
+			}
+		}
+		if !isNotebookPort {
+			return fmt.Errorf("invalid Network Policy comfiguration")
+		}
+	} else if len(notebookNetworkPolicy.Spec.Ingress[0].From) == 0 {
+		return fmt.Errorf("invalid Network Policy comfiguration")
+	}
+
+	// Test Notebook Network policy that allows all requests on Notebook OAuth port
+	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkpolicy(nbMeta, nbMeta.Name+"-oauth-np")
+	if err != nil {
+		return fmt.Errorf("error getting network policy for Notebook OAuth port %v: %v", notebookOAuthNetworkPolicy.Name, err)
+	}
+
+	if len(notebookOAuthNetworkPolicy.Spec.PolicyTypes) == 0 || notebookOAuthNetworkPolicy.Spec.PolicyTypes[0] != netv1.PolicyTypeIngress {
+		return fmt.Errorf("invalid policy type. Expected value :%v", netv1.PolicyTypeIngress)
+	}
+
+	if len(notebookOAuthNetworkPolicy.Spec.Ingress) == 0 {
+		return fmt.Errorf("invalid network policy, should contain ingress rule")
+	} else if len(notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports) != 0 {
+		isNotebookPort := false
+		for _, notebookport := range notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports {
+			if notebookport.Port.IntVal == 8443 {
+				isNotebookPort = true
+			}
+		}
+		if !isNotebookPort {
+			return fmt.Errorf("invalid Network Policy comfiguration")
+		}
 	}
 	return err
 }

@@ -2,6 +2,8 @@
 IMG ?= notebook-controller
 TAG ?= $(shell git describe --tags --always --dirty)
 
+CONTAINER_ENGINE ?= podman
+
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd"
 
@@ -79,11 +81,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 ##@ Build
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	cd .. && docker build . -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
+	cd .. && ${CONTAINER_ENGINE} build . -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}:${TAG}
+	${CONTAINER_ENGINE} push ${IMG}:${TAG}
 
 .PHONY: image
 image: docker-build docker-push ## Build and push docker image with the manager.

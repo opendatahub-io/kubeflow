@@ -3,6 +3,7 @@ package e2e
 import (
 	"crypto/tls"
 	"fmt"
+	netv1 "k8s.io/api/networking/v1"
 	"log"
 	"net/http"
 	"time"
@@ -67,6 +68,22 @@ func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Rou
 	}
 
 	return &nbRouteList.Items[0], err
+}
+
+func (tc *testContext) getNotebookNetworkpolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
+	nbNetworkPolicy := &netv1.NetworkPolicy{}
+	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(tc.ctx, name, metav1.GetOptions{})
+		if npErr != nil {
+			log.Printf("error retrieving Notebook Network policy %v: %v", name, err)
+			return false, nil
+		} else {
+			nbNetworkPolicy = np
+			return true, nil
+		}
+	})
+
+	return nbNetworkPolicy, err
 }
 
 func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Response, error) {

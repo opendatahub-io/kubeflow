@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	netv1 "k8s.io/api/networking/v1"
 	"net"
 	"path/filepath"
 	"testing"
@@ -100,6 +101,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(netv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	// Initiliaze Kubernetes client

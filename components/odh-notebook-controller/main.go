@@ -60,7 +60,7 @@ func init() {
 func main() {
 	var metricsAddr, probeAddr, oauthProxyImage string
 	var webhookPort int
-	var enableLeaderElection bool
+	var enableLeaderElection, enableDebugLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
@@ -72,8 +72,9 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.BoolVar(&enableDebugLogging, "debug-log", false, "Enable debug logging mode.")
 	opts := zap.Options{
-		Development: true,
+		Development: enableDebugLogging,
 		TimeEncoder: zapcore.TimeEncoderOfLayout(time.RFC3339),
 	}
 	opts.BindFlags(flag.CommandLine)

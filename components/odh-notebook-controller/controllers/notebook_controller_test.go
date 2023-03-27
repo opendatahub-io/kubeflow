@@ -17,6 +17,9 @@ package controllers
 
 import (
 	"context"
+	"io/ioutil"
+	netv1 "k8s.io/api/networking/v1"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -166,6 +169,188 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 	})
 
+	Context("When creating a Notebook, test Networkpolicies", func() {
+		const (
+			Name      = "test-notebook-np"
+			Namespace = "default"
+		)
+
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      Name,
+				Namespace: Namespace,
+			},
+			Spec: nbv1.NotebookSpec{
+				Template: nbv1.NotebookTemplateSpec{
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Name:  Name,
+						Image: "registry.redhat.io/ubi8/ubi:latest",
+					}}}},
+			},
+		}
+
+		npProtocol := corev1.ProtocolTCP
+		testPodNamespace := Namespace
+		if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
+				testPodNamespace = ns
+			}
+		}
+
+		expectedNotebookNetworkPolicy := netv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebook.Name + "-ctrl-np",
+				Namespace: notebook.Namespace,
+			},
+			Spec: netv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"notebook-name": notebook.Name,
+					},
+				},
+				Ingress: []netv1.NetworkPolicyIngressRule{
+					{
+						Ports: []netv1.NetworkPolicyPort{
+							{
+								Protocol: &npProtocol,
+								Port: &intstr.IntOrString{
+									IntVal: NotebookPort,
+								},
+							},
+						},
+						From: []netv1.NetworkPolicyPeer{
+							{
+								// Since for unit tests we do not have context,
+								// namespace will fallback to test pod namespace if run in CI or default if run locally
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": testPodNamespace,
+									},
+								},
+							},
+						},
+					},
+				},
+				PolicyTypes: []netv1.PolicyType{
+					netv1.PolicyTypeIngress,
+				},
+			},
+		}
+		expectedNotebookOAuthNetworkPolicy := netv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebook.Name + "-oauth-np",
+				Namespace: notebook.Namespace,
+			},
+			Spec: netv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"notebook-name": notebook.Name,
+					},
+				},
+				Ingress: []netv1.NetworkPolicyIngressRule{
+					{
+						Ports: []netv1.NetworkPolicyPort{
+							{
+								Protocol: &npProtocol,
+								Port: &intstr.IntOrString{
+									IntVal: NotebookOAuthPort,
+								},
+							},
+						},
+					},
+				},
+				PolicyTypes: []netv1.PolicyType{
+					netv1.PolicyTypeIngress,
+				},
+			},
+		}
+
+		notebookNetworkPolicy := &netv1.NetworkPolicy{}
+		notebookOAuthNetworkPolicy := &netv1.NetworkPolicy{}
+
+		It("Should create network policies to restrict undesired traffic", func() {
+			ctx := context.Background()
+
+			By("By creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has created Network policy to allow only controller traffic")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + "-ctrl-np", Namespace: Namespace}
+				return cli.Get(ctx, key, notebookNetworkPolicy)
+			}, timeout, interval).ShouldNot(HaveOccurred())
+			Expect(CompareNotebookNetworkPolicies(*notebookNetworkPolicy, expectedNotebookNetworkPolicy)).Should(BeTrue())
+
+			By("By checking that the controller has created Network policy to allow all requests on OAuth port")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + "-oauth-np", Namespace: Namespace}
+				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
+			}, timeout, interval).ShouldNot(HaveOccurred())
+			Expect(CompareNotebookNetworkPolicies(*notebookOAuthNetworkPolicy, expectedNotebookOAuthNetworkPolicy)).Should(BeTrue())
+		})
+
+		It("Should reconcile the Network policies when modified", func() {
+			By("By simulating a manual NetworkPolicy modification")
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"policyTypes":["Egress"]}}`))
+			Expect(cli.Patch(ctx, notebookNetworkPolicy, patch)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has restored the network policy spec")
+			Eventually(func() (string, error) {
+				key := types.NamespacedName{Name: Name + "-ctrl-np", Namespace: Namespace}
+				err := cli.Get(ctx, key, notebookNetworkPolicy)
+				if err != nil {
+					return "", err
+				}
+				return string(notebookNetworkPolicy.Spec.PolicyTypes[0]), nil
+			}, timeout, interval).Should(Equal("Ingress"))
+			Expect(CompareNotebookNetworkPolicies(*notebookNetworkPolicy, expectedNotebookNetworkPolicy)).Should(BeTrue())
+		})
+
+		It("Should recreate the Network Policy when deleted", func() {
+			By("By deleting the notebook OAuth Network Policy")
+			Expect(cli.Delete(ctx, notebookOAuthNetworkPolicy)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has recreated the OAuth Network policy")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + "-oauth-np", Namespace: Namespace}
+				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
+			}, timeout, interval).ShouldNot(HaveOccurred())
+			Expect(CompareNotebookNetworkPolicies(*notebookOAuthNetworkPolicy, expectedNotebookOAuthNetworkPolicy)).Should(BeTrue())
+		})
+
+		It("Should delete the Network Policies", func() {
+			expectedOwnerReference := metav1.OwnerReference{
+				APIVersion:         "kubeflow.org/v1",
+				Kind:               "Notebook",
+				Name:               Name,
+				UID:                notebook.GetObjectMeta().GetUID(),
+				Controller:         pointer.BoolPtr(true),
+				BlockOwnerDeletion: pointer.BoolPtr(true),
+			}
+
+			By("By checking that the Notebook owns the Notebook Network Policy object")
+			Expect(notebookNetworkPolicy.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+
+			By("By checking that the Notebook owns the Notebook OAuth Network Policy object")
+			Expect(notebookOAuthNetworkPolicy.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+
+			By("By deleting the recently created Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the Notebook is deleted")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, notebook)
+			}, timeout, interval).Should(HaveOccurred())
+			time.Sleep(interval)
+		})
+
+	})
+
 	Context("When creating a Notebook with the OAuth annotation enabled", func() {
 		const (
 			Name      = "test-notebook-oauth"
@@ -253,7 +438,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 									"--tls-key=/etc/tls/private/tls.key",
 									"--upstream=http://localhost:8888",
 									"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-									"--skip-auth-regex=^(?:/notebook/$(NAMESPACE)/" + notebook.Name + ")?/api$",
 									"--email-domain=*",
 									"--skip-provider-button",
 									`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +

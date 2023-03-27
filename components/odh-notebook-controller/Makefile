@@ -6,6 +6,8 @@ TAG ?= $(shell git describe --tags --always)
 KF_IMG ?= quay.io/opendatahub/kubeflow-notebook-controller
 KF_TAG ?= 1.6-9ae9413
 
+CONTAINER_ENGINE ?= podman
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
@@ -104,11 +106,11 @@ run: manifests generate fmt vet certificates ktunnel ## Run a controller from yo
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	cd ../ && docker build . -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
+	cd ../ && ${CONTAINER_ENGINE} build . -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}:${TAG}
+	${CONTAINER_ENGINE} push ${IMG}:${TAG}
 
 .PHONY: image
 image: docker-build docker-push ## Build and push docker image with the manager.
