@@ -1,0 +1,28 @@
+name: Sync odh-manifests repository with kubeflow notebook controller manifests
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+    paths:
+      - 'components/notebook-controller/config/**'
+      - 'components/odh-notebook-controller/config/**'
+
+jobs:
+  sync-with-odh-manifests:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+    - name: Send dispatch to odh-manifests
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const result = await github.rest.actions.createWorkflowDispatch({
+            owner: 'opendatahub-io',
+            repo: 'odh-manifests',
+            workflow_id: 'sync_kubeflow_manifests.yaml',
+            ref: 'actions/kubeflow-sync'
+          })
+          console.log(result)
