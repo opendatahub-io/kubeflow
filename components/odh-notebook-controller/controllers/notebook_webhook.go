@@ -45,13 +45,13 @@ type NotebookWebhook struct {
 
 var proxyEnvVars = make(map[string]string, 4)
 
-// InjectReconciliationLock injects the kubefllow notebook controller culling
+// InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
-// controller finishes the reconciliation. Otherwise a race condition may happen
+// controller finishes the reconciliation. Otherwise, a race condition may happen
 // while mounting the notebook service account pull secret into the pod.
 //
 // The ODH notebook controller will remove this annotation when the first
-// reconcilitation is completed (see RemoveReconciliationLock).
+// reconciliation is completed (see RemoveReconciliationLock).
 func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 	if meta.Annotations != nil {
 		meta.Annotations[culler.STOP_ANNOTATION] = AnnotationValueReconciliationLock
@@ -231,7 +231,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	// Inject the the reconciliation lock only on new notebook creation
+	// Inject the reconciliation lock only on new notebook creation
 	if req.Operation == admissionv1.Create {
 		err = InjectReconciliationLock(&notebook.ObjectMeta)
 		if err != nil {
@@ -239,8 +239,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
-	// Inject the OAuth proxy if the annotation is present
+	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
+			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
+		}
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)

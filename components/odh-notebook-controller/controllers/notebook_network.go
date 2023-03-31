@@ -37,15 +37,14 @@ const (
 	NotebookPort      = 8888
 )
 
-// ReconcileNetworkPolicies will manage the network policies reconciliation
-// required by the notebook
+// ReconcileAllNetworkPolicies will manage the network policies reconciliation
+// required by the notebook.
 func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
 	// Generate the desired Network Policies
 	desiredNotebookNetworkPolicy := NewNotebookNetworkPolicy(notebook)
-	desiredOAuthNetworkPolicy := NewOAuthNetworkPolicy(notebook)
 
 	// Create Network Policies if they do not already exist
 	err := r.reconcileNetworkPolicy(desiredNotebookNetworkPolicy, ctx, notebook)
@@ -54,35 +53,38 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 		return err
 	}
 
-	err = r.reconcileNetworkPolicy(desiredOAuthNetworkPolicy, ctx, notebook)
-	if err != nil {
-		log.Error(err, "error creating Notebook OAuth network policy")
-		return err
+	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
+		desiredOAuthNetworkPolicy := NewOAuthNetworkPolicy(notebook)
+		err = r.reconcileNetworkPolicy(desiredOAuthNetworkPolicy, ctx, notebook)
+		if err != nil {
+			log.Error(err, "error creating Notebook OAuth network policy")
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desirednetworkPolicy *netv1.NetworkPolicy, ctx context.Context, notebook *nbv1.Notebook) error {
+func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desiredNetworkPolicy *netv1.NetworkPolicy, ctx context.Context, notebook *nbv1.Notebook) error {
 
 	// Create the Network Policy if it does not already exist
 	foundNetworkPolicy := &netv1.NetworkPolicy{}
 	justCreated := false
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      desirednetworkPolicy.GetName(),
+		Name:      desiredNetworkPolicy.GetName(),
 		Namespace: notebook.GetNamespace(),
 	}, foundNetworkPolicy)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			r.Log.Info("Creating Network Policy", "name", desirednetworkPolicy.Name)
+			r.Log.Info("Creating Network Policy", "name", desiredNetworkPolicy.Name)
 			// Add .metatada.ownerReferences to the Network Policy to be deleted by
 			// the Kubernetes garbage collector if the notebook is deleted
-			err = ctrl.SetControllerReference(notebook, desirednetworkPolicy, r.Scheme)
+			err = ctrl.SetControllerReference(notebook, desiredNetworkPolicy, r.Scheme)
 			if err != nil {
 				return err
 			}
 			// Create the NetworkPolicy in the Openshift cluster
-			err = r.Create(ctx, desirednetworkPolicy)
+			err = r.Create(ctx, desiredNetworkPolicy)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
 				return err
 			}
@@ -93,21 +95,21 @@ func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desirednetworkPolic
 	}
 
 	// Reconcile the NetworkPolicy spec if it has been manually modified
-	if !justCreated && !CompareNotebookNetworkPolicies(*desirednetworkPolicy, *foundNetworkPolicy) {
+	if !justCreated && !CompareNotebookNetworkPolicies(*desiredNetworkPolicy, *foundNetworkPolicy) {
 		r.Log.Info("Reconciling Network policy", "name", foundNetworkPolicy.Name)
 		// Retry the update operation when the ingress controller eventually
 		// updates the resource version field
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// Get the last route revision
 			if err := r.Get(ctx, types.NamespacedName{
-				Name:      desirednetworkPolicy.Name,
+				Name:      desiredNetworkPolicy.Name,
 				Namespace: notebook.Namespace,
 			}, foundNetworkPolicy); err != nil {
 				return err
 			}
 			// Reconcile labels and spec field
-			foundNetworkPolicy.Spec = desirednetworkPolicy.Spec
-			foundNetworkPolicy.ObjectMeta.Labels = desirednetworkPolicy.ObjectMeta.Labels
+			foundNetworkPolicy.Spec = desiredNetworkPolicy.Spec
+			foundNetworkPolicy.ObjectMeta.Labels = desiredNetworkPolicy.ObjectMeta.Labels
 			return r.Update(ctx, foundNetworkPolicy)
 		})
 		if err != nil {
