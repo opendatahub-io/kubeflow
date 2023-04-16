@@ -19,18 +19,13 @@ RUN cd /workspace/odh-notebook-controller && go mod download
 
 WORKDIR /workspace/odh-notebook-controller
 
-# Build
-RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GO111MODULE=on go build -a -mod=mod -o manager main.go; \
-    else \
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -mod=mod -o manager main.go; \
-    fi
+RUN make build
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/base:debug
 WORKDIR /
-COPY --from=builder /workspace/odh-notebook-controller/manager .
+COPY --from=builder /workspace/odh-notebook-controller/bin/manager .
 COPY --from=builder /workspace/odh-notebook-controller/third_party/license.txt third_party/license.txt
 COPY --from=builder /go/pkg/mod/github.com/hashicorp third_party/hashicorp
 ENTRYPOINT ["/manager"]

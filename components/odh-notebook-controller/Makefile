@@ -93,10 +93,13 @@ test: manifests generate fmt vet envtest ## Run tests.
 		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover.out
 
 ##@ Build
+GOOS?=$(shell uname -s | tr '[:upper:]' '[:lower:]')
+GOARCH?=$(shell uname -m | tr '[:upper:]' '[:lower:]' | sed 's/x86_64/amd64/')
+GOBUILD:=GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0
 
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
-	go build -o bin/manager main.go
+	${GOBUILD} go build -o bin/manager main.go
 
 .PHONY: run
 run: manifests generate fmt vet certificates ktunnel ## Run a controller from your host.
