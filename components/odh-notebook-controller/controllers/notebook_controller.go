@@ -200,7 +200,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 func (r *OpenshiftNotebookReconciler) createProxyConfigMap(notebook *nbv1.Notebook,
 	ctx context.Context) error {
 
-	trustedCAConfigMap := &corev1.ConfigMap{
+	desiredTrustedCAConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "trusted-ca",
 			Namespace: notebook.Namespace,
@@ -208,13 +208,26 @@ func (r *OpenshiftNotebookReconciler) createProxyConfigMap(notebook *nbv1.Notebo
 		},
 	}
 
-	err := r.Client.Create(ctx, trustedCAConfigMap)
+	foundTrustedCAConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, client.ObjectKey{
+		Namespace: desiredTrustedCAConfigMap.Namespace,
+		Name:      desiredTrustedCAConfigMap.Name,
+	}, foundTrustedCAConfigMap)
 	if err != nil {
-		if apierrs.IsAlreadyExists(err) {
-			return nil
+		if apierrs.IsNotFound(err) {
+			r.Log.Info("Creating trusted-ca configmap")
+			err = r.Create(ctx, desiredTrustedCAConfigMap)
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				r.Log.Error(err, "Unable to create the trusted-ca ConfigMap")
+				return err
+			}
+		} else {
+			r.Log.Error(err, "Unable to fetch the trusted-ca ConfigMap")
+			return err
 		}
 	}
-	return err
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

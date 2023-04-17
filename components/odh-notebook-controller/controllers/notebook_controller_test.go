@@ -190,7 +190,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		}
 
 		npProtocol := corev1.ProtocolTCP
-		testPodNamespace := Namespace
+		testPodNamespace := "redhat-ods-applications"
 		if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 			if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
 				testPodNamespace = ns
@@ -221,7 +221,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						From: []netv1.NetworkPolicyPeer{
 							{
 								// Since for unit tests we do not have context,
-								// namespace will fallback to test pod namespace if run in CI or default if run locally
+								// namespace will fallback to test pod namespace if run in CI or `redhat-ods-applications` if run locally
 								NamespaceSelector: &metav1.LabelSelector{
 									MatchLabels: map[string]string{
 										"kubernetes.io/metadata.name": testPodNamespace,
