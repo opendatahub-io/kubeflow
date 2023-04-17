@@ -189,19 +189,19 @@ $(LOCALBIN): ## Ensure that the directory exists
 CONTROLLER_GEN = $(LOCALBIN)/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0
+	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0
 
 KUSTOMIZE = $(LOCALBIN)/kustomize
 .PHONY: kustomize
 kustomize: ## Download kustomize locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0
+	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0
 
 ENVTEST = $(LOCALBIN)/setup-envtest
 .PHONY: envtest
 envtest: ## Download setup-envtest locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
 KTUNNEL = $(LOCALBIN)/ktunnel
 .PHONY: ktunnel
 ktunnel: ## Download ktunnel locally if necessary.
-	GOBIN=$(LOCALBIN) go install github.com/omrikiei/ktunnel@v1.4.8
+	GOBIN=$(LOCALBIN) go install -mod=readonly github.com/omrikiei/ktunnel@v1.4.8
