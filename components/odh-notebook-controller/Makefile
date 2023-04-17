@@ -189,19 +189,32 @@ $(LOCALBIN): ## Ensure that the directory exists
 CONTROLLER_GEN = $(LOCALBIN)/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.8.0)
 
 KUSTOMIZE = $(LOCALBIN)/kustomize
 .PHONY: kustomize
 kustomize: ## Download kustomize locally if necessary.
-	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0
+	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0)
 
 ENVTEST = $(LOCALBIN)/setup-envtest
 .PHONY: envtest
 envtest: ## Download setup-envtest locally if necessary.
-	GOBIN=$(LOCALBIN) go install -mod=readonly sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	$(call go-get-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest@latest)
 
 KTUNNEL = $(LOCALBIN)/ktunnel
 .PHONY: ktunnel
 ktunnel: ## Download ktunnel locally if necessary.
-	GOBIN=$(LOCALBIN) go install -mod=readonly github.com/omrikiei/ktunnel@v1.4.8
+	$(call go-get-tool,$(KTUNNEL),github.com/omrikiei/ktunnel@v1.4.8)
+
+# go-get-tool will 'go get' any package $2 and install it to $1.
+define go-get-tool
+@[ -f $(1) ] || { \
+set -e ;\
+TMP_DIR=$$(mktemp -d) ;\
+cd $$TMP_DIR ;\
+go mod init tmp ;\
+echo "Downloading $(2)" ;\
+GOBIN=$(LOCALBIN) go install $(2) ;\
+rm -rf $$TMP_DIR ;\
+}
+endef
