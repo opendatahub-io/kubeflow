@@ -214,7 +214,7 @@ TMP_DIR=$$(mktemp -d) ;\
 cd $$TMP_DIR ;\
 go mod init tmp ;\
 echo "Downloading $(2)" ;\
-GOBIN=$(LOCALBIN) go install $(2) ;\
+GOBIN=$(LOCALBIN) go install -mod=readonly $(2) ;\
 rm -rf $$TMP_DIR ;\
 }
 endef
