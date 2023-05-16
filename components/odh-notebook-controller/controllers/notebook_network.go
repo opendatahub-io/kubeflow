@@ -17,9 +17,9 @@ package controllers
 
 import (
 	"context"
-	"io/ioutil"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	"os"
 	"reflect"
 	"strings"
 
@@ -212,7 +212,7 @@ func NewOAuthNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 
 func getControllerNamespace() string {
 	// TODO:Add env variable that stores namespace for both controllers.
-	if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
 			return ns
 		}
