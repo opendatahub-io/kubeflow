@@ -21,7 +21,8 @@ import (
 func creationTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	for _, nbContext := range testCtx.testNotebooks {
+	oauthNotebooks := filterTestNotebooks(testCtx.testNotebooks, OAuthProxy)
+	for _, nbContext := range oauthNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Creation of Notebook instance", func(t *testing.T) {

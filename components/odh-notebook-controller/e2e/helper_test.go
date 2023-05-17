@@ -228,3 +228,89 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 	}
 	return thothMinimalOAuthNbContext
 }
+
+func setupThothMinimalServiceMeshNotebook() notebookContext {
+	testNotebookName := "thoth-minimal-service-mesh-notebook"
+
+	testNotebook := &nbv1.Notebook{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"notebooks.opendatahub.io/service-mesh": "true"},
+			Name:        testNotebookName,
+			Namespace:   notebookTestNamespace,
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name:       "thoth-minimal-service-mesh-notebook",
+							Image:      "quay.io/thoth-station/s2i-minimal-notebook:v0.2.2",
+							WorkingDir: "/opt/app-root/src",
+							Ports: []v1.ContainerPort{
+								{
+									Name:          "notebook-port",
+									ContainerPort: 8888,
+									Protocol:      "TCP",
+								},
+							},
+							EnvFrom: []v1.EnvFromSource{},
+							Env: []v1.EnvVar{
+								{
+									Name:  "JUPYTER_NOTEBOOK_PORT",
+									Value: "8888",
+								},
+								{
+									Name:  "NOTEBOOK_ARGS",
+									Value: "--ServerApp.port=8888 --NotebookApp.token='' --NotebookApp.password='' --ServerApp.base_url=/notebook/" + notebookTestNamespace + "/" + testNotebookName,
+								},
+							},
+							Resources: v1.ResourceRequirements{
+								Limits: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+								Requests: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+							},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									HTTPGet: &v1.HTTPGetAction{
+										Path:   "/notebook/" + notebookTestNamespace + "/" + testNotebookName + "/api",
+										Port:   intstr.FromString("notebook-port"),
+										Scheme: "HTTP",
+									},
+								},
+								InitialDelaySeconds: 5,
+								TimeoutSeconds:      1,
+								PeriodSeconds:       5,
+								SuccessThreshold:    1,
+								FailureThreshold:    3,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	thothMinimalServiceMeshNbContext := notebookContext{
+		nbObjectMeta:   &testNotebook.ObjectMeta,
+		nbSpec:         &testNotebook.Spec,
+		deploymentMode: ServiceMesh,
+	}
+	return thothMinimalServiceMeshNbContext
+}
+
+func filterTestNotebooks(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
+	var filtered []notebookContext
+	for _, notebook := range notebooks {
+		if notebook.deploymentMode == mode {
+			filtered = append(filtered, notebook)
+		}
+	}
+
+	return filtered
+}

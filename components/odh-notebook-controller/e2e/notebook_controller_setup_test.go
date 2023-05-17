@@ -38,7 +38,7 @@ type testContext struct {
 	customClient client.Client
 	// namespace for running the tests
 	testNamespace string
-	// time rquired to create a resource
+	// time required to create a resource
 	resourceCreationTimeout time.Duration
 	// time interval to check for resource creation
 	resourceRetryInterval time.Duration
@@ -48,6 +48,15 @@ type testContext struct {
 	ctx context.Context
 }
 
+// DeploymentMode indicates what infra scenarios should be verified by the test
+// with default being OAuthProxy scenario
+type DeploymentMode int
+
+const (
+	OAuthProxy DeploymentMode = iota
+	ServiceMesh
+)
+
 // notebookContext holds information about test notebook
 // Any notebook that needs to be added to the e2e test suite should be defined in
 // the notebookContext struct.
@@ -55,14 +64,15 @@ type notebookContext struct {
 	// metadata for Notebook object
 	nbObjectMeta *metav1.ObjectMeta
 	// metadata for Notebook Spec
-	nbSpec *nbv1.NotebookSpec
+	nbSpec         *nbv1.NotebookSpec
+	deploymentMode DeploymentMode
 }
 
 func NewTestContext() (*testContext, error) {
 
 	// GetConfig(): If KUBECONFIG env variable is set, it is used to create
 	// the client, else the inClusterConfig() is used.
-	// Lastly if none of the them are set, it uses  $HOME/.kube/config to create the client.
+	// Lastly if none of them are set, it uses  $HOME/.kube/config to create the client.
 	config, err := ctrlruntime.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error creating the config object %v", err)
@@ -80,7 +90,7 @@ func NewTestContext() (*testContext, error) {
 	}
 
 	// Setup all test Notebooks
-	testNotebooksContextList := []notebookContext{setupThothMinimalOAuthNotebook()}
+	testNotebooksContextList := []notebookContext{setupThothMinimalOAuthNotebook(), setupThothMinimalServiceMeshNotebook()}
 
 	return &testContext{
 		cfg:                     config,
@@ -116,7 +126,7 @@ func TestE2ENotebookController(t *testing.T) {
 func TestMain(m *testing.M) {
 	// call flag.Parse() here if TestMain uses flags
 	flag.StringVar(&notebookTestNamespace, "nb-namespace",
-		"e2e-notebook-controller", "Custom namespace where the notebook contollers are deployed")
+		"e2e-notebook-controller", "Custom namespace where the notebook controllers are deployed")
 	flag.BoolVar(&skipDeletion, "skip-deletion", false, "skip deletion of the controllers")
 	flag.Parse()
 	os.Exit(m.Run())
