@@ -25,6 +25,7 @@ import (
 var (
 	notebookTestNamespace string
 	skipDeletion          bool
+	deploymentMode        DeploymentMode
 	scheme                = runtime.NewScheme()
 )
 
@@ -49,13 +50,32 @@ type testContext struct {
 }
 
 // DeploymentMode indicates what infra scenarios should be verified by the test
-// with default being OAuthProxy scenario
+// with default being OAuthProxy scenario.
 type DeploymentMode int
 
 const (
 	OAuthProxy DeploymentMode = iota
 	ServiceMesh
 )
+
+var modes = [...]string{"oauth", "service-mesh"}
+
+// Implementing flag.Value funcs, so we can use DeploymentMode as flag.
+
+func (d *DeploymentMode) String() string {
+	return modes[*d]
+}
+
+func (d *DeploymentMode) Set(s string) error {
+	for i := range modes {
+		if modes[i] == s {
+			*d = DeploymentMode(i)
+			return nil
+		}
+	}
+
+	return errors.Errorf("Unknown deployment mode %s. Try any of these %v", s, modes)
+}
 
 // notebookContext holds information about test notebook
 // Any notebook that needs to be added to the e2e test suite should be defined in
@@ -104,7 +124,7 @@ func NewTestContext() (*testContext, error) {
 	}, nil
 }
 
-// TestKFNBC sets up the testing suite for KFNBC.
+// TestE2ENotebookController sets up the testing suite for KFNBC.
 func TestE2ENotebookController(t *testing.T) {
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -124,10 +144,11 @@ func TestE2ENotebookController(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	// call flag.Parse() here if TestMain uses flags
 	flag.StringVar(&notebookTestNamespace, "nb-namespace",
 		"e2e-notebook-controller", "Custom namespace where the notebook controllers are deployed")
 	flag.BoolVar(&skipDeletion, "skip-deletion", false, "skip deletion of the controllers")
+	flag.Var(&deploymentMode, "deploymentMode", "sets deployment mode")
 	flag.Parse()
+
 	os.Exit(m.Run())
 }

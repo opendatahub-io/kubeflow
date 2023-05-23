@@ -168,9 +168,15 @@ undeploy: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
 undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
 	$(KUSTOMIZE) build config/development | oc delete --ignore-not-found=true -f -
 
+e2e-test-%:
+	$(eval deploymentMode:=$(subst e2e-test-,,$@))
+	go test ./e2e/ -run ^TestE2ENotebookController -v \
+		--nb-namespace=${K8S_NAMESPACE} \
+		--deploymentMode=$(deploymentMode) \
+		${E2E_TEST_FLAGS}
+
 .PHONY: e2e-test
-e2e-test: ## Run e2e tests for the controller
-	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+e2e-test: e2e-test-oauth e2e-test-service-mesh ## Run e2e tests for the controller
 
 .PHONY: run-ci-e2e-tests
 run-ci-e2e-tests:

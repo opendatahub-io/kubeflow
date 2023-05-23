@@ -98,14 +98,14 @@ func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Res
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	client := &http.Client{Transport: tr}
+	httpClient := &http.Client{Transport: tr}
 
 	req, err := http.NewRequest("GET", notebookEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return client.Do(req)
+	return httpClient.Do(req)
 }
 
 func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
