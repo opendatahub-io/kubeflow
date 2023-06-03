@@ -50,9 +50,13 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 
 func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Route, error) {
 	nbRouteList := routev1.RouteList{}
-	opts := []client.ListOption{
-		client.InNamespace(nbMeta.Namespace),
-		client.MatchingLabels{"notebook-name": nbMeta.Name}}
+
+	var opts []client.ListOption
+	if deploymentMode == ServiceMesh {
+		opts = append(opts, client.MatchingLabels{"maistra.io/gateway-name": "odh-gateway"})
+	} else {
+		opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
+	}
 	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
 		routeErr := tc.customClient.List(tc.ctx, &nbRouteList, opts...)
 		if routeErr != nil {
@@ -70,7 +74,7 @@ func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Rou
 	return &nbRouteList.Items[0], err
 }
 
-func (tc *testContext) getNotebookNetworkpolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
+func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
 	nbNetworkPolicy := &netv1.NetworkPolicy{}
 	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
 		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(tc.ctx, name, metav1.GetOptions{})
@@ -93,7 +97,7 @@ func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Res
 	}
 	// Access the Notebook endpoint using http request
 	notebookEndpoint := "https://" + nbRoute.Spec.Host + "/notebook/" +
-		nbRoute.Namespace + "/" + nbRoute.Name + "/api"
+		nbMeta.Namespace + "/" + nbMeta.Name + "/api"
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -235,7 +239,7 @@ func setupThothMinimalServiceMeshNotebook() notebookContext {
 	testNotebook := &nbv1.Notebook{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
-			Annotations: map[string]string{"notebooks.opendatahub.io/service-mesh": "true"},
+			Annotations: map[string]string{"opendatahub.io/service-mesh": "true"},
 			Name:        testNotebookName,
 			Namespace:   notebookTestNamespace,
 		},
@@ -304,7 +308,7 @@ func setupThothMinimalServiceMeshNotebook() notebookContext {
 	return thothMinimalServiceMeshNbContext
 }
 
-func filterTestNotebooks(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
+func notebooksForScenario(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
 	var filtered []notebookContext
 	for _, notebook := range notebooks {
 		if notebook.deploymentMode == mode {

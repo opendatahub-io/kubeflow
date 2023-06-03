@@ -60,8 +60,7 @@ const (
 
 var modes = [...]string{"oauth", "service-mesh"}
 
-// Implementing flag.Value funcs, so we can use DeploymentMode as flag.
-
+// Implementing flag.Value funcs, so we can use DeploymentMode as a CLI flag.
 func (d *DeploymentMode) String() string {
 	return modes[*d]
 }
@@ -129,7 +128,7 @@ func TestE2ENotebookController(t *testing.T) {
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
-	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(routev1.Install(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 
 	// individual test suites after the operator is running

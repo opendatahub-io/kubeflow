@@ -20,8 +20,8 @@ import (
 func deletionTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	oauthNotebooks := filterTestNotebooks(testCtx.testNotebooks, OAuthProxy)
-	for _, nbContext := range oauthNotebooks {
+	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
+	for _, nbContext := range notebooksForSelectedDeploymentMode {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Notebook Deletion", func(t *testing.T) {
@@ -71,6 +71,11 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	})
 	if err != nil {
 		return fmt.Errorf("unable to delete Statefulset %s :%v ", nbMeta.Name, err)
+	}
+
+	if deploymentMode == ServiceMesh {
+		// Subsequent resources are create for deployments with oauth-proxy
+		return nil
 	}
 
 	// Verify Notebook Route is deleted
