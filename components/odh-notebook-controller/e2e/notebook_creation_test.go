@@ -130,11 +130,11 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 		return err
 	}
 
-	if deploymentMode == ServiceMesh {
-		// Scenario below is not part of service mesh deployment
-		return nil
+	if deploymentMode == OAuthProxy {
+		return tc.ensureOAuthNetworkPolicyExists(nbMeta, err)
 	}
-	return tc.ensureOAuthNetworkPolicyExists(nbMeta, err)
+
+	return nil
 }
 
 func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta, err error) error {

@@ -97,28 +97,25 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
 
-	if deploymentMode == ServiceMesh {
-		// Subsequent resources are create for deployments with oauth-proxy
-		return nil
-	}
+	if deploymentMode == OAuthProxy {
+		// Verify Notebook Route is deleted
+		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
+		nbRoute := &routev1.Route{}
+		err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+			err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
+			if err != nil {
+				if errors.IsNotFound(err) {
+					return true, nil
+				}
+				log.Printf("Failed to get %s Route", nbMeta.Name)
+				return false, err
 
-	// Verify Notebook Route is deleted
-	nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
-	nbRoute := &routev1.Route{}
-	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
-		err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				return true, nil
 			}
-			log.Printf("Failed to get %s Route", nbMeta.Name)
-			return false, err
-
+			return false, nil
+		})
+		if err != nil {
+			return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
 		}
-		return false, nil
-	})
-	if err != nil {
-		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
 	}
 
 	return nil
