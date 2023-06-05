@@ -3,6 +3,8 @@ package e2e
 import (
 	"fmt"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"log"
 	"testing"
 
@@ -73,6 +75,28 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Statefulset %s :%v ", nbMeta.Name, err)
 	}
 
+	// Verify Notebook Network Policies are deleted
+	nbNetworkPolicyList := netv1.NetworkPolicyList{}
+	opts := filterServiceMeshManagedPolicies(nbMeta)
+	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
+		if nperr != nil {
+			if errors.IsNotFound(nperr) {
+				return true, nil
+			}
+			log.Printf("Failed to get Network policies for %v", nbMeta.Name)
+			return false, err
+
+		}
+		if len(nbNetworkPolicyList.Items) == 0 {
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
+	}
+
 	if deploymentMode == ServiceMesh {
 		// Subsequent resources are create for deployments with oauth-proxy
 		return nil
@@ -97,29 +121,22 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
 	}
 
-	// Verify Notebook Network Policies are deleted
-	nbNetworkPolicyList := netv1.NetworkPolicyList{}
-	opts := []client.ListOption{
-		client.InNamespace(nbMeta.Namespace)}
-	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
-		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
-		if nperr != nil {
-			if errors.IsNotFound(nperr) {
-				return true, nil
-			}
-			log.Printf("Failed to get Network policies for %v", nbMeta.Name)
-			return false, err
-
-		}
-		if len(nbNetworkPolicyList.Items) == 0 {
-			return true, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
-	}
 	return nil
+}
+
+func filterServiceMeshManagedPolicies(nbMeta *metav1.ObjectMeta) []client.ListOption {
+	labelSelectorReq, err := labels.NewRequirement("app.kubernetes.io/managed-by", selection.NotIn, []string{"maistra-istio-operator"})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	notManagedByMeshLabel := labels.NewSelector()
+	notManagedByMeshLabel = notManagedByMeshLabel.Add(*labelSelectorReq)
+
+	return []client.ListOption{
+		client.InNamespace(nbMeta.Namespace),
+		client.MatchingLabelsSelector{Selector: notManagedByMeshLabel},
+	}
 }
 
 func (tc *testContext) isNotebookCRD() error {
