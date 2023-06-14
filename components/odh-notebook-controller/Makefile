@@ -12,7 +12,7 @@ CONTAINER_ENGINE ?= podman
 ENVTEST_K8S_VERSION = 1.23
 
 # Kubernetes configuration
-K8S_NAMESPACE = odh-notebook-controller-system
+K8S_NAMESPACE ?= odh-notebook-controller-system
 
 # Webhook configuration
 WEBHOOK_PORT = 8443
@@ -202,7 +202,7 @@ undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluste
 e2e-test-%:
 	$(eval deploymentMode:=$(subst e2e-test-,,$@))
 	go test ./e2e/ -run ^TestE2ENotebookController -v \
-		--nb-namespace=${K8S_NAMESPACE} \
+		--nb-namespace=$(K8S_NAMESPACE) \
 		--deploymentMode=$(deploymentMode) \
 		${E2E_TEST_FLAGS}
 
