@@ -10,6 +10,10 @@ kind: Deployment
 metadata:
   name: deployment
 spec:
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: "100%"
   template:
     metadata:
       labels:
