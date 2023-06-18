@@ -282,6 +282,7 @@ func (w *NotebookWebhook) ClusterWideProxyIsEnabled() bool {
 				proxyEnvVars["NO_PROXY"] = proxy.Status.NoProxy
 				if proxy.Spec.TrustedCA.Name != "" {
 					proxyEnvVars["PIP_CERT"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+					proxyEnvVars["REQUESTS_CA_BUNDLE"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
 				}
 				return true
 			}
