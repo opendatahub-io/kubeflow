@@ -50,9 +50,13 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 
 func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Route, error) {
 	nbRouteList := routev1.RouteList{}
-	opts := []client.ListOption{
-		client.InNamespace(nbMeta.Namespace),
-		client.MatchingLabels{"notebook-name": nbMeta.Name}}
+
+	var opts []client.ListOption
+	if deploymentMode == ServiceMesh {
+		opts = append(opts, client.MatchingLabels{"maistra.io/gateway-name": "odh-gateway"})
+	} else {
+		opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
+	}
 	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
 		routeErr := tc.customClient.List(tc.ctx, &nbRouteList, opts...)
 		if routeErr != nil {
@@ -70,7 +74,7 @@ func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Rou
 	return &nbRouteList.Items[0], err
 }
 
-func (tc *testContext) getNotebookNetworkpolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
+func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
 	nbNetworkPolicy := &netv1.NetworkPolicy{}
 	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
 		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(tc.ctx, name, metav1.GetOptions{})
@@ -93,19 +97,19 @@ func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Res
 	}
 	// Access the Notebook endpoint using http request
 	notebookEndpoint := "https://" + nbRoute.Spec.Host + "/notebook/" +
-		nbRoute.Namespace + "/" + nbRoute.Name + "/api"
+		nbMeta.Namespace + "/" + nbMeta.Name + "/api"
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	client := &http.Client{Transport: tr}
+	httpClient := &http.Client{Transport: tr}
 
 	req, err := http.NewRequest("GET", notebookEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return client.Do(req)
+	return httpClient.Do(req)
 }
 
 func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
@@ -227,4 +231,90 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 		nbSpec:       &testNotebook.Spec,
 	}
 	return thothMinimalOAuthNbContext
+}
+
+func setupThothMinimalServiceMeshNotebook() notebookContext {
+	testNotebookName := "thoth-minimal-service-mesh-notebook"
+
+	testNotebook := &nbv1.Notebook{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"opendatahub.io/service-mesh": "true"},
+			Name:        testNotebookName,
+			Namespace:   notebookTestNamespace,
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name:       "thoth-minimal-service-mesh-notebook",
+							Image:      "quay.io/thoth-station/s2i-minimal-notebook:v0.2.2",
+							WorkingDir: "/opt/app-root/src",
+							Ports: []v1.ContainerPort{
+								{
+									Name:          "notebook-port",
+									ContainerPort: 8888,
+									Protocol:      "TCP",
+								},
+							},
+							EnvFrom: []v1.EnvFromSource{},
+							Env: []v1.EnvVar{
+								{
+									Name:  "JUPYTER_NOTEBOOK_PORT",
+									Value: "8888",
+								},
+								{
+									Name:  "NOTEBOOK_ARGS",
+									Value: "--ServerApp.port=8888 --NotebookApp.token='' --NotebookApp.password='' --ServerApp.base_url=/notebook/" + notebookTestNamespace + "/" + testNotebookName,
+								},
+							},
+							Resources: v1.ResourceRequirements{
+								Limits: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+								Requests: map[v1.ResourceName]resource.Quantity{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+							},
+							LivenessProbe: &v1.Probe{
+								ProbeHandler: v1.ProbeHandler{
+									HTTPGet: &v1.HTTPGetAction{
+										Path:   "/notebook/" + notebookTestNamespace + "/" + testNotebookName + "/api",
+										Port:   intstr.FromString("notebook-port"),
+										Scheme: "HTTP",
+									},
+								},
+								InitialDelaySeconds: 5,
+								TimeoutSeconds:      1,
+								PeriodSeconds:       5,
+								SuccessThreshold:    1,
+								FailureThreshold:    3,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	thothMinimalServiceMeshNbContext := notebookContext{
+		nbObjectMeta:   &testNotebook.ObjectMeta,
+		nbSpec:         &testNotebook.Spec,
+		deploymentMode: ServiceMesh,
+	}
+	return thothMinimalServiceMeshNbContext
+}
+
+func notebooksForScenario(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
+	var filtered []notebookContext
+	for _, notebook := range notebooks {
+		if notebook.deploymentMode == mode {
+			filtered = append(filtered, notebook)
+		}
+	}
+
+	return filtered
 }

@@ -25,15 +25,7 @@ func (tc *testContext) testKubeflowNotebookController(t *testing.T) {
 	for _, configmap := range configMaplist.Items {
 		if strings.Contains(configmap.Name, "notebook-controller-config") {
 			notebookConfigFound = true
-			// Verify if the configmap has key ADD_FSGROUP with value 'false'
-			require.EqualValuesf(t, "false", configmap.Data["ADD_FSGROUP"],
-				"error getting ADD_FSGROUP in the configmap")
-			// Verify if the configmap has key USE_ISTIO with value 'false'
-			require.EqualValuesf(t, "false", configmap.Data["USE_ISTIO"],
-				"error getting USE_ISTIO in the configmap")
-			// Verify if the configmap has key ISTIO_GATEWAY with value 'kubeflow/kubeflow-gateway'
-			require.EqualValuesf(t, "kubeflow/kubeflow-gateway",
-				configmap.Data["ISTIO_GATEWAY"], "error getting ISTIO_GATEWAY in the configmap")
+			break
 		}
 
 	}

@@ -3,6 +3,8 @@ package e2e
 import (
 	"fmt"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"log"
 	"testing"
 
@@ -20,7 +22,8 @@ import (
 func deletionTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	for _, nbContext := range testCtx.testNotebooks {
+	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
+	for _, nbContext := range notebooksForSelectedDeploymentMode {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Notebook Deletion", func(t *testing.T) {
@@ -72,29 +75,9 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Statefulset %s :%v ", nbMeta.Name, err)
 	}
 
-	// Verify Notebook Route is deleted
-	nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
-	nbRoute := &routev1.Route{}
-	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
-		err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				return true, nil
-			}
-			log.Printf("Failed to get %s Route", nbMeta.Name)
-			return false, err
-
-		}
-		return false, nil
-	})
-	if err != nil {
-		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
-	}
-
 	// Verify Notebook Network Policies are deleted
 	nbNetworkPolicyList := netv1.NetworkPolicyList{}
-	opts := []client.ListOption{
-		client.InNamespace(nbMeta.Namespace)}
+	opts := filterServiceMeshManagedPolicies(nbMeta)
 	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
 		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
 		if nperr != nil {
@@ -113,7 +96,44 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	if err != nil {
 		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
+
+	if deploymentMode == OAuthProxy {
+		// Verify Notebook Route is deleted
+		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
+		nbRoute := &routev1.Route{}
+		err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+			err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
+			if err != nil {
+				if errors.IsNotFound(err) {
+					return true, nil
+				}
+				log.Printf("Failed to get %s Route", nbMeta.Name)
+				return false, err
+
+			}
+			return false, nil
+		})
+		if err != nil {
+			return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
+		}
+	}
+
 	return nil
+}
+
+func filterServiceMeshManagedPolicies(nbMeta *metav1.ObjectMeta) []client.ListOption {
+	labelSelectorReq, err := labels.NewRequirement("app.kubernetes.io/managed-by", selection.NotIn, []string{"maistra-istio-operator"})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	notManagedByMeshLabel := labels.NewSelector()
+	notManagedByMeshLabel = notManagedByMeshLabel.Add(*labelSelectorReq)
+
+	return []client.ListOption{
+		client.InNamespace(nbMeta.Namespace),
+		client.MatchingLabelsSelector{Selector: notManagedByMeshLabel},
+	}
 }
 
 func (tc *testContext) isNotebookCRD() error {

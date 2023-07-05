@@ -12,7 +12,7 @@ CONTAINER_ENGINE ?= podman
 ENVTEST_K8S_VERSION = 1.23
 
 # Kubernetes configuration
-K8S_NAMESPACE = odh-notebook-controller-system
+K8S_NAMESPACE ?= odh-notebook-controller-system
 
 # Webhook configuration
 WEBHOOK_PORT = 8443
@@ -136,13 +136,44 @@ setup: manifests kustomize ## Replace Kustomize manifests with your environment 
 	sed -i'' -e 's,newName: .*,newName: '"${IMG}"',' ./config/base/kustomization.yaml
 	sed -i'' -e 's,newTag: .*,newTag: '"${TAG}"',' ./config/base/kustomization.yaml
 
-.PHONE: deploy-kf
+.PHONY: setup-service-mesh
+setup-service-mesh: kustomize ## Replace Kustomize manifests with your environment configuration.
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' \
+			../notebook-controller/config/overlays/service-mesh/smm.yaml
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' \
+		../notebook-controller/config/overlays/service-mesh/kustomization.yaml
+	sed -i'' -e 's,newName: .*,newName: '"${KF_IMG}"',' \
+		../notebook-controller/config/overlays/service-mesh/kustomization.yaml
+	sed -i'' -e 's,newTag: .*,newTag: '"${KF_TAG}"',' \
+	../notebook-controller/config/overlays/service-mesh/kustomization.yaml
+	sed -i'' -e 's,host: .*,host: opendatahub.'"$(shell kubectl get ingress.config.openshift.io cluster -o 'jsonpath={.spec.domain}')"',' \
+    	../notebook-controller/config/overlays/service-mesh/gateway-route.yaml
+
+.PHONY: deploy-service-mesh
+deploy-service-mesh: ## Deploy Service Mesh to the Openshift cluster.
+	./e2e/scripts/install-ossm-release.sh install-operators
+	./e2e/scripts/install-ossm-release.sh install-smcp
+
+.PHONY: undeploy-service-mesh
+undeploy-service-mesh: ## Undeploy Service Mesh and related operators
+	./e2e/scripts/install-ossm-release.sh delete-smcp
+	./e2e/scripts/install-ossm-release.sh delete-operators
+
+.PHONY: deploy-kf
 deploy-kf: setup-kf ## Deploy kubeflow controller to the Openshift cluster.
 	$(KUSTOMIZE) build ../notebook-controller/config/overlays/openshift | oc apply -f -
 
 .PHONY: deploy
 deploy: setup deploy-kf ## Deploy controller to the Openshift cluster.
 	$(KUSTOMIZE) build config/base | oc apply -f -
+
+.PHONY: deploy-with-mesh
+deploy-with-mesh: setup-service-mesh deploy
+	$(KUSTOMIZE) build ../notebook-controller/config/overlays/service-mesh | oc apply -f -
+
+.PHONY: undeploy-with-mesh
+undeploy-with-mesh: setup-service-mesh undeploy
+	$(KUSTOMIZE) build ../notebook-controller/config/overlays/service-mesh | oc delete --ignore-not-found=true -f -
 
 .PHONY: deploy-dev
 deploy-dev: setup deploy-kf ## Deploy controller to the Openshift cluster.
@@ -168,13 +199,23 @@ undeploy: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
 undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
 	$(KUSTOMIZE) build config/development | oc delete --ignore-not-found=true -f -
 
+e2e-test-%:
+	$(eval deploymentMode:=$(subst e2e-test-,,$@))
+	go test ./e2e/ -run ^TestE2ENotebookController -v \
+		--nb-namespace=$(K8S_NAMESPACE) \
+		--deploymentMode=$(deploymentMode) \
+		${E2E_TEST_FLAGS}
+
 .PHONY: e2e-test
-e2e-test: ## Run e2e tests for the controller
-	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+e2e-test: e2e-test-oauth ## Run e2e tests for the controller with oauth proxy
 
 .PHONY: run-ci-e2e-tests
 run-ci-e2e-tests:
 	bash ./run-e2e-test.sh
+
+.PHONY: run-ci-e2e-tests-service-mesh
+run-ci-e2e-service-mesh-tests:
+	bash ./run-e2e-test-service-mesh.sh
 
 ##@ Build Dependencies
 

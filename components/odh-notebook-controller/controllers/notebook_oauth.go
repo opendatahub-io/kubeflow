@@ -255,8 +255,8 @@ func NewNotebookOAuthRoute(notebook *nbv1.Notebook) *routev1.Route {
 	return route
 }
 
-// Reconcile will manage the creation, update and deletion of the OAuth route
-// when the notebook is reconciled
+// ReconcileOAuthRoute will manage the creation, update and deletion of the OAuth route
+// when the notebook is reconciled.
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthRoute(
 	notebook *nbv1.Notebook, ctx context.Context) error {
 	return r.reconcileRoute(notebook, ctx, NewNotebookOAuthRoute)
