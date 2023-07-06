@@ -25,7 +25,8 @@ spec:
           imagePullPolicy: Always
           command:
             - /manager
-          args: ["--oauth-proxy-image", "registry.redhat.io/openshift4/ose-oauth-proxy:v4.10"]
+          # latest v4.10 manifest list digest for architecture AMD64. Used instead of tag format to be compatible with imagePullPolicy: IfNotPresent
+          args: ["--oauth-proxy-image", "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33"]
           securityContext:
             allowPrivilegeEscalation: false
           ports:
