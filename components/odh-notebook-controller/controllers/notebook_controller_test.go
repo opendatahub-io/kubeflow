@@ -740,7 +740,7 @@ func createOAuthContainer(name, namespace string) corev1.Container {
 	return corev1.Container{
 		Name:            "oauth-proxy",
 		Image:           OAuthProxyImage,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env: []corev1.EnvVar{{
 			Name: "NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
