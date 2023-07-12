@@ -70,7 +70,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 	proxyContainer := corev1.Container{
 		Name:            "oauth-proxy",
 		Image:           oauth.ProxyImage,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env: []corev1.EnvVar{{
 			Name: "NAMESPACE",
 			ValueFrom: &corev1.EnvVarSource{
