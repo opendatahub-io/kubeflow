@@ -35,8 +35,8 @@ import (
 const (
 	OAuthServicePort     = 443
 	OAuthServicePortName = "oauth-proxy"
-        // use sha256 manifest link digest value of v4.10 image for AMD64 as default to be compatible with imagePullPolicy: IfNotPresent, overridable 
-        // taken from https://catalog.redhat.com/software/containers/openshift4/ose-oauth-proxy/5cdb2133bed8bd5717d5ae64?architecture=amd64&tag=v4.10.0-202306170106.p0.g799d414.assembly.stream&push_date=1688610772000&container-tabs=gti
+        // use sha256 manifest list digest value of v4.10 image for AMD64 as default to be compatible with imagePullPolicy: IfNotPresent, overridable 
+        // taken from https://catalog.redhat.com/software/containers/openshift4/ose-oauth-proxy/5cdb2133bed8bd5717d5ae64?tag=v4.10.0-202306170106.p0.g799d414.assembly.stream&push_date=1688610772000&gti-tabs=get-the-source&container-tabs=gti
 	OAuthProxyImage      = "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33"
 )
 
