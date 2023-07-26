@@ -91,6 +91,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			"--tls-key=/etc/tls/private/tls.key",
 			"--upstream=http://localhost:8888",
 			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+			"--skip-provider-button",
 			"--email-domain=*",
 			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
 				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
