@@ -41,7 +41,7 @@ func NewNotebookRoute(notebook *nbv1.Notebook) *routev1.Route {
 			},
 		},
 		Spec: routev1.RouteSpec{
-			Path: "/notebook/" + notebook.Namespace + "/" + notebook.Name,
+			// Path: "/notebook/" + notebook.Namespace + "/" + notebook.Name,
 			To: routev1.RouteTargetReference{
 				Kind:   "Service",
 				Name:   notebook.Name,
