@@ -91,7 +91,6 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			"--tls-key=/etc/tls/private/tls.key",
 			"--upstream=http://localhost:8888",
 			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-			"--skip-provider-button",
 			"--email-domain=*",
 			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
 				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
@@ -156,12 +155,6 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		proxyContainer.Args = append(proxyContainer.Args,
 			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
 	}
-
-	// // Add redirect url on oauth proxy configs
-	// if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
-	// 	proxyContainer.Args = append(proxyContainer.Args,
-	// 		"--redirect-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl]+"/oauth2/callback")
-	// }
 
 	// Add the sidecar container to the notebook
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
