@@ -157,6 +157,12 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
 	}
 
+	// Add redirect url on oauth proxy configs
+	if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
+		proxyContainer.Args = append(proxyContainer.Args,
+			"--redirect-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl]+"/oauth2/callback")
+	}
+
 	// Add the sidecar container to the notebook
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	proxyContainerExists := false
