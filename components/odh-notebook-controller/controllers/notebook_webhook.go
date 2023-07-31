@@ -92,7 +92,6 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			"--upstream=http://localhost:8888",
 			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
 			"--email-domain=*",
-			"--skip-provider-button",
 			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
 				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
 		},
