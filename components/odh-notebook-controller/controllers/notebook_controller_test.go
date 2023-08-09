@@ -70,6 +70,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				},
 			},
 			Spec: routev1.RouteSpec{
+				Path: "/notebook/" + notebook.Namespace + "/" + notebook.Name,
 				To: routev1.RouteTargetReference{
 					Kind:   "Service",
 					Name:   Name,
