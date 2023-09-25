@@ -151,10 +151,10 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 	}
 
 	// Add logout url if logout annotation is present in the notebook
-	if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
-		proxyContainer.Args = append(proxyContainer.Args,
-			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
-	}
+	// if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
+	// 	proxyContainer.Args = append(proxyContainer.Args,
+	// 		"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
+	// }
 
 	// Add the sidecar container to the notebook
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
