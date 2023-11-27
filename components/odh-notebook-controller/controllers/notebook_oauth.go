@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -26,16 +27,20 @@ import (
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
-	OAuthServicePort     = 443
-	OAuthServicePortName = "oauth-proxy"
-	OAuthProxyImage      = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
+	OAuthServicePort      = 443
+	OAuthServicePortName  = "oauth-proxy"
+	OAuthProxyImage       = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
+	ODHDefaultNameSpace   = "opendatahub"
+	RHODSDefaultNameSpace = "rhods-notebooks"
 )
 
 type OAuthConfig struct {
@@ -104,6 +109,74 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthServiceAccount(notebook *nbv
 			log.Error(err, "Unable to fetch the Service Account")
 			return err
 		}
+
+		// Add view roles to the Service Account if the workbench is DataScience project based
+		if notebook.Namespace != ODHDefaultNameSpace && notebook.Namespace != RHODSDefaultNameSpace {
+
+			nbrole := &rbacv1.Role{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("%s-view", notebook.Name),
+					Namespace: notebook.Namespace,
+				},
+				Rules: []rbacv1.PolicyRule{
+					{
+						Verbs:     []string{"get", "watch", "list"},
+						APIGroups: []string{""},
+						Resources: []string{"configmaps", "pods"},
+					},
+				},
+			}
+
+			// Add .metatada.ownerReferences to the Role to be deleted by
+			// the Kubernetes garbage collector if the notebook is deleted
+			err = ctrl.SetControllerReference(notebook, nbrole, r.Scheme)
+			if err != nil {
+				log.Error(err, "Unable to add OwnerReference to the Role")
+				return err
+			}
+
+			// Create the Role
+			log.Info("Creating Role")
+			err = r.Create(ctx, nbrole)
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				log.Error(err, "Unable to create the Role")
+				return err
+			}
+
+			nbrolebinding := &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("%s-binding", nbrole.Name),
+					Namespace: notebook.Namespace,
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind: "ServiceAccount",
+						Name: desiredServiceAccount.Name,
+					},
+				},
+				RoleRef: rbacv1.RoleRef{
+					Kind: "Role",
+					Name: nbrole.Name,
+				},
+			}
+
+			// Add .metatada.ownerReferences to the Role Binding to be deleted by
+			// the Kubernetes garbage collector if the notebook is deleted
+			err = ctrl.SetControllerReference(notebook, nbrolebinding, r.Scheme)
+			if err != nil {
+				log.Error(err, "Unable to add OwnerReference to the RoleBinding")
+				return err
+			}
+
+			// Create the RoleBinding
+			log.Info("Creating RoleBinding")
+			err = r.Create(ctx, nbrolebinding)
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				log.Error(err, "Unable to create the RoleBinding")
+				return err
+			}
+		}
+
 	}
 
 	return nil
