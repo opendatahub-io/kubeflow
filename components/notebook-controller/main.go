@@ -36,6 +36,7 @@ import (
 	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/controllers"
 	controller_metrics "github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -85,7 +86,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                  scheme,
-		MetricsBindAddress:      metricsAddr,
+		Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          enableLeaderElection,
 		LeaderElectionNamespace: leaderElectionNamespace,

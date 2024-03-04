@@ -40,6 +40,7 @@ import (
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	routev1 "github.com/openshift/api/route/v1"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -87,11 +88,13 @@ func main() {
 	// Setup controller manager
 	mgrConfig := ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "odh-notebook-controller",
-		Port:                   webhookPort,
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Port: webhookPort,
+		}),
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrConfig)
