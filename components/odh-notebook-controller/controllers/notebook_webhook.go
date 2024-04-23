@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
 	"sort"
 	"strings"
@@ -52,6 +53,8 @@ type NotebookWebhook struct {
 	// controller namespace
 	Namespace string
 }
+
+var proxyEnvVars = make(map[string]string, 3)
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
@@ -230,6 +233,29 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 	return nil
 }
 
+func (w *NotebookWebhook) ClusterWideProxyIsEnabled() bool {
+	proxyResourceList := &configv1.ProxyList{}
+	err := w.Client.List(context.TODO(), proxyResourceList)
+	if err != nil {
+		return false
+	}
+
+	for _, proxy := range proxyResourceList.Items {
+		if proxy.Name == "cluster" {
+			if proxy.Status.HTTPProxy != "" && proxy.Status.HTTPSProxy != "" &&
+				proxy.Status.NoProxy != "" {
+				// Update Proxy Env variables map
+				proxyEnvVars["HTTP_PROXY"] = proxy.Status.HTTPProxy
+				proxyEnvVars["HTTPS_PROXY"] = proxy.Status.HTTPSProxy
+				proxyEnvVars["NO_PROXY"] = proxy.Status.NoProxy
+				return true
+			}
+		}
+	}
+	return false
+
+}
+
 // Handle transforms the Notebook objects.
 func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) admission.Response {
 
@@ -274,6 +300,14 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
 		}
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+
+	// If cluster-wide-proxy is enabled add environment variables
+	if w.ClusterWideProxyIsEnabled() {
+		err = InjectProxyConfigEnvVars(notebook)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -367,6 +401,57 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 	log.Info("Update blocked, notebook pod template would be changed by the webhook", "diff", diff)
 	mutatedNotebook.Spec.Template.Spec = updatedNotebook.Spec.Template.Spec
 	return mutatedNotebook, &UpdatesPending{Reason: diff}, nil
+}
+
+func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
+	notebookContainers := &notebook.Spec.Template.Spec.Containers
+	var imgContainer corev1.Container
+
+	// Update Notebook Image container with env variables from central cluster proxy config
+	for _, container := range *notebookContainers {
+		// Update notebook image container with env Variables
+		if container.Name == notebook.Name {
+			var newVars []corev1.EnvVar
+			imgContainer = container
+
+			for key, val := range proxyEnvVars {
+				keyExists := false
+				for _, env := range imgContainer.Env {
+					if key == env.Name {
+						keyExists = true
+						// Update if Proxy spec is updated
+						if env.Value != val {
+							env.Value = val
+						}
+					}
+				}
+				if !keyExists {
+					newVars = append(newVars, corev1.EnvVar{Name: key, Value: val})
+				}
+			}
+
+			// Update container only when required env variables are not present
+			imgContainerExists := false
+			if len(newVars) != 0 {
+				imgContainer.Env = append(imgContainer.Env, newVars...)
+			}
+
+			// Update container with Proxy Env Changes
+			for index, container := range *notebookContainers {
+				if container.Name == notebook.Name {
+					(*notebookContainers)[index] = imgContainer
+					imgContainerExists = true
+					break
+				}
+			}
+
+			if !imgContainerExists {
+				return fmt.Errorf("notebook image container not found %v", notebook.Name)
+			}
+			break
+		}
+	}
+	return nil
 }
 
 // CheckAndMountCACertBundle checks if the odh-trusted-ca-bundle ConfigMap is present
