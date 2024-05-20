@@ -1,5 +1,4 @@
 /*
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -19,7 +18,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -75,6 +76,36 @@ var _ = BeforeSuite(func() {
 	}
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseFlagOptions(&opts)))
 
+	// Create a temporary kubeconfig file
+	kubeconfigContent := []byte(`
+apiVersion: v1
+clusters:
+- cluster:
+    server: https://localhost:6443
+  name: local
+contexts:
+- context:
+    cluster: local
+    user: user
+  name: local
+current-context: local
+kind: Config
+preferences: {}
+users:
+- name: user
+  user:
+    token: fake-token
+`)
+	tmpDir, err := ioutil.TempDir("", "kubeconfig")
+	Expect(err).NotTo(HaveOccurred())
+
+	kubeconfigPath := filepath.Join(tmpDir, "config")
+	err = ioutil.WriteFile(kubeconfigPath, kubeconfigContent, 0644)
+	Expect(err).NotTo(HaveOccurred())
+
+	// Set the KUBECONFIG environment variable
+	os.Setenv("KUBECONFIG", kubeconfigPath)
+
 	// Initiliaze test environment:
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest#Environment.Start
 	By("Bootstrapping test environment")
@@ -90,7 +121,7 @@ var _ = BeforeSuite(func() {
 		},
 	}
 
-	cfg, err := envTest.Start()
+	cfg, err = envTest.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
