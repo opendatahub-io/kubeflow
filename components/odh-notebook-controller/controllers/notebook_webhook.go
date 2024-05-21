@@ -20,8 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -36,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -48,6 +45,7 @@ import (
 type NotebookWebhook struct {
 	Log         logr.Logger
 	Client      client.Client
+	Config      *rest.Config
 	Decoder     *admission.Decoder
 	OAuthConfig OAuthConfig
 }
@@ -256,7 +254,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Check Imagestream Info
-		err = SetContainerImageFromRegistry(ctx, w.Client, notebook, log)
+		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -450,111 +448,105 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	return nil
 }
 
-// This function checks if there is an internal registry and takes the corresponding actions to set the container.image value.
+// SetContainerImageFromRegistry checks if there is an internal registry and takes the corresponding actions to set the container.image value.
 // If an internal registry is detected, it uses the default values specified in the Notebook Custom Resource (CR).
 // Otherwise, it checks the last-image-selection annotation to find the image stream and fetches the image from status.dockerImageReference,
 // assigning it to the container.image value.
-func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
+func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger) error {
+    // Create a dynamic client
+    dynamicClient, err := dynamic.NewForConfig(config)
+    if err != nil {
+        log.Error(err, "Error creating dynamic client")
+        return err
+    }
+    // Specify the GroupVersionResource for imagestreams
+    ims := schema.GroupVersionResource{
+        Group:    "image.openshift.io",
+        Version:  "v1",
+        Resource: "imagestreams",
+    }
 
-	// Load kubeconfig
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
-		}
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			log.Error(err, "Error creating config")
-			return err
-		}
-	}
+    annotations := notebook.GetAnnotations()
+    if annotations != nil {
+        if imageSelection, exists := annotations["notebooks.opendatahub.io/last-image-selection"]; exists {
+            // Check if the image selection has an internal registry, if so  will pickup this. This value constructed on the initialization of the Notebook CR.
+            if strings.Contains(notebook.Spec.Template.Spec.Containers[0].Image, "image-registry.openshift-image-registry.svc:5000") {
+                log.Info("Internal registry found. Will pickup the default value from image field.")
+                return nil
+            } else {
+                // Split the imageSelection to imagestream and tag
+                parts := strings.Split(imageSelection, ":")
+                if len(parts) != 2 {
+                    log.Error(nil, "Invalid image selection format")
+                    return fmt.Errorf("invalid image selection format")
+                }
 
-	// Create a dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Error creating dynamic client")
-		return err
-	}
-	// Specify the GroupVersionResource for imagestreams
-	ims := schema.GroupVersionResource{
-		Group:    "image.openshift.io",
-		Version:  "v1",
-		Resource: "imagestreams",
-	}
+                imagestreamName := parts[0]
+                tag := parts[1]
 
-	annotations := notebook.GetAnnotations()
-	if annotations != nil {
-		if imageSelection, exists := annotations["notebooks.opendatahub.io/last-image-selection"]; exists {
+                // Specify the namespaces to search in
+                namespaces := []string{"opendatahub", "redhat-ods-applications"}
 
-			// Check if the image selection has an internal registry, if so  will pickup this. This value constructed on the initialization of the Notebook CR.
-			if strings.Contains(notebook.Spec.Template.Spec.Containers[0].Image, "image-registry.openshift-image-registry.svc:5000") {
-				log.Info("Internal registry found. Will pickup the default value from image field.")
-				return nil
-			} else {
-				// Split the imageSelection to imagestream and tag
-				parts := strings.Split(imageSelection, ":")
-				if len(parts) != 2 {
-					log.Error(nil, "Invalid image selection format")
-					return fmt.Errorf("invalid image selection format")
-				}
+                imagestreamFound := false
 
-				imagestreamName := parts[0]
-				tag := parts[1]
+                for _, namespace := range namespaces {
+                    // List imagestreams in the specified namespace
+                    imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
+                    if err != nil {
+                        log.Error(err, "Cannot list imagestreams", "namespace", namespace)
+                        continue
+                    }
 
-				// Specify the namespaces to search in
-				namespaces := []string{"opendatahub", "redhat-ods-applications"}
+                    // Iterate through the imagestreams to find matches
+                    for _, item := range imagestreams.Items {
+                        metadata := item.Object["metadata"].(map[string]interface{})
+                        name := metadata["name"].(string)
 
-				for _, namespace := range namespaces {
-					// List imagestreams in the specified namespace
-					imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
-					if err != nil {
-						log.Error(err, "Cannot list imagestreams", "namespace", namespace)
-						continue
-					}
+                        if name == imagestreamName {
+                            status := item.Object["status"].(map[string]interface{})
 
-					// Iterate through the imagestreams to find matches
-					for _, item := range imagestreams.Items {
-						metadata := item.Object["metadata"].(map[string]interface{})
-						name := metadata["name"].(string)
+                            log.Info("No Internal registry found, pick up imageHash from status.tag.dockerImageReference")
 
-						if name == imagestreamName {
-							status := item.Object["status"].(map[string]interface{})
+                            tags := status["tags"].([]interface{})
+                            for _, t := range tags {
+                                tagMap := t.(map[string]interface{})
+                                tagName := tagMap["tag"].(string)
+                                if tagName == tag {
+                                    items := tagMap["items"].([]interface{})
+                                    if len(items) > 0 {
+                                        // Sort items by creationTimestamp to get the most recent one
+                                        sort.Slice(items, func(i, j int) bool {
+                                            iTime := items[i].(map[string]interface{})["created"].(string)
+                                            jTime := items[j].(map[string]interface{})["created"].(string)
+                                            return iTime > jTime // Lexicographical comparison of RFC3339 timestamps
+                                        })
+                                        imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
+                                        notebook.Spec.Template.Spec.Containers[0].Image = imageHash
+                                        // Update the JUPYTER_IMAGE environment variable
+                                        for i, envVar := range notebook.Spec.Template.Spec.Containers[0].Env {
+                                            if envVar.Name == "JUPYTER_IMAGE" {
+                                                notebook.Spec.Template.Spec.Containers[0].Env[i].Value = imageHash
+                                                break
+                                            }
+                                        }
+                                        imagestreamFound = true
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if imagestreamFound {
+                        break
+                    }
+                }
 
-							log.Info("No Internal registry found, pick up imageHash from status.tag.dockerImageReference")
+                if !imagestreamFound {
+                    log.Info("Imagestream not found in any of the specified namespaces", "imagestreamName", imagestreamName, "tag", tag)
+                }
+            }
+        }
+    }
 
-							tags := status["tags"].([]interface{})
-							for _, t := range tags {
-								tagMap := t.(map[string]interface{})
-								tagName := tagMap["tag"].(string)
-								if tagName == tag {
-									items := tagMap["items"].([]interface{})
-									if len(items) > 0 {
-										// Sort items by creationTimestamp to get the most recent one
-										sort.Slice(items, func(i, j int) bool {
-											iTime := items[i].(map[string]interface{})["created"].(string)
-											jTime := items[j].(map[string]interface{})["created"].(string)
-											return iTime > jTime
-										})
-										imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
-										notebook.Spec.Template.Spec.Containers[0].Image = imageHash
-										// Update the JUPYTER_IMAGE environment variable
-										for i, envVar := range notebook.Spec.Template.Spec.Containers[0].Env {
-											if envVar.Name == "JUPYTER_IMAGE" {
-												notebook.Spec.Template.Spec.Containers[0].Env[i].Value = imageHash
-												break
-											}
-										}
-										return nil
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return nil
+    return nil
 }

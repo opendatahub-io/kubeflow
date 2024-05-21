@@ -116,6 +116,7 @@ func main() {
 		Handler: &controllers.NotebookWebhook{
 			Log:    ctrl.Log.WithName("controllers").WithName("Notebook"),
 			Client: mgr.GetClient(),
+			Config: mgr.GetConfig(),
 			OAuthConfig: controllers.OAuthConfig{
 				ProxyImage: oauthProxyImage,
 			},
