@@ -88,4 +88,7 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
+// use sibling kubeflow packages from this repo
+replace github.com/kubeflow/kubeflow/components/notebook-controller => ../notebook-controller
+
 replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
