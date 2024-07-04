@@ -3,7 +3,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../default
-images:
-  - name: quay.io/opendatahub/odh-notebook-controller
-    newName: quay.io/opendatahub/odh-notebook-controller
-    newTag: 1.7-35b81f5
+
+configMapGenerator:
+- name: odh-notebook-controller-image-parameters
+  env: params.env
+generatorOptions:
+  disableNameSuffixHash: true
+
+vars:
+- name: odh-notebook-controller-image
+  objref:
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.odh-notebook-controller-image
