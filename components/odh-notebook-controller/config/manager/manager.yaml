@@ -21,7 +21,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: manager
-          image: quay.io/opendatahub/odh-notebook-controller:latest
+          image: $(odh-notebook-controller-image)
           imagePullPolicy: Always
           command:
             - /manager

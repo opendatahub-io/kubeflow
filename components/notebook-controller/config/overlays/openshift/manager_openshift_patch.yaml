@@ -32,6 +32,7 @@ spec:
                   name: notebook-controller-culler-config
                   key: IDLENESS_CHECK_PERIOD
                   optional: true
+          image: $(odh-kf-notebook-controller-image)
           resources:
             limits:
               cpu: 500m
