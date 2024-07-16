@@ -4,3 +4,5 @@ kind: Kustomization
 resources:
   - manager.yaml
   - service.yaml
+configurations:
+- params.yaml
