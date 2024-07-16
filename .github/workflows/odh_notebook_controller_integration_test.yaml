@@ -85,11 +85,7 @@ jobs:
           cd components/odh-notebook-controller/config/base
           kubectl create ns opendatahub
 
-          # export CURRENT_NOTEBOOK_IMG=quay.io/opendatahub/odh-notebook-controller:latest
-          # export PR_NOTEBOOK_IMG=localhost/${{env.IMG}}:${{env.TAG}}
-          # kustomize edit set image ${CURRENT_NOTEBOOK_IMG}=${PR_NOTEBOOK_IMG}
-          sed -i "s/quay.io\/opendatahub\/odh-notebook-controller:stable/localhost\/${{env.IMG}}:${{env.TAG}}/g" params.env
-
+          echo "odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}" > params.env
 
           cat <<EOF | oc apply -f -
           ---
