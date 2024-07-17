@@ -1,0 +1,14 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities
+version: v1.25.0
+exclude:
+  global:
+    - components/access-management/**
+    - components/admission-webhook/**
+    - components/centraldashboard/**
+    - components/centraldashboard-angular/**
+    - components/crud-web-apps/**
+    - components/example-notebook-servers/**
+    - components/profile-controller/**
+    - components/tensorboard-controller/**
+    - docs/**
+    - testing/**
