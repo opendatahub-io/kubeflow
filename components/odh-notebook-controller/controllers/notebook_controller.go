@@ -57,8 +57,9 @@ const (
 // OpenshiftNotebookReconciler holds the controller configuration.
 type OpenshiftNotebookReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
+	Namespace string
+	Scheme    *runtime.Scheme
+	Log       logr.Logger
 }
 
 // ClusterRole permissions

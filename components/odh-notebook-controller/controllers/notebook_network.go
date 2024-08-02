@@ -19,10 +19,9 @@ import (
 	"context"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
-	"os"
 	"reflect"
-	"strings"
 
+	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +43,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
 	// Generate the desired Network Policies
-	desiredNotebookNetworkPolicy := NewNotebookNetworkPolicy(notebook)
+	desiredNotebookNetworkPolicy := NewNotebookNetworkPolicy(notebook, log, r.Namespace)
 
 	// Create Network Policies if they do not already exist
 	err := r.reconcileNetworkPolicy(desiredNotebookNetworkPolicy, ctx, notebook)
@@ -129,11 +128,11 @@ func CompareNotebookNetworkPolicies(np1 netv1.NetworkPolicy, np2 netv1.NetworkPo
 }
 
 // NewNotebookNetworkPolicy defines the desired network policy for Notebook port
-func NewNotebookNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
+func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespace string) *netv1.NetworkPolicy {
 	npProtocol := corev1.ProtocolTCP
 	namespaceSel := metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			"kubernetes.io/metadata.name": getControllerNamespace(),
+			"kubernetes.io/metadata.name": namespace,
 		},
 	}
 	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the oauth port of a notebook
@@ -208,16 +207,4 @@ func NewOAuthNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 			},
 		},
 	}
-}
-
-func getControllerNamespace() string {
-	// TODO:Add env variable that stores namespace for both controllers.
-	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
-			return ns
-		}
-	}
-
-	// Fallback to default namespace, keep default as redhat-ods-applications
-	return "redhat-ods-applications"
 }
