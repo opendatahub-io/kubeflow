@@ -54,6 +54,7 @@ const (
 // OpenshiftNotebookReconciler holds the controller configuration.
 type OpenshiftNotebookReconciler struct {
 	client.Client
+	Namespace string
 	Scheme *runtime.Scheme
 	Log    logr.Logger
 }
