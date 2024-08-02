@@ -49,6 +49,8 @@ type NotebookWebhook struct {
 	Config      *rest.Config
 	Decoder     *admission.Decoder
 	OAuthConfig OAuthConfig
+	// controller namespace
+	Namespace string
 }
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -254,7 +256,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	// Check Imagestream Info both on create and update operations
 	if req.Operation == admissionv1.Create || req.Operation == admissionv1.Update {
 		// Check Imagestream Info
-		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log)
+		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log, w.Namespace)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -536,7 +538,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 // If an internal registry is detected, it uses the default values specified in the Notebook Custom Resource (CR).
 // Otherwise, it checks the last-image-selection annotation to find the image stream and fetches the image from status.dockerImageReference,
 // assigning it to the container.image value.
-func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger) error {
+func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger, namespace string) error {
 	// Create a dynamic client
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -575,63 +577,56 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 							return fmt.Errorf("invalid image selection format")
 						}
 
-						// Specify the namespaces to search in
-						namespaces := []string{"opendatahub", "redhat-ods-applications"}
 						imagestreamFound := false
-						for _, namespace := range namespaces {
-							// List imagestreams in the specified namespace
-							imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
-							if err != nil {
-								log.Info("Cannot list imagestreams", "error", err)
-								continue
-							}
+						// List imagestreams in the specified namespace
+						imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
+						if err != nil {
+							log.Info("Cannot list imagestreams", "error", err)
+							continue
+						}
 
-							// Iterate through the imagestreams to find matches
-							for _, item := range imagestreams.Items {
-								metadata := item.Object["metadata"].(map[string]interface{})
-								name := metadata["name"].(string)
+						// Iterate through the imagestreams to find matches
+						for _, item := range imagestreams.Items {
+							metadata := item.Object["metadata"].(map[string]interface{})
+							name := metadata["name"].(string)
 
-								// Match with the ImageStream name
-								if name == imageSelected[0] {
-									status := item.Object["status"].(map[string]interface{})
+							// Match with the ImageStream name
+							if name == imageSelected[0] {
+								status := item.Object["status"].(map[string]interface{})
 
-									// Match to the corresponding tag of the image
-									tags := status["tags"].([]interface{})
-									for _, t := range tags {
-										tagMap := t.(map[string]interface{})
-										tagName := tagMap["tag"].(string)
-										if tagName == imageSelected[1] {
-											items := tagMap["items"].([]interface{})
-											if len(items) > 0 {
-												// Sort items by creationTimestamp to get the most recent one
-												sort.Slice(items, func(i, j int) bool {
-													iTime := items[i].(map[string]interface{})["created"].(string)
-													jTime := items[j].(map[string]interface{})["created"].(string)
-													return iTime > jTime // Lexicographical comparison of RFC3339 timestamps
-												})
-												imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
-												// Update the Containers[i].Image value
-												notebook.Spec.Template.Spec.Containers[i].Image = imageHash
-												// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
-												for i, envVar := range container.Env {
-													if envVar.Name == "JUPYTER_IMAGE" {
-														container.Env[i].Value = imageSelection
-														break
-													}
+								// Match to the corresponding tag of the image
+								tags := status["tags"].([]interface{})
+								for _, t := range tags {
+									tagMap := t.(map[string]interface{})
+									tagName := tagMap["tag"].(string)
+									if tagName == imageSelected[1] {
+										items := tagMap["items"].([]interface{})
+										if len(items) > 0 {
+											// Sort items by creationTimestamp to get the most recent one
+											sort.Slice(items, func(i, j int) bool {
+												iTime := items[i].(map[string]interface{})["created"].(string)
+												jTime := items[j].(map[string]interface{})["created"].(string)
+												return iTime > jTime // Lexicographical comparison of RFC3339 timestamps
+											})
+											imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
+											// Update the Containers[i].Image value
+											notebook.Spec.Template.Spec.Containers[i].Image = imageHash
+											// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
+											for i, envVar := range container.Env {
+												if envVar.Name == "JUPYTER_IMAGE" {
+													container.Env[i].Value = imageSelection
+													break
 												}
-												imagestreamFound = true
-												break
 											}
+											imagestreamFound = true
+											break
 										}
 									}
 								}
 							}
-							if imagestreamFound {
-								break
-							}
 						}
 						if !imagestreamFound {
-							log.Error(nil, "Imagestream not found in any of the specified namespaces", "imageSelected", imageSelected[0], "tag", imageSelected[1])
+							log.Error(nil, "Imagestream not found in main controller namespace", "imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
 						}
 					}
 				}

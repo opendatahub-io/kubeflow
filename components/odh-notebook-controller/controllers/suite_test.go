@@ -69,8 +69,9 @@ var (
 )
 
 const (
-	timeout  = time.Second * 10
-	interval = time.Second * 2
+	timeout                            = time.Second * 10
+	interval                           = time.Second * 2
+	odhNotebookControllerTestNamespace = "redhat-ods-applications"
 )
 
 func TestAPIs(t *testing.T) {
@@ -173,9 +174,10 @@ var _ = BeforeSuite(func() {
 
 	// Setup notebook controller
 	err = (&OpenshiftNotebookReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("notebook-controller"),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
+		Scheme:    mgr.GetScheme(),
+		Namespace: odhNotebookControllerTestNamespace,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -183,9 +185,10 @@ var _ = BeforeSuite(func() {
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &NotebookWebhook{
-			Log:    ctrl.Log.WithName("controllers").WithName("notebook-controller"),
-			Client: mgr.GetClient(),
-			Config: mgr.GetConfig(),
+			Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
+			Client:    mgr.GetClient(),
+			Config:    mgr.GetConfig(),
+			Namespace: odhNotebookControllerTestNamespace,
 			OAuthConfig: OAuthConfig{
 				ProxyImage: OAuthProxyImage,
 			},

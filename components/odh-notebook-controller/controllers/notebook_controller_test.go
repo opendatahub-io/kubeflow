@@ -20,9 +20,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -432,12 +430,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebook := createNotebook(Name, Namespace)
 
 		npProtocol := corev1.ProtocolTCP
-		testPodNamespace := "redhat-ods-applications"
-		if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-			if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
-				testPodNamespace = ns
-			}
-		}
+		testPodNamespace := odhNotebookControllerTestNamespace
 
 		expectedNotebookNetworkPolicy := netv1.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
