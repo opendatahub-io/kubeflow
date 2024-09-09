@@ -27,6 +27,18 @@
     overflow: auto;
 }
 
+.scrollable::-webkit-scrollbar {
+    -webkit-appearance: none;
+    width: 7px;
+    height: 7px;
+}
+
+.scrollable::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+    background-color: rgba(238, 238, 239, 0.5);
+    box-shadow: 0 0 1px rgba(255,255,255,.5);
+}
+
 #MainDrawer {
     color: white;
     --app-drawer-content-container: {
@@ -43,13 +55,6 @@ app-drawer-layout {
 app-drawer-layout[narrow] #MainDrawer {
     --app-drawer-content-container: {
         box-shadow: 0 0 6px -1px #000;
-    }
-}
-
-app-drawer-layout[bleed] #MainDrawer {
-    background: var(--primary-background-color);
-    --app-drawer-content-container: {
-        background: transparent !important;
     }
 }
 
@@ -95,7 +100,7 @@ app-drawer-layout[bleed] #MainDrawer {
 }
 
 #MainDrawer .inner-menu-item {
-    padding-left: 65px;
+    padding-left: 60px;
     margin: 0;
     font-size: 13px;
     min-height: 30px;

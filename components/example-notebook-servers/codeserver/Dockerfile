@@ -1,28 +1,25 @@
-# Use the respective Makefile to pass the appropriate BASE_IMG and build the image correctly
+#
+# NOTE: Use the Makefiles to build this image correctly.
+#
+
 ARG BASE_IMG=<base>
 FROM $BASE_IMG
 
-USER root
+ARG TARGETARCH
 
 # args - software versions
- # renovate: datasource=github-tags depName=cdr/code-server versioning=semver
-ARG CODESERVER_VERSION=v4.3.0
+ARG CODESERVER_VERSION=v4.89.1
+
+USER root
 
 # install - code-server
-RUN curl -sL "https://github.com/cdr/code-server/releases/download/${CODESERVER_VERSION}/code-server_${CODESERVER_VERSION/v/}_amd64.deb" -o /tmp/code-server.deb \
+RUN curl -fsSL "https://github.com/coder/code-server/releases/download/${CODESERVER_VERSION}/code-server_${CODESERVER_VERSION/v/}_${TARGETARCH}.deb" -o /tmp/code-server.deb \
  && dpkg -i /tmp/code-server.deb \
  && rm -f /tmp/code-server.deb
 
 # s6 - copy scripts
-COPY --chown=jovyan:users s6/ /etc
-
-# s6 - 01-copy-tmp-home
-RUN mkdir -p /tmp_home \
- && cp -r ${HOME} /tmp_home \
- && chown -R ${NB_USER}:users /tmp_home
+COPY --chown=${NB_USER}:${NB_GID} --chmod=755 s6/ /etc
 
 USER $NB_UID
 
 EXPOSE 8888
-
-ENTRYPOINT ["/init"]

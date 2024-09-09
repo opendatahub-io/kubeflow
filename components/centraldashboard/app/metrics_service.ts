@@ -1,10 +1,10 @@
 /** Time-series interval enumeration. */
 export enum Interval {
-  Last5m,
-  Last15m,
-  Last30m,
-  Last60m,
-  Last180m
+  Last5m = 'Last5m',
+  Last15m = 'Last15m',
+  Last30m = 'Last30m',
+  Last60m = 'Last60m',
+  Last180m = 'Last180m',
 }
 
 /** Data-point contained in a time series. */
@@ -12,6 +12,11 @@ export interface TimeSeriesPoint {
   timestamp: number;
   label: string;
   value: number;
+}
+
+export interface MetricsInfo {
+  resourceChartsLink: string | undefined;
+  resourceChartsLinkText: string;
 }
 
 /**
@@ -39,4 +44,10 @@ export interface MetricsService {
    * @param interval
    */
   getPodMemoryUsage(interval: Interval): Promise<TimeSeriesPoint[]>;
+
+  /**
+   * Return a MetricsInfo object containing the url of the metric dashboard and the
+   * text to display for the redirect button.
+   */
+  getChartsLink(): MetricsInfo;
 }

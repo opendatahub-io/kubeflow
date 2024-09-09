@@ -3,6 +3,7 @@ import {KubernetesService} from './k8s_service';
 import {Interval, MetricsService} from './metrics_service';
 
 export const ERRORS = {
+  no_metrics_service_configured: 'No metrics service configured',
   operation_not_supported: 'Operation not supported',
   invalid_links_config: 'Cannot load dashboard menu link',
   invalid_settings: 'Cannot load dashboard settings'
@@ -28,6 +29,15 @@ export class Api {
    */
   routes(): Router {
     return Router()
+        .get('/metrics', async (req: Request, res: Response) => {
+            if (!this.metricsService) {
+                return apiError({
+                    res, code: 405,
+                    error: ERRORS.operation_not_supported,
+                });
+            }
+            res.json(this.metricsService.getChartsLink());
+        })
         .get(
             '/metrics/:type((node|podcpu|podmem))',
             async (req: Request, res: Response) => {
@@ -39,8 +49,10 @@ export class Api {
               }
 
               let interval = Interval.Last15m;
-              if (Interval[req.query.interval] !== undefined) {
-                interval = Number(Interval[req.query.interval]);
+              const intervalQuery = req.query.interval as string;
+              const intervalQueryKey = intervalQuery as keyof typeof Interval;
+              if (Interval[intervalQueryKey] !== undefined) {
+                  interval = Interval[intervalQueryKey];
               }
               switch (req.params.type) {
                 case 'node':

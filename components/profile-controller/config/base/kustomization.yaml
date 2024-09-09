@@ -12,7 +12,11 @@ patchesStrategicMerge:
 images:
 - name: docker.io/kubeflownotebookswg/profile-controller
   newName: docker.io/kubeflownotebookswg/profile-controller
+<<<<<<< HEAD
   newTag: v1.7.0
+=======
+  newTag: v1.9.0
+>>>>>>> 48b8643bee14b8c85c3de9f6d129752bb55b44d3
 
 configMapGenerator:
 - name: namespace-labels-data

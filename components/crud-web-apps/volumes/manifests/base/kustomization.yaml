@@ -14,13 +14,20 @@ commonLabels:
 images:
 - name: docker.io/kubeflownotebookswg/volumes-web-app
   newName: docker.io/kubeflownotebookswg/volumes-web-app
+<<<<<<< HEAD
   newTag: v1.7.0
+=======
+  newTag: v1.9.0
+>>>>>>> 48b8643bee14b8c85c3de9f6d129752bb55b44d3
 # We need the name to be unique without the suffix because the original name is what
 # gets used with patches
 configMapGenerator:
 - envs:
   - params.env
   name: parameters
+- files:
+  - viewer-spec.yaml
+  name: viewer-spec
 vars:
 - fieldref:
     fieldPath: data.VWA_CLUSTER_DOMAIN

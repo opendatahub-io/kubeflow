@@ -5,7 +5,11 @@ import { DeleteButtonComponent } from './delete-button.component';
 const mockElement = {
   age: 'Mon, 19 Sep 2022 16:39:10 GMT',
   capacity: '5Gi',
+<<<<<<< HEAD
   class: 'rok',
+=======
+  class: '',
+>>>>>>> 48b8643bee14b8c85c3de9f6d129752bb55b44d3
   modes: ['ReadWriteOnce'],
   name: 'a0-new-image-workspace-d8pc2',
   namespace: 'kubeflow-user',

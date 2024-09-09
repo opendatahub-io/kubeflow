@@ -9,7 +9,11 @@ import {html, PolymerElement} from '@polymer/polymer/polymer-element.js';
 
 export const ALL_NAMESPACES = 'All namespaces';
 export const ALL_NAMESPACES_ALLOWED_LIST = ['jupyter', 'volumes',
+<<<<<<< HEAD
     'tensorboards'];
+=======
+    'tensorboards', 'katib', 'models'];
+>>>>>>> 48b8643bee14b8c85c3de9f6d129752bb55b44d3
 
 const allNamespacesAllowedPaths = ALL_NAMESPACES_ALLOWED_LIST
     .map(( p)=>`/_/${p}/`);
