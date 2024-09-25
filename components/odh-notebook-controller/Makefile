@@ -234,7 +234,7 @@ controller-gen: ## Download controller-gen locally if necessary.
 KUSTOMIZE = $(LOCALBIN)/kustomize
 .PHONY: kustomize
 kustomize: ## Download kustomize locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/v3/cmd/kustomize@v3.2.0
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/v3/cmd/kustomize@v5.0.2
 
 ENVTEST = $(LOCALBIN)/setup-envtest
 .PHONY: envtest
