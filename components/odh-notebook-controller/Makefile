@@ -239,7 +239,7 @@ kustomize: ## Download kustomize locally if necessary.
 ENVTEST = $(LOCALBIN)/setup-envtest
 .PHONY: envtest
 envtest: ## Download setup-envtest locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20230216140739-c98506dc3b8e
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20240923090159-236e448db12c
 
 KTUNNEL = $(LOCALBIN)/ktunnel
 .PHONY: ktunnel
