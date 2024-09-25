@@ -5,9 +5,9 @@ on:  # yamllint disable-line rule:truthy
   workflow_dispatch:
     inputs:
       branch-name:
-        description: "Provide name of the branch, ex: v1.7-branch"
+        description: "Provide name of the branch, ex: v1.9-branch"
         required: true
-        default: "v1.7-branch"
+        default: "v1.9-branch"
       organization:
         required: true
         description: "Owner of origin notebooks repository used to open a PR"
@@ -49,14 +49,40 @@ jobs:
         PAYLOAD=$(curl --silent -H 'Accept: application/vnd.github.v4.raw' https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits?sha=$BRANCH_NAME&per_page=1)
         echo "COMMIT_ID=$(echo $PAYLOAD | jq -r '.[0].sha[0:7]')" >> ${GITHUB_OUTPUT}
 
+    - name: Extract version from branch-name
+      id: version
+      run: |
+        if VERSION=$(echo "${{ env.BRANCH_NAME }}" | sed -E 's/^v([0-9]+\.[0-9]+)-.*/\1/') then
+          VERSION="main"
+        else
+          VERSION=$(echo "${{ env.BRANCH_NAME }}" | sed -E 's/^v([0-9]+\.[0-9]+)-.*/\1/')
+
+          # Check if VERSION is empty, then, assign the full branch name
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${{ env.BRANCH_NAME }}"
+          fi
+        fi
+        echo "VERSION=$VERSION" >> ${GITHUB_OUTPUT}
+        echo "Extracted VERSION is: $VERSION"
+
+
+        if [[ "${{ env.BRANCH_NAME }}" == "main" ]]; then
+          VERSION="main"
+        else
+          VERSION=$(echo "${{ env.BRANCH_NAME }}" | sed -E 's/^v([0-9]+\.[0-9]+)-.*/\1/')
+        fi
+        echo "VERSION=$VERSION" >> ${GITHUB_OUTPUT}
+        echo "Extracted VERSION is: $VERSION"
+
     - name: Update related files
       id: apply-changes
       run: |
         COMMIT_ID=${{ steps.commit-id.outputs.COMMIT_ID }}
-        echo "Updating files with COMMIT_ID=${COMMIT_ID}"
-        sed -i "s/\(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:1\.7-\)[a-z0-9]\{7\}/\1${COMMIT_ID}/" components/notebook-controller/config/overlays/openshift/params.env
-        sed -i "s/\(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:1\.7-\)[a-z0-9]\{7\}/\1${COMMIT_ID}/" components/odh-notebook-controller/config/base/params.env
-        sed -i "s/\(KF_TAG ?= 1\.7-\)[a-z0-9]\{7\}/\1${COMMIT_ID}/" components/odh-notebook-controller/Makefile
+        VERSION=${{ steps.version.outputs.VERSION }}
+        echo "Updating files in VERSION=${VERSION} with COMMIT_ID=${COMMIT_ID}"
+        sed -E "s/(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/notebook-controller/config/overlays/openshift/params.env
+        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i  components/odh-notebook-controller/config/base/params.env
+        sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/odh-notebook-controller/Makefile
 
         git status
         if [[ $(git status --porcelain | wc -l) -gt 0 ]]; then
@@ -66,7 +92,7 @@ jobs:
           git add components/notebook-controller/config/overlays/openshift/params.env
           git add components/odh-notebook-controller/config/base/params.env
           git add components/odh-notebook-controller/Makefile
-          git commit -m "Update odh and notebook-controller with image 1.7-${COMMIT_ID}"
+          git commit -m "Update odh and notebook-controller with image ${VERSION}-${COMMIT_ID}"
           git push origin ${{ env.TEMP_UPDATER_BRANCH }}
           git log --oneline
         else
@@ -82,7 +108,7 @@ jobs:
             --base ${{ env.BRANCH_NAME }}
       env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          pr_title: "[GHA] Update odh and notebook-controller with image 1.7-${{ steps.commit-id.outputs.COMMIT_ID }}"
+          pr_title: "[GHA] Update odh and notebook-controller with image ${{ steps.version.outputs.VERSION }}-${{ steps.commit-id.outputs.COMMIT_ID }}"
           pr_body: |
             :robot: This is an automated Pull Request created by `/.github/workflows/notebook-controller-images-updater.yaml`.
 
