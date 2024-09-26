@@ -3,11 +3,12 @@ on:
   push:
   pull_request:
     paths:
+      - .github/workflows/odh_notebook_controller_integration_test.yaml
+      - components/notebook-controller/**
       - components/odh-notebook-controller/**
   workflow_dispatch:
 
 env:
-  IMG: odh-notebook-controller
   TAG: integration-test
 
 jobs:
@@ -55,9 +56,18 @@ jobs:
 
       - name: Build Notebook Controller Image
         run: |
+          cd components/notebook-controller
+          make docker-build
+        env:
+          IMG: notebook-controller
+          CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/notebook-controller/build-cache
+
+      - name: Build ODH Notebook Controller Image
+        run: |
           cd components/odh-notebook-controller
           make docker-build
         env:
+          IMG: odh-notebook-controller
           CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/odh-notebook-controller/build-cache
 
       - name: Install KinD
@@ -66,11 +76,19 @@ jobs:
       - name: Create KinD Cluster
         run: kind create cluster --config components/testing/gh-actions/kind-1-25.yaml
 
-      - name: Load Images into KinD Cluster
+      - name: Load image into KinD Cluster
         run: |
-          # kind load docker-image localhost/${{env.IMG}}:${{env.TAG}}
-          podman save -o img.tar localhost/${{env.IMG}}:${{env.TAG}}
-          kind load image-archive img.tar
+          podman save -o ${{env.IMG}}.tar localhost/${{env.IMG}}:${{env.TAG}}
+          kind load image-archive ${{env.IMG}}.tar
+        env:
+          IMG: notebook-controller
+
+      - name: Load odh image into KinD Cluster
+        run: |
+          podman save -o ${{env.IMG}}.tar localhost/${{env.IMG}}:${{env.TAG}}
+          kind load image-archive ${{env.IMG}}.tar
+        env:
+          IMG: odh-notebook-controller
 
       - name: Install kustomize
         run: ./components/testing/gh-actions/install_kustomize.sh
@@ -78,7 +96,71 @@ jobs:
       - name: Install Istio
         run: ./components/testing/gh-actions/install_istio.sh
 
+      - name: Install fake OpenShift CRDs
+        run: |
+          kubectl apply -f - <<EOF
+          ---
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            annotations:
+              crd/fake: "true"
+            name: routes.route.openshift.io
+          spec:
+            group: route.openshift.io
+            names:
+              kind: Route
+              listKind: RouteList
+              singular: route
+              plural: routes
+            scope: Namespaced
+            versions:
+              - name: v1
+                schema:
+                  openAPIV3Schema:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                served: true
+                storage: true
+          EOF
+
       - name: Build & Apply manifests
+        run: |
+          set -x
+
+          cd components/notebook-controller/config/overlays/kubeflow
+          kubectl create ns kubeflow
+
+          export CURRENT_NOTEBOOK_IMG=docker.io/kubeflownotebookswg/notebook-controller
+          export PR_NOTEBOOK_IMG=localhost/${{env.IMG}}:${{env.TAG}}
+          kustomize edit set image ${CURRENT_NOTEBOOK_IMG}=${PR_NOTEBOOK_IMG}
+
+          # configure culler
+          cat <<EOF | oc apply -f -
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: notebook-controller-culler-config
+            namespace: kubeflow
+          data:
+            ENABLE_CULLING: "true"
+            CULL_IDLE_TIME: "60" # In minutes (1 hour)
+            IDLENESS_CHECK_PERIOD: "5" # In minutes
+          EOF
+
+          kustomize build . | sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | kubectl apply -f -
+          kubectl wait pods -n kubeflow -l app=notebook-controller --for=condition=Ready --timeout=100s
+        env:
+          IMG: notebook-controller
+
+      - name: Print logs
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n kubeflow -l app=notebook-controller
+          kubectl logs -n kubeflow -l app=notebook-controller
+
+      - name: Build & Apply ODH manifests
         run: |
           set -x
 
@@ -102,24 +184,104 @@ jobs:
 
           # odh-notebook-controller assumes that openshift-cert operator autocreates certificates when
           # resources have the label `service.beta.openshift.io/serving-cert-secret-name`
-          cat <<EOF | kubectl apply -f -
-          ---
-          kind: Secret
-          apiVersion: v1
-          metadata:
-            name: odh-notebook-controller-webhook-cert
-            namespace: opendatahub
-          data:
-            tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVYRENDQTBTZ0F3SUJBZ0lJVXRUZkNrbGRmR293RFFZSktvWklodmNOQVFFTEJRQXdOakUwTURJR0ExVUUKQXd3cmIzQmxibk5vYVdaMExYTmxjblpwWTJVdGMyVnlkbWx1WnkxemFXZHVaWEpBTVRjeE16VXlNRGt3TWpBZQpGdzB5TkRBMU1qQXhNakkyTURSYUZ3MHlOakExTWpBeE1qSTJNRFZhTUU0eFREQktCZ05WQkFNVFEyOWthQzF1CmIzUmxZbTl2YXkxamIyNTBjbTlzYkdWeUxYZGxZbWh2YjJzdGMyVnlkbWxqWlM1eVpXUm9ZWFF0YjJSekxXRncKY0d4cFkyRjBhVzl1Y3k1emRtTXdnZ0VpTUEwR0NTcUdTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFEeQpySEoreTNoMEhRYWZUUFNWd1JkWmEwNnd2aTdhT0FGOVFQK1RERk15dE92VHduREdkam4rUHlFaVpGUW1aZm9nClAzOS83TXNMWVkvNU1HSmhpNERGbFl3OUxldjBMSFRoRnUzY3BQVjZYWWVUcmpxZHQ0anZlY0l3TWRmOHZ6dmwKaDVTWnNxOWRFMTYwSGpBdlRpdXlJUWs1aCt1ckhZeW5KUjNpdkFHMTdobzliUlpsSFpJUkpEd3RCK3NZc2htNwpWSkIwZGI1M2RuY2FZNDNYeHJmK1dJdW1vbWtSMENmRVMvTmpnY2ZtU2xSM01RNUNIZ2FKdFdzNkd2ZnlEcjR1CnNGNFJtZzY1RE1POWdYUEVhQm9oSUxRcTJxdkY2WmsrYzI0NE9LTjJwdHZJamh0L3dEL01xTk80YUwzUjY5WWUKYmMxdTVzaWxGSTRsYkpnU1FQRlJBZ01CQUFHamdnRlVNSUlCVURBT0JnTlZIUThCQWY4RUJBTUNCYUF3RXdZRApWUjBsQkF3d0NnWUlLd1lCQlFVSEF3RXdEQVlEVlIwVEFRSC9CQUl3QURBZEJnTlZIUTRFRmdRVW83bmVtcEFoCjN4QXUzZk1tREhHNVhCOFN6WW93SHdZRFZSMGpCQmd3Rm9BVU84aWRRZ0dpeVBXMzdxZEhubktPaktIcnphQXcKZ2FNR0ExVWRFUVNCbXpDQm1JSkRiMlJvTFc1dmRHVmliMjlyTFdOdmJuUnliMnhzWlhJdGQyVmlhRzl2YXkxegpaWEoyYVdObExuSmxaR2hoZEMxdlpITXRZWEJ3YkdsallYUnBiMjV6TG5OMlk0SlJiMlJvTFc1dmRHVmliMjlyCkxXTnZiblJ5YjJ4c1pYSXRkMlZpYUc5dmF5MXpaWEoyYVdObExuSmxaR2hoZEMxdlpITXRZWEJ3YkdsallYUnAKYjI1ekxuTjJZeTVqYkhWemRHVnlMbXh2WTJGc01EVUdDeXNHQVFRQmtnZ1JaQUlCQkNZVEpEWXhOV0ptWVROagpMV05sTUdNdE5EZGlNQzA1TmpJMUxUbG1NakE1WlRVelpXWXhNREFOQmdrcWhraUc5dzBCQVFzRkFBT0NBUUVBCk1oWStnbkFEdy9hWUovQXRIZlNVdDRiZFFEU1FCallIQ1U3aE0xWGNVM3IvejBZUWh3aDh6enNJRGs0YmtiUUwKMjBlaHE5MXZURTZ3alJOSFd3UktZV2lFMEVMZmpIc0V4YkRnUHVYMUdHRVpjbGNTVGhleHhTTFFCS0R6YlhJVQp1dW1pTDhLSi92aTZVbnBuNEtySE9XbkpIUnRFQmFFNWtSWTNoVDZFQjNjYThUUzZsRW9PTEJsaWdLby90bCtaCmtZYlVQRThJMVJHd0pGbXZTSXpVRzRBQUs3NnQvWHZHMlFTcWNvSi9ETExxWFgxOENQV0VuamZlY2ZicjdzU1MKR2p1azMyS1hOK2Z0UnNsK242azBLVzg5SGh5WmY3ZVVZeTZQS09nblp3NDlvR0RpSHZDVTM1aEhiZzhYK3kxSApGS3BIcjRRNHZWUndTOXpwd1Y2cFJBPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQotLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS0KTUlJRFVUQ0NBam1nQXdJQkFnSUlIdm03MUJIR1oyMHdEUVlKS29aSWh2Y05BUUVMQlFBd05qRTBNRElHQTFVRQpBd3dyYjNCbGJuTm9hV1owTFhObGNuWnBZMlV0YzJWeWRtbHVaeTF6YVdkdVpYSkFNVGN4TXpVeU1Ea3dNakFlCkZ3MHlOREEwTVRreE1EQXhOREphRncweU5qQTJNVGd4TURBeE5ETmFNRFl4TkRBeUJnTlZCQU1NSzI5d1pXNXoKYUdsbWRDMXpaWEoyYVdObExYTmxjblpwYm1jdGMybG5ibVZ5UURFM01UTTFNakE1TURJd2dnRWlNQTBHQ1NxRwpTSWIzRFFFQkFRVUFBNElCRHdBd2dnRUtBb0lCQVFDMWJWVTlXUmQyZWYrZnVzNTZvTHBPYVlNVk1GVDN1RmlFCnA5UHJ0K2RoZ2dwbUNIczQrcWdXVlFjUkVITmIrK0tVUVhmZ2I5ZTFmWkNnbFFUSFBiU1VJUHZxYVJUVG8vWVUKbWNhTEJjUUl4L0pwUmtTV0pKUUVnaDM1clZLMzQyeWE2c1d4MUQvKzkvQm5vbVhhUmN4TzRzL0E2aWpKZ1VQeQpXQk96cmkvRXo1cVlWdktpQ2pKMUZ1cGdpejhNb1RBcXRSTVVuSW9lakwzSWZIWDdsMVFGVU5CUm1sTTRWM2xkCmZ6dDJJMjhLUHFyVkVWaHdCQkY3VFJmeFY5ZVhTTDhsTWRlMEN5SnlkYnlwT2dlRmxEUHJlSVl6R05HZ3c0YlUKaVNEazZYMGdaVEFQSGN2YlVEWGx6VHkydVZta0FLMXRZcmpIdGRLVWRzRVRpczBJNUFBTkFnTUJBQUdqWXpCaApNQTRHQTFVZER3RUIvd1FFQXdJQ3BEQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01CMEdBMVVkRGdRV0JCUTd5SjFDCkFhTEk5YmZ1cDBlZWNvNk1vZXZOb0RBZkJnTlZIU01FR0RBV2dCUTd5SjFDQWFMSTliZnVwMGVlY282TW9ldk4Kb0RBTkJna3Foa2lHOXcwQkFRc0ZBQU9DQVFFQWVtYzVGSEdnSUpyVTltVGpoTFVFWkF3R1FxTU9DMmpuVWw3WgozL3ZDZFMrb3lsZ1h6dC9wa0lORkVWTy9zVEQ0U0NOUmo3S3hJL09iWGt0eXJuMnhuNGF0aVZ0Nll4TSt5MFNMCnBMVFY5NjNUakRDRjBobVBzalNiQWZyUkxqSkhDWXNQOUs5dXhlMG94TmphcnFOeDB1Ym9tQW14N3JvcVhZRHIKZnR3Y0ZBTUJoS0o1Sm9vcXRnUWhkZGhvU1REN0dpUGpxL2dna3RzcDBYTGZLc3h0M2FONHlXWDJSVk9yS3huTwpvQ3hUdUVIRG4wYkluNDFwVThxMWszYUR3N3cxTGpzTlI4Q0NmNS9Oczh1QWR3MmY5Z2taVEhtQ3pjZUFrRHpjCngzWXdiRTBTKzVUYm9RS3NPTjR2Tm9hR200aVFxVXp0clhRTU5zOXdmLzZRZFI2ZDZRPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
-            tls.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcFFJQkFBS0NBUUVBOHF4eWZzdDRkQjBHbjB6MGxjRVhXV3RPc0w0dTJqZ0JmVUQva3d4VE1yVHIwOEp3CnhuWTUvajhoSW1SVUptWDZJRDkvZit6TEMyR1ArVEJpWVl1QXhaV01QUzNyOUN4MDRSYnQzS1QxZWwySGs2NDYKbmJlSTczbkNNREhYL0w4NzVZZVVtYkt2WFJOZXRCNHdMMDRyc2lFSk9ZZnJxeDJNcHlVZDRyd0J0ZTRhUFcwVwpaUjJTRVNROExRZnJHTEladTFTUWRIVytkM1ozR21PTjE4YTMvbGlMcHFKcEVkQW54RXZ6WTRISDVrcFVkekVPClFoNEdpYlZyT2hyMzhnNitMckJlRVpvT3VRekR2WUZ6eEdnYUlTQzBLdHFyeGVtWlBuTnVPRGlqZHFiYnlJNGIKZjhBL3pLalR1R2k5MGV2V0htM05idWJJcFJTT0pXeVlFa0R4VVFJREFRQUJBb0lCQUZubDFFeHdaK0RyMThZdgpwZlBNSWpBMzltQzNNM2dYZzBXNVRIUlcvb01zVHFpVndWMWo4cnZpK3cxWWlXdm9IeTdQRnhaMnpBa2RUVTZNCnhBVkt2cHR6ZVE0NDhzM3pvaUM0Yzhsbk9xRG9BUStPWFp5TG55akh2RTVLU0s4UzBNZUk0RjNIdWZzSzcreGQKdW8vcnIzZy9rTUZGUHVLWEFjSHhtQTZrZ3lXM3BFaFdhT2tNdUExdDMzc2lvS21LdXpJTWFyR0JuSEpOdHczRwpsL0hNdW9wbjI2VWEwT3l2UTA4Y1ZnNVczV24xcHNXZHRqQ1lXdTIvTEdjNzBvUzQyZlB5Uk85bFBSQ0c5WUtKCnp2bGdMWVZWWnlsc3NORXlkR0NBS251bG9MMUphU3FIRDdrRDlqREN1QWRHRTRwYVRraytrQzFUcFBMcTNXM1QKR1kra3g1a0NnWUVBOTNhbVl6WkJvTytLN04xRnJsNUlPcE5nYnlKUXJkeDA0a0JmV3o0R3JtdDlrdW1HUEtkZwoyU3VBSUtBNnU1enpSeE5qSXFsZ3lEZno4S1cyLy9qY1RZNDI5U3RSS2RMOWt5QTVVU1lJbml3VWtzdnBBTjhQCjVROFh4dVRtNnJTb3pxQjZrUjJDVmpJN0NiOHNYMDdGQTk1Sm1WWmZjbXVrTG16SlUrTElMUGNDZ1lFQSt3dC8KZ3Qrc2RYYW0zRWYvTDh4K1J6T0R0N3FURmtJZE53SytPaVYxUUlVUEZRZXllWkNWT2FiSUx3VXhNOHgxNWRzSgphaUN4MFhUam1XMjdYVUltbEs1RG41WkZZM1RmeUFTYXJ0UEhoelBzMlo0QWVEUngyRUlmSGg4L3lyeXlqRDFsCkhFR0QxTUozcG5zVWV6QmJqdXIrOTJHd1B5V2paK0FjWXlMbUtmY0NnWUVBd1lSRnBid2VJbTV3NDc0OTZaZk4KUUJGVURsUjFaeURKUHMwOFJLd0NxWTloaWV1WWtBSU1XSWdPRUhWOHVJNktLSURldTVKZEh2V3lpL1ByWWMwSQo2cFZXSU8rWTd1NFNZbVdHclJEakdGNDhVSGVwWkljTGRRTVNndlVxSjB6VDNaSGRoM0hlSk8zdkFUWkF5dDljCmJpUDh4aTZuUVdFdjZTWWxZcllyK0EwQ2dZRUE0b1dDZmhYVHFIM3luQ3QrMEtPRmdqdXlhNU0zYTBzbXoxOXoKUkVaT1lYUnVvbnc2aDhSMVVmcnpBTEovcmd5Y2lWWTJUWVBJejRYWVpMWUY3V1ZtS0p5QnVqcyt5enBIUGxVaApPZ1V3TWdnaGZFODhmenBiUzFhR2U0aVk2QmVTU0VhUnVJaEpLeTU2QmtkaXVMRnV2Q3ZBK25rMExoYUpObzZiCkxyenIwQXNDZ1lFQWxyRllyS3Fwckw5enY1bUNjRWEzWFdZY00wTFZYcml1TURVelJweU5udXdvQVUwaGs5SG8KU0t3by9KRkhUdVVLbjJqQXN5aW5aMysyNjRORU9UM1BpUUpZYisyWk1YcEdrR2gvazJ5MUZGUTk2czhLNCs5YgpmRzlwVkFUNFJpMUU2VndkUWRsSHRmMmZlQWtyWlFzUmVkQncxM0g0dVR0Y0hwWFNrVCt3blFRPQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=
-          type: kubernetes.io/tls
-          EOF
 
-          kustomize build . | sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | kubectl apply -f -
+          # in kind we need to generate the certs ourselves, or use cert-operator (that's a kubebuilder recommendation)
+          openssl req -nodes -x509 -newkey rsa:4096 -sha256 -days 3650 -keyout ca-key.pem -out ca-cert.pem -subj "/CN=TestCA"
+          openssl req -nodes -newkey rsa:4096 -keyout server-key.pem -out server-csr.pem -subj "/CN=ServerC" -addext "subjectAltName = DNS:odh-notebook-controller-webhook-service.opendatahub.svc,DNS:odh-notebook-controller-webhook-service.opendatahub.svc.cluster.local"
+          openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem -out server-cert.pem -days 365 -copy_extensions copyall -ext subjectAltName
+
+          # deploy certificate for the webhook
+          openssl x509 -noout -text -in server-cert.pem
+          kubectl create secret tls -n opendatahub odh-notebook-controller-webhook-cert --cert=server-cert.pem --key=server-key.pem
+
+          # deploy certificate for the notebook we'll start later
+          kubectl create secret tls minimal-notebook-tls --cert=server-cert.pem --key=server-key.pem
+
+          # deploy odh-notebook-controller manifests
+          # switching to unauthenticated oauth-proxy image, c.f. https://github.com/opendatahub-io/opendatahub-community/issues/100
+          kustomize build . | \
+            sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | \
+            sed 's|registry.redhat.io/openshift4/ose-oauth-proxy.*|quay.io/openshift/origin-oauth-proxy@sha256:1ece77d14a685ef2397c3a327844eea45ded00c95471e9e333e35ef3860b1895|g' | \
+            kubectl apply -f -
+
+          # patch the webhook with our self-signed CA
+          bundlePatch=$(cat <<END
+          [{"op": "replace", "path": "/webhooks/0/clientConfig/caBundle", "value": "$(cat ca-cert.pem | base64 | tr -d '\n')" }]
+          END
+          )
+          kubectl patch MutatingWebhookConfiguration/odh-notebook-controller-mutating-webhook-configuration --type=json -p="$bundlePatch"
+
+          # wait for the good result
           kubectl wait pods -n opendatahub -l app=odh-notebook-controller --for=condition=Ready --timeout=100s
+        env:
+          IMG: odh-notebook-controller
 
-      - name: Print logs
+      - name: Print ODH logs
         if: "!cancelled()"
         run: |
           kubectl describe pods -n opendatahub -l app=odh-notebook-controller
           kubectl logs -n opendatahub -l app=odh-notebook-controller
+
+      - name: Create notebook and check it, this is from kubeflow readme
+        run: |
+          notebook_namespace=default
+          cat <<EOF | oc apply -f -
+          ---
+          apiVersion: kubeflow.org/v1
+          kind: Notebook
+          metadata:
+            name: minimal-notebook
+            annotations:
+              notebooks.opendatahub.io/inject-oauth: "true"
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: minimal-notebook
+                    image: quay.io/thoth-station/s2i-minimal-notebook:v0.3.0
+                    imagePullPolicy: Always
+                    workingDir: /opt/app-root/src
+                    env:
+                      - name: NOTEBOOK_ARGS
+                        value: |
+                          --ServerApp.port=8888
+                          --ServerApp.token=''
+                          --ServerApp.password=''
+                          --ServerApp.base_url=/notebook/${notebook_namespace}/minimal-notebook
+                    ports:
+                      - name: notebook-port
+                        containerPort: 8888
+                        protocol: TCP
+                    resources:
+                      requests:
+                        cpu: "1"
+                        memory: 1m
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                    livenessProbe:
+                      initialDelaySeconds: 10
+                      periodSeconds: 5
+                      timeoutSeconds: 1
+                      successThreshold: 1
+                      failureThreshold: 3
+                      httpGet:
+                        scheme: HTTP
+                        path: /notebook/${notebook_namespace}/minimal-notebook/api
+                        port: notebook-port
+          EOF
+
+          # wait for the good result
+          kubectl rollout status --watch statefulset minimal-notebook
+          kubectl wait statefulset minimal-notebook --for=jsonpath='{.spec.replicas}'=1 --timeout=100s
+          kubectl rollout status --watch statefulset minimal-notebook --timeout=300s
+          kubectl wait pods minimal-notebook-0 --for=condition=Ready --timeout=100s
+
+      - name: Print notebook logs
+        if: "!cancelled()"
+        run: |
+          kubectl describe notebooks
+          kubectl describe statefulsets
+          kubectl describe pods
+          kubectl logs minimal-notebook-0
+          kubectl describe routes
