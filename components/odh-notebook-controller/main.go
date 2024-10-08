@@ -17,6 +17,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -57,6 +58,17 @@ func init() {
 	utilruntime.Must(configv1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
+}
+
+func getControllerNamespace() (string, error) {
+	// Try to get the namespace from the service account secret
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		if ns := string(data); len(ns) > 0 {
+			return ns, nil
+		}
+	}
+
+	return "", fmt.Errorf("unable to determine the namespace")
 }
 
 func main() {
@@ -104,9 +116,17 @@ func main() {
 	}
 
 	// Setup notebook controller
+	// determine and set the controller namespace
+	namespace, err := getControllerNamespace()
+	if err != nil {
+		setupLog.Error(err, "Error during determining controller / main namespace")
+		os.Exit(1)
+	}
+	setupLog.Info("Controller is running in namespace", "namespace", namespace)
 	if err = (&controllers.OpenshiftNotebookReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("Notebook"),
+		Namespace: namespace,
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Notebook")
@@ -120,6 +140,7 @@ func main() {
 			Log:    ctrl.Log.WithName("controllers").WithName("Notebook"),
 			Client: mgr.GetClient(),
 			Config: mgr.GetConfig(),
+			Namespace: namespace,
 			OAuthConfig: controllers.OAuthConfig{
 				ProxyImage: oauthProxyImage,
 			},
