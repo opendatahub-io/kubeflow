@@ -304,7 +304,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
 			},
 			Data: map[string]string{
-				"ca-bundle.crt": string(bytes.Join(rootCertPool, []byte{})),
+				"ca-bundle.crt": string(bytes.Join(rootCertPool, []byte("\n"))),
 			},
 		}
 
