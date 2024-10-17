@@ -66,6 +66,7 @@ var (
 const (
 	timeout  = time.Second * 10
 	interval = time.Second * 2
+	odhNotebookControllerTestNamespace = "redhat-ods-applications"
 )
 
 func TestAPIs(t *testing.T) {
@@ -134,6 +135,7 @@ var _ = BeforeSuite(func() {
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 		Scheme: mgr.GetScheme(),
+		Namespace: odhNotebookControllerTestNamespace,
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -144,6 +146,7 @@ var _ = BeforeSuite(func() {
 			Log:    ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 			Client: mgr.GetClient(),
 			Config: mgr.GetConfig(),
+			Namespace: odhNotebookControllerTestNamespace,
 			OAuthConfig: OAuthConfig{
 				ProxyImage: OAuthProxyImage,
 			},
