@@ -11,6 +11,8 @@ ARG GOLANG_VERSION=1.21
 
 # Use ubi8/go-toolset as base image
 FROM registry.access.redhat.com/ubi8/go-toolset:${GOLANG_VERSION} as builder
+ARG TARGETOS
+ARG TARGETARCH
 
 ## Build args to be used at this step
 ARG SOURCE_CODE
@@ -28,14 +30,12 @@ WORKDIR /workspace/odh-notebook-controller
 ## Build the kf-notebook-controller
 USER root
 
-RUN if [ -z ${CACHITO_ENV_FILE} ]; then \
-       go mod download all; \
-    else \
-       source ${CACHITO_ENV_FILE}; \
-    fi
-
-RUN go build \
-        -o ./bin/manager main.go
+# the GOARCH has not a default value to allow the binary be built according to the host where the command
+# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
+# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
+# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
+RUN if [ -z ${CACHITO_ENV_FILE} ]; then go mod download; else source ${CACHITO_ENV_FILE}; fi && \
+  CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -tags strictfipsruntime -a -o ./bin/manager main.go
 
 # Use ubi8/ubi-minimal as base image
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
@@ -50,7 +50,7 @@ RUN useradd --uid 1001 --create-home --user-group --system rhods
 ## Set workdir directory to user home
 WORKDIR /home/rhods
 
-## Copy kf-notebook-controller-manager binary from builder stage
+## Copy odh-notebook-controller-manager binary from builder stage
 COPY --from=builder /workspace/odh-notebook-controller/bin/manager /manager
 COPY --from=builder /workspace/odh-notebook-controller/third_party/license.txt third_party/license.txt
 
