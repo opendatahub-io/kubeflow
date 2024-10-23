@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2024-10-20T17:05:55Z"
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  name: wb1
+  namespace: developer
+  resourceVersion: "7175286"
+  uid: 79db15b4-6659-4f62-b355-908dde9c2bd6
+subsets:
+- addresses:
+  - ip: 10.217.1.212
+    nodeName: crc
+    targetRef:
+      kind: Pod
+      name: wb1-0
+      namespace: developer
+      uid: 0c7c198f-cff5-44ec-ae75-c6db14164818
+  ports:
+  - name: http-wb1
+    port: 8888
+    protocol: TCP

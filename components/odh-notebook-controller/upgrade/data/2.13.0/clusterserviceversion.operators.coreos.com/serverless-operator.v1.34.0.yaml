@@ -1,0 +1,1823 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "operator.knative.dev/v1beta1",
+          "kind": "KnativeServing",
+          "metadata": {
+            "name": "knative-serving"
+          },
+          "spec": {
+          }
+        },
+        {
+          "apiVersion": "operator.knative.dev/v1beta1",
+          "kind": "KnativeEventing",
+          "metadata": {
+            "name": "knative-eventing"
+          },
+          "spec": {
+          }
+        },
+        {
+          "apiVersion": "operator.serverless.openshift.io/v1alpha1",
+          "kind": "KnativeKafka",
+          "metadata": {
+            "name": "knative-kafka"
+          },
+          "spec": {
+            "broker": {
+              "enabled": false,
+              "defaultConfig": {
+                "numPartitions": 10,
+                "replicationFactor": 3,
+                "bootstrapServers": "REPLACE_WITH_COMMA_SEPARATED_KAFKA_BOOTSTRAP_SERVERS"
+              }
+            },
+            "source": {
+              "enabled": false
+            },
+            "sink": {
+              "enabled": false
+            },
+            "channel": {
+              "enabled": false,
+              "bootstrapServers": "REPLACE_WITH_COMMA_SEPARATED_KAFKA_BOOTSTRAP_SERVERS"
+            }
+          }
+        }
+      ]
+    capabilities: Full Lifecycle
+    categories: Networking,Integration & Delivery,Cloud Provider,Developer Tools
+    certified: "false"
+    createdAt: "2024-10-08T12:30:03Z"
+    description: Deploy and manage event-driven serverless applications and functions
+      using Knative.
+    features.operators.openshift.io/disconnected: "true"
+    features.operators.openshift.io/fips-compliant: "false"
+    features.operators.openshift.io/proxy-aware: "true"
+    features.operators.openshift.io/tls-profiles: "false"
+    features.operators.openshift.io/token-auth-aws: "false"
+    features.operators.openshift.io/token-auth-azure: "false"
+    features.operators.openshift.io/token-auth-gcp: "false"
+    olm.operatorGroup: openshift-serverless-m4wfd
+    olm.operatorNamespace: openshift-serverless
+    olm.skipRange: '>=1.33.0 <1.34.0'
+    operatorframework.io/properties: '{"properties":[{"type":"olm.gvk","value":{"group":"operator.knative.dev","kind":"KnativeEventing","version":"v1beta1"}},{"type":"olm.gvk","value":{"group":"operator.knative.dev","kind":"KnativeServing","version":"v1beta1"}},{"type":"olm.gvk","value":{"group":"operator.serverless.openshift.io","kind":"KnativeKafka","version":"v1alpha1"}},{"type":"olm.package","value":{"packageName":"serverless-operator","version":"1.34.0"}}]}'
+    operatorframework.io/suggested-namespace: openshift-serverless
+    operators.openshift.io/infrastructure-features: '["disconnected", "proxy-aware"]'
+    operators.openshift.io/must-gather-image: registry.redhat.io/openshift-serverless-1/svls-must-gather-rhel8@sha256:c7ea3d26e4220fcfde67b840b1cdb135bd9774ff84eb2e4673de81c9f3696d11
+    operators.openshift.io/valid-subscription: '["OpenShift Container Platform", "OpenShift
+      Platform Plus"]'
+    repository: https://github.com/openshift-knative/serverless-operator
+    support: Red Hat
+  creationTimestamp: "2024-10-20T16:52:30Z"
+  generation: 1
+  labels:
+    olm.copiedFrom: openshift-serverless
+    olm.managed: "true"
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/arch.arm64: supported
+    operatorframework.io/arch.ppc64le: supported
+    operatorframework.io/arch.s390x: supported
+  name: serverless-operator.v1.34.0
+  namespace: developer
+  resourceVersion: "7192272"
+  uid: b6157f63-65db-4c45-824e-13ef617c496b
+spec:
+  apiservicedefinitions: {}
+  cleanup:
+    enabled: false
+  customresourcedefinitions:
+    owned:
+    - description: A platform for streamlined application deployment, traffic-based
+        auto-scaling from zero to N, and traffic-split rollouts
+      displayName: Knative Serving
+      kind: KnativeServing
+      name: knativeservings.operator.knative.dev
+      statusDescriptors:
+      - description: The version of Knative Serving installed
+        displayName: Version
+        path: version
+      - description: Conditions of Knative Serving installed
+        displayName: Conditions
+        path: conditions
+        x-descriptors:
+        - urn:alm:descriptor:io.kubernetes.conditions
+      version: v1beta1
+    - description: An event-driven application platform that leverages CloudEvents
+        with a simple HTTP interface
+      displayName: Knative Eventing
+      kind: KnativeEventing
+      name: knativeeventings.operator.knative.dev
+      statusDescriptors:
+      - description: The version of Knative Eventing installed
+        displayName: Version
+        path: version
+      version: v1beta1
+    - description: An extension to Knative Eventing, merging HTTP accessibility with
+        Apache Kafka's proven efficiency and reliability
+      displayName: Knative Kafka
+      kind: KnativeKafka
+      name: knativekafkas.operator.serverless.openshift.io
+      version: v1alpha1
+  description: |-
+    The Red Hat OpenShift Serverless operator provides a collection of APIs that
+    enables containers, microservices and functions to run "serverless".
+    Serverless applications can scale up and down (to zero) on demand and be triggered by a
+    number of event sources. OpenShift Serverless integrates with a number of
+    platform services, such as Monitoring and it is based on the open
+    source project Knative.
+
+    # Prerequisites
+    Knative Serving (and Knative Eventing respectively) can only be installed into the
+    `knative-serving` (`knative-eventing`) namespace. These namespaces will be
+    automatically created when installing the operator.
+
+    The components provided with the OpenShift Serverless operator require minimum cluster sizes on
+    OpenShift Container Platform. For more information, see the documentation on [Getting started
+    with OpenShift Serverless](https://docs.redhat.com/en/documentation/red_hat_openshift_serverless/1.34/html/serving/getting-started-with-knative-serving#serverless-applications).
+
+    # Supported Features
+    - **Easy to get started:** Provides a simplified developer experience to deploy
+      and run cloud native applications on Kubernetes, providing powerful
+      abstractions.
+    - **Immutable Revisions:** Deploy new features performing canary, A/B or
+      blue-green testing with gradual traffic rollout following best practices.
+    - **Use any programming language or runtime of choice:** From Java, Python, Go
+      and JavaScript to Quarkus, SpringBoot or Node.js.
+    - **Automatic scaling:** Removes the requirement to configure numbers of replicas
+      or idling behavior. Applications automatically scale to zero when not in use,
+      or scale up to meet demand, with built in reliability and fault tolerance.
+    - **Event Driven Applications:** You can build loosely coupled, distributed applications
+      that can be connected to a variety of either built in or third party event sources,
+      powered by operators.
+    - **Ready for the hybrid cloud:** Provides true, portable serverless functionality,
+      that can run anywhere OpenShift Container Platform runs. You can leverage data
+      locality and SaaS as you need it.
+
+    # Components & APIs
+    This operator provides the following components:
+
+    ## Knative Serving
+    Knative Serving builds on Kubernetes to support deploying and serving of applications and functions as serverless containers.
+    Serving simplifies the application deployment, dynamically scales based on in incoming traffic and supports custom rollout strategies with traffic splitting.
+    Other features include:
+    - Simplified deployment of serverless containers
+    - Traffic-based auto-scaling, including scale-to-zero
+    - Routing and network programming
+    - Point-in-time application snapshots and their configurations
+
+    ## Knative Eventing
+    Knative Eventing provides a platform that offers composable primitives to enable late-binding event sources and
+    event consumers.
+    Knative Eventing supports the following architectural cloud-native concepts:
+
+    - Services are loosely coupled during development and deployed independently to production
+    - A producer can generate events before a consumer is listening, and a consumer can express an interest in an event or class of events that are not yet being produced.
+    - Services can be connected to create new applications without modifying producer or consumer, and with the ability to select a specific subset of events from a particular producer.
+
+    ## Knative Functions
+    Knative Functions allows developers to write functions that let them focus on business logic.
+    These functions are deployed as Knative Services and take advantage of Knative Serving and Eventing.
+    Knative Functions bring greater efficiency, more scalability and faster development to facilitate rapid go-to-market.
+
+    Other features include:
+    - Build strategies including Source-to-Image (S2I) and Buildpacks
+    - Multiple runtimes, including Node.js, Quarkus and Go
+    - Local developer experience through the kn CLI
+    - Project templates
+    - Support for receiving CloudEvents and plain HTTP requests
+
+    ## Knative CLI `kn`
+    The Knative client `kn` allows you to create Knative resources from the command line or from within
+    Shell scripts.
+    With its extensive help pages and autocompletion support, it frees you from memorizing the detailed structure of the Knative resource schemas.
+
+    `kn` offers you:
+    - Full support for managing all features of Knative Serving: Services, Revisions and Routes
+    - Support for managing Knative Eventing entities: Sources, Brokers, Triggers, Channels and Subscriptions
+    - A kubectl-like plugin architecture to extend the built-in functionality
+    - Easy integration of Knative into Tekton pipelines by using `kn` in a Tekton task
+    - Create, build and deploy Knative Functions for multiple runtimes, including Node.js, Quarkus, and Go
+
+    # Further Information
+    For documentation on OpenShift Serverless, see:
+    - [Installation
+    Guide](https://docs.redhat.com/en/documentation/red_hat_openshift_serverless/1.34/html/installing_openshift_serverless/index)
+    - [Develop Serverless Applications](https://docs.redhat.com/en/documentation/red_hat_openshift_serverless/1.34/html/serving/getting-started-with-knative-serving#serverless-applications)
+  displayName: Red Hat OpenShift Serverless
+  icon:
+  - base64data: PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzOCIgaGVpZ2h0PSIzOCIgdmlld0JveD0iMCAwIDM4IDM4Ij48ZGVmcz48c3R5bGU+LmF7ZmlsbDojZmZmO30uYntmaWxsOiNlMDA7fTwvc3R5bGU+PC9kZWZzPjxwYXRoIGNsYXNzPSJhIiBkPSJNMjgsMUgxMGE5LDksMCwwLDAtOSw5VjI4YTksOSwwLDAsMCw5LDlIMjhhOSw5LDAsMCwwLDktOVYxMGE5LDksMCwwLDAtOS05WiIvPjxwYXRoIGQ9Ik0yOCwyLjI1QTcuNzU4Nyw3Ljc1ODcsMCwwLDEsMzUuNzUsMTBWMjhBNy43NTg3LDcuNzU4NywwLDAsMSwyOCwzNS43NUgxMEE3Ljc1ODcsNy43NTg3LDAsMCwxLDIuMjUsMjhWMTBBNy43NTg3LDcuNzU4NywwLDAsMSwxMCwyLjI1SDI4TTI4LDFIMTBhOSw5LDAsMCwwLTksOVYyOGE5LDksMCwwLDAsOSw5SDI4YTksOSwwLDAsMCw5LTlWMTBhOSw5LDAsMCwwLTktOVoiLz48cGF0aCBjbGFzcz0iYiIgZD0iTTE0LDIzLjQ3NjZIMTBhLjYyNTMuNjI1MywwLDAsMS0uNjI1LS42MjV2LTRhLjYyNTIuNjI1MiwwLDAsMSwuNjI1LS42MjVoNGEuNjI1Mi42MjUyLDAsMCwxLC42MjUuNjI1djRBLjYyNTMuNjI1MywwLDAsMSwxNCwyMy40NzY2Wm0tMy4zNzUtMS4yNWgyLjc1di0yLjc1aC0yLjc1WiIvPjxwYXRoIGNsYXNzPSJiIiBkPSJNMjEsMjMuNDc2NkgxN2EuNjI1My42MjUzLDAsMCwxLS42MjUtLjYyNXYtNGEuNjI1Mi42MjUyLDAsMCwxLC42MjUtLjYyNWg0YS42MjUyLjYyNTIsMCwwLDEsLjYyNS42MjV2NEEuNjI1My42MjUzLDAsMCwxLDIxLDIzLjQ3NjZabS0zLjM3NS0xLjI1aDIuNzV2LTIuNzVoLTIuNzVaIi8+PHBhdGggY2xhc3M9ImIiIGQ9Ik0xNy41LDE2LjQ3NjZoLTRhLjYyNTMuNjI1MywwLDAsMS0uNjI1LS42MjV2LTRhLjYyNTIuNjI1MiwwLDAsMSwuNjI1LS42MjVoNGEuNjI1Mi42MjUyLDAsMCwxLC42MjUuNjI1djRBLjYyNTMuNjI1MywwLDAsMSwxNy41LDE2LjQ3NjZabS0zLjM3NS0xLjI1aDIuNzV2LTIuNzVoLTIuNzVaIi8+PHBhdGggY2xhc3M9ImIiIGQ9Ik0yNC41LDE2LjQ3NjZoLTRhLjYyNTMuNjI1MywwLDAsMS0uNjI1LS42MjV2LTRhLjYyNTIuNjI1MiwwLDAsMSwuNjI1LS42MjVoNGEuNjI1Mi42MjUyLDAsMCwxLC42MjUuNjI1djRBLjYyNTMuNjI1MywwLDAsMSwyNC41LDE2LjQ3NjZabS0zLjM3NS0xLjI1aDIuNzV2LTIuNzVoLTIuNzVaIi8+PHBhdGggY2xhc3M9ImIiIGQ9Ik0yOCwyMy40NzY2SDI0YS42MjUzLjYyNTMsMCwwLDEtLjYyNS0uNjI1di00YS42MjUyLjYyNTIsMCwwLDEsLjYyNS0uNjI1aDRhLjYyNTIuNjI1MiwwLDAsMSwuNjI1LjYyNXY0QS42MjUzLjYyNTMsMCwwLDEsMjgsMjMuNDc2NlptLTMuMzc1LTEuMjVoMi43NXYtMi43NWgtMi43NVoiLz48cGF0aCBkPSJNMjksMjYuNDc2Nkg5YS42MjUuNjI1LDAsMCwxLDAtMS4yNUgyOWEuNjI1LjYyNSwwLDAsMSwwLDEuMjVaIi8+PC9zdmc+
+    mediatype: image/svg+xml
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - sources.knative.dev
+          resources:
+          - kafkasources
+          - kafkasinks
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - events
+          - namespaces
+          - serviceaccounts
+          - services
+          - secrets
+          - endpoints
+          - pods
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          - deployments/finalizers
+          - statefulsets
+          - statefulsets/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - autoscaling
+          resources:
+          - horizontalpodautoscalers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+        - apiGroups:
+          - batch
+          resources:
+          - jobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - watch
+          - update
+        - apiGroups:
+          - policy
+          resources:
+          - poddisruptionbudgets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterroles
+          - roles
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - escalate
+          - bind
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterrolebindings
+          - rolebindings
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resources:
+          - mutatingwebhookconfigurations
+          - validatingwebhookconfigurations
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - apiextensions.k8s.io
+          resources:
+          - customresourcedefinitions
+          - customresourcedefinitions/status
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - caching.internal.knative.dev
+          resources:
+          - images
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - console.openshift.io
+          resources:
+          - consolequickstarts
+          - consoleclidownloads
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - clusteroperators
+          - clusteroperators/status
+          verbs:
+          - get
+          - watch
+          - list
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routes
+          - routes/custom-host
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - operator.knative.dev
+          resources:
+          - knativeservings
+          - knativeservings/status
+          - knativeservings/finalizers
+          - knativeeventings
+          - knativeeventings/status
+          - knativeeventings/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - patch
+        - apiGroups:
+          - operator.serverless.openshift.io
+          resources:
+          - knativekafkas
+          - knativekafkas/status
+          - knativekafkas/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - patch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - ingresses
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificates
+          - issuers
+          - clusterissuers
+          verbs:
+          - create
+          - delete
+          - update
+          - list
+          - get
+          - watch
+        serviceAccountName: knative-openshift
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - namespaces
+          - secrets
+          - serviceaccounts
+          - services
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - patch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          - deployments/finalizers
+          - statefulsets
+          - statefulsets/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - autoscaling
+          resources:
+          - horizontalpodautoscalers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+        - apiGroups:
+          - batch
+          resources:
+          - jobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - watch
+          - update
+        - apiGroups:
+          - policy
+          resources:
+          - poddisruptionbudgets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterroles
+          - roles
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - escalate
+          - bind
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterrolebindings
+          - rolebindings
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resources:
+          - mutatingwebhookconfigurations
+          - validatingwebhookconfigurations
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - apiextensions.k8s.io
+          resources:
+          - customresourcedefinitions
+          - customresourcedefinitions/status
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - caching.internal.knative.dev
+          resources:
+          - images
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - console.openshift.io
+          resources:
+          - consolequickstarts
+          - consoleclidownloads
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - clusteroperators
+          - clusteroperators/status
+          verbs:
+          - get
+          - watch
+          - list
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routes
+          - routes/custom-host
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - operator.knative.dev
+          resources:
+          - knativeservings
+          - knativeservings/status
+          - knativeservings/finalizers
+          - knativeeventings
+          - knativeeventings/status
+          - knativeeventings/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - patch
+        - apiGroups:
+          - operator.serverless.openshift.io
+          resources:
+          - knativekafkas
+          - knativekafkas/status
+          - knativekafkas/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+          - patch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - ingresses
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificates
+          - issuers
+          - clusterissuers
+          verbs:
+          - create
+          - delete
+          - update
+          - list
+          - get
+          - watch
+        - apiGroups:
+          - networking.internal.knative.dev
+          resources:
+          - certificates
+          verbs:
+          - create
+          - delete
+          - update
+          - get
+          - list
+          - watch
+        serviceAccountName: knative-operator
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - networking.internal.knative.dev
+          resources:
+          - ingresses
+          - ingresses/finalizers
+          verbs:
+          - get
+          - list
+          - watch
+          - patch
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routes
+          - routes/custom-host
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        serviceAccountName: knative-openshift-ingress
+      deployments:
+      - name: knative-operator-webhook
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              name: knative-operator
+              serverless.openshift.io/is: webhook
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                sidecar.istio.io/inject: "false"
+              creationTimestamp: null
+              labels:
+                name: knative-operator
+                serverless.openshift.io/is: webhook
+            spec:
+              containers:
+              - env:
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: OPERATOR_NAME
+                  value: knative-operator
+                - name: SYSTEM_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: METRICS_DOMAIN
+                  value: knative.dev/serving-operator
+                - name: REQUIRED_SERVING_NAMESPACE
+                  value: knative-serving
+                - name: REQUIRED_EVENTING_NAMESPACE
+                  value: knative-eventing
+                - name: SERVICE_MONITOR_RBAC_MANIFEST_PATH
+                  value: /var/run/ko/monitoring/rbac-proxy.yaml
+                - name: WEBHOOK_NAME
+                  value: knative-operator-service
+                - name: USE_OLM_TLS
+                  value: "true"
+                - name: KUBERNETES_MIN_VERSION
+                  value: v1.0.0
+                - name: IMAGE_queue-proxy
+                  value: registry.redhat.io/openshift-serverless-1/serving-queue-rhel8@sha256:629183a90335e9159284f641103234e79a49e48785c59f3c800f74acea2faa64
+                - name: IMAGE_activator
+                  value: registry.redhat.io/openshift-serverless-1/serving-activator-rhel8@sha256:22e62a4ac77f6fcefb041c5d7d5f2fd289a6c8ee06f3de98f6837ad0e876fadc
+                - name: IMAGE_autoscaler
+                  value: registry.redhat.io/openshift-serverless-1/serving-autoscaler-rhel8@sha256:74d578ddd1fb1b4a7b696ab2ba0dc59616fe7c730bc94cb2cdd93d6e53f15c69
+                - name: IMAGE_autoscaler-hpa
+                  value: registry.redhat.io/openshift-serverless-1/serving-autoscaler-hpa-rhel8@sha256:7b7a3107853e467128952012c8647e0dcf3c40a2c81aca3aec90478dc160aab9
+                - name: IMAGE_controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/serving-controller-rhel8@sha256:f5d69ffded16f5008c2f936a3eb03488ba554dc004aa0fc24995242251ac6d5b
+                - name: IMAGE_webhook__webhook
+                  value: registry.redhat.io/openshift-serverless-1/serving-webhook-rhel8@sha256:e2b0a4336567ca54f17d4ab48266cad9f0505b4b34a99e1ce39a57afb5d808be
+                - name: IMAGE_storage-version-migration-serving-__migrate
+                  value: registry.redhat.io/openshift-serverless-1/serving-storage-version-migration-rhel8@sha256:620794a4937ea20858cee3ea8566286575dfa8e03ca5a2972a70da22748be127
+                - name: IMAGE_kourier-gateway
+                  value: registry.redhat.io/openshift-service-mesh/proxyv2-rhel8@sha256:02b834fd74da71ec37f6a5c0d10aac9a679d1a0f4e510c4f77723ef2367e858a
+                - name: IMAGE_net-kourier-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/kourier-control-rhel8@sha256:737793adc6f8d570f0af45eed1fa9fa95afba68b6c3c3aa67f38892d9625452f
+                - name: IMAGE_net-istio-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/net-istio-controller-rhel8@sha256:062c9c6a15a1feb37ceec917d45901b5eb2368bf0368a151782677a2eea097be
+                - name: IMAGE_net-istio-webhook__webhook
+                  value: registry.redhat.io/openshift-serverless-1/net-istio-webhook-rhel8@sha256:d53d0d5bb4fb114fd46a0de22d26ff1eefd9579ad556079e8d65d483b8b94d5a
+                - name: IMAGE_eventing-controller__eventing-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-controller-rhel8@sha256:040cd6cd7f4de080515a5386a61b7ae4f0c5a035bdb6243e9769d0c561564ce6
+                - name: IMAGE_eventing-istio-controller__eventing-istio-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-istio-controller-rhel8@sha256:489bc48ea89de2ae891d12a5a2ff4a14fc737d9ab2039b4df5defbaf783a306b
+                - name: IMAGE_eventing-webhook__eventing-webhook
+                  value: registry.redhat.io/openshift-serverless-1/eventing-webhook-rhel8@sha256:37dc0c92be81c86eb25e05fca87ce906bcf928c4a90042182d146ac3593f3a73
+                - name: IMAGE_storage-version-migration-eventing-__migrate
+                  value: registry.redhat.io/openshift-serverless-1/eventing-storage-version-migration-rhel8@sha256:fbc93a6137779bc2b2f131765f2db66d3ad1aaab8cc420e2fb1390694b41411d
+                - name: IMAGE_mt-broker-controller__mt-broker-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtchannel-broker-rhel8@sha256:aedb5d2b060292006ebbfbe1108c93af3c652decc240e19a6415083ddb2e7979
+                - name: IMAGE_mt-broker-filter__filter
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-filter-rhel8@sha256:73bba4048d7185c5816d25be2bdcad1597dc9d2eb0e6714d8c3e58f4c77d0282
+                - name: IMAGE_mt-broker-ingress__ingress
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-ingress-rhel8@sha256:09f668747852d8ffe8fc7cca51c4e414a046b41b1e3d777466d143636148f55a
+                - name: IMAGE_imc-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-controller-rhel8@sha256:2b8b052aa9d5281e033220cecbe1e41198d3f81d38d8ad863363104a64af793a
+                - name: IMAGE_imc-dispatcher__dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+                - name: IMAGE_pingsource-mt-adapter__dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtping-rhel8@sha256:b9bf89156a42a950ad188739806c9499084426acc0e19373f5c3832b668730d6
+                - name: IMAGE_APISERVER_RA_IMAGE
+                  value: registry.redhat.io/openshift-serverless-1/eventing-apiserver-receive-adapter-rhel8@sha256:9da2f46278867e2d5e2e680f1f90c6bec46c283ef7bada24091bc6c42311f968
+                - name: IMAGE_DISPATCHER_IMAGE
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+                - name: IMAGE_eventmesh-backend__controller
+                  value: registry.redhat.io/openshift-serverless-1-tech-preview/backstage-plugins-eventmesh-rhel8@sha256:5e28ee6c57a52b7f144bca484216562585e1b593c20ed155009f35568ae44df7
+                - name: IMAGE_KUBE_RBAC_PROXY
+                  value: registry.redhat.io/openshift4/ose-kube-rbac-proxy@sha256:e34f912158985525f6efb3c4b675f20854fc677c867d12fe3cd2e971309428dc
+                - name: IMAGE_KN_PLUGIN_EVENT_SENDER
+                  value: registry.redhat.io/openshift-serverless-1-tech-preview/knative-client-plugin-event-sender-rhel8@sha256:615c1659509869b87d1e1944f2b7bde8683b99e5c6828f98dd1066ef2be2cf99
+                - name: IMAGE_KN_CLIENT
+                  value: registry.redhat.io/openshift-serverless-1/client-kn-rhel8@sha256:735a6918003f933af603363f6db7f3688cbb6224af838b1cb6f5fcca9e2c51f6
+                - name: IMAGE_KN_PLUGIN_FUNC_UTIL
+                  value: registry.redhat.io/openshift-serverless-1/func-utils-rhel8@sha256:7b11f01ff32f7f41899c60d162389f46efccc3ec955b0bce1d993c47fd627db7
+                - name: IMAGE_KN_PLUGIN_FUNC_TEKTON_S2I
+                  value: registry.redhat.io/source-to-image/source-to-image-rhel8@sha256:6a6025914296a62fdf2092c3a40011bd9b966a6806b094d51eec5e1bd5026ef4
+                - name: IMAGE_KN_PLUGIN_FUNC_TEKTON_BUILDAH
+                  value: registry.redhat.io/rhel8/buildah@sha256:3d505d9c0f5d4cd5a4ec03b8d038656c6cdbdf5191e00ce6388f7e0e4d2f1b74
+                - name: IMAGE_KN_PLUGIN_FUNC_NODEJS_20_MINIMAL
+                  value: registry.redhat.io/ubi8/nodejs-20-minimal@sha256:1a493f45b1621f3f9de81d0c41f2e614803d4b6fe5c3233d0467063d5baf165d
+                - name: IMAGE_KN_PLUGIN_FUNC_OPENJDK_21
+                  value: registry.redhat.io/ubi8/openjdk-21@sha256:e8e2b2525e1ba56ec2e2cc582a4fba7c95210cb2e073f6744172cf5d41ff309b
+                - name: IMAGE_KN_PLUGIN_FUNC_PYTHON_39
+                  value: registry.redhat.io/ubi8/python-39@sha256:59a97ad8ec36453d8f6503f41a06585536b000611827183309fdc4dbb8cf9c27
+                - name: CURRENT_VERSION
+                  value: 1.34.0
+                - name: KNATIVE_SERVING_VERSION
+                  value: "1.14"
+                - name: KNATIVE_EVENTING_VERSION
+                  value: "1.14"
+                - name: KNATIVE_EVENTING_KAFKA_BROKER_VERSION
+                  value: "1.14"
+                image: registry.redhat.io/openshift-serverless-1/serverless-rhel8-operator@sha256:61b971cbb4a6585c916e956a7a0f4096e49794188eea56cb09c2c89eebedd7df
+                imagePullPolicy: Always
+                name: knative-operator
+                ports:
+                - containerPort: 9090
+                  name: metrics
+                  protocol: TCP
+                - containerPort: 8443
+                  name: https-webhook
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    httpHeaders:
+                    - name: k-kubelet-probe
+                      value: webhook
+                    port: 8443
+                    scheme: HTTPS
+                  periodSeconds: 1
+                resources: {}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+              serviceAccountName: knative-operator
+      - name: knative-openshift
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              name: knative-openshift
+          strategy: {}
+          template:
+            metadata:
+              creationTimestamp: null
+              labels:
+                name: knative-openshift
+            spec:
+              containers:
+              - env:
+                - name: WATCH_NAMESPACE
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: DEPLOYMENT_NAME
+                  value: knative-openshift
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: OPERATOR_NAME
+                  value: knative-openshift
+                - name: REQUIRED_SERVING_NAMESPACE
+                  value: knative-serving
+                - name: REQUIRED_EVENTING_NAMESPACE
+                  value: knative-eventing
+                - name: REQUIRED_KAFKA_NAMESPACE
+                  value: knative-eventing
+                - name: KAFKACHANNEL_MANIFEST_PATH
+                  value: deploy/resources/knativekafka/channel
+                - name: KAFKASOURCE_MANIFEST_PATH
+                  value: deploy/resources/knativekafka/source
+                - name: KAFKACONTROLLER_MANIFEST_PATH
+                  value: deploy/resources/knativekafka/controller
+                - name: KAFKABROKER_MANIFEST_PATH
+                  value: deploy/resources/knativekafka/broker
+                - name: KAFKASINK_MANIFEST_PATH
+                  value: deploy/resources/knativekafka/sink
+                - name: QUICKSTART_MANIFEST_PATH
+                  value: deploy/resources/quickstart/serverless-application-quickstart.yaml
+                - name: DASHBOARDS_ROOT_MANIFEST_PATH
+                  value: deploy/resources/dashboards
+                - name: SOURCES_USE_CLUSTER_MONITORING
+                  value: "true"
+                - name: SOURCES_GENERATE_SERVICE_MONITORS
+                  value: "true"
+                - name: ENABLE_PPROF
+                  value: "false"
+                - name: KUBERNETES_MIN_VERSION
+                  value: v1.0.0
+                - name: IMAGE_queue-proxy
+                  value: registry.redhat.io/openshift-serverless-1/serving-queue-rhel8@sha256:629183a90335e9159284f641103234e79a49e48785c59f3c800f74acea2faa64
+                - name: IMAGE_activator
+                  value: registry.redhat.io/openshift-serverless-1/serving-activator-rhel8@sha256:22e62a4ac77f6fcefb041c5d7d5f2fd289a6c8ee06f3de98f6837ad0e876fadc
+                - name: IMAGE_autoscaler
+                  value: registry.redhat.io/openshift-serverless-1/serving-autoscaler-rhel8@sha256:74d578ddd1fb1b4a7b696ab2ba0dc59616fe7c730bc94cb2cdd93d6e53f15c69
+                - name: IMAGE_autoscaler-hpa
+                  value: registry.redhat.io/openshift-serverless-1/serving-autoscaler-hpa-rhel8@sha256:7b7a3107853e467128952012c8647e0dcf3c40a2c81aca3aec90478dc160aab9
+                - name: IMAGE_controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/serving-controller-rhel8@sha256:f5d69ffded16f5008c2f936a3eb03488ba554dc004aa0fc24995242251ac6d5b
+                - name: IMAGE_webhook__webhook
+                  value: registry.redhat.io/openshift-serverless-1/serving-webhook-rhel8@sha256:e2b0a4336567ca54f17d4ab48266cad9f0505b4b34a99e1ce39a57afb5d808be
+                - name: IMAGE_storage-version-migration-serving-__migrate
+                  value: registry.redhat.io/openshift-serverless-1/serving-storage-version-migration-rhel8@sha256:620794a4937ea20858cee3ea8566286575dfa8e03ca5a2972a70da22748be127
+                - name: IMAGE_kourier-gateway
+                  value: registry.redhat.io/openshift-service-mesh/proxyv2-rhel8@sha256:02b834fd74da71ec37f6a5c0d10aac9a679d1a0f4e510c4f77723ef2367e858a
+                - name: IMAGE_net-kourier-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/kourier-control-rhel8@sha256:737793adc6f8d570f0af45eed1fa9fa95afba68b6c3c3aa67f38892d9625452f
+                - name: IMAGE_net-istio-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/net-istio-controller-rhel8@sha256:062c9c6a15a1feb37ceec917d45901b5eb2368bf0368a151782677a2eea097be
+                - name: IMAGE_net-istio-webhook__webhook
+                  value: registry.redhat.io/openshift-serverless-1/net-istio-webhook-rhel8@sha256:d53d0d5bb4fb114fd46a0de22d26ff1eefd9579ad556079e8d65d483b8b94d5a
+                - name: IMAGE_eventing-controller__eventing-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-controller-rhel8@sha256:040cd6cd7f4de080515a5386a61b7ae4f0c5a035bdb6243e9769d0c561564ce6
+                - name: IMAGE_eventing-istio-controller__eventing-istio-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-istio-controller-rhel8@sha256:489bc48ea89de2ae891d12a5a2ff4a14fc737d9ab2039b4df5defbaf783a306b
+                - name: IMAGE_eventing-webhook__eventing-webhook
+                  value: registry.redhat.io/openshift-serverless-1/eventing-webhook-rhel8@sha256:37dc0c92be81c86eb25e05fca87ce906bcf928c4a90042182d146ac3593f3a73
+                - name: IMAGE_storage-version-migration-eventing-__migrate
+                  value: registry.redhat.io/openshift-serverless-1/eventing-storage-version-migration-rhel8@sha256:fbc93a6137779bc2b2f131765f2db66d3ad1aaab8cc420e2fb1390694b41411d
+                - name: IMAGE_mt-broker-controller__mt-broker-controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtchannel-broker-rhel8@sha256:aedb5d2b060292006ebbfbe1108c93af3c652decc240e19a6415083ddb2e7979
+                - name: IMAGE_mt-broker-filter__filter
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-filter-rhel8@sha256:73bba4048d7185c5816d25be2bdcad1597dc9d2eb0e6714d8c3e58f4c77d0282
+                - name: IMAGE_mt-broker-ingress__ingress
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-ingress-rhel8@sha256:09f668747852d8ffe8fc7cca51c4e414a046b41b1e3d777466d143636148f55a
+                - name: IMAGE_imc-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-controller-rhel8@sha256:2b8b052aa9d5281e033220cecbe1e41198d3f81d38d8ad863363104a64af793a
+                - name: IMAGE_imc-dispatcher__dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+                - name: IMAGE_pingsource-mt-adapter__dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-mtping-rhel8@sha256:b9bf89156a42a950ad188739806c9499084426acc0e19373f5c3832b668730d6
+                - name: IMAGE_APISERVER_RA_IMAGE
+                  value: registry.redhat.io/openshift-serverless-1/eventing-apiserver-receive-adapter-rhel8@sha256:9da2f46278867e2d5e2e680f1f90c6bec46c283ef7bada24091bc6c42311f968
+                - name: IMAGE_DISPATCHER_IMAGE
+                  value: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+                - name: IMAGE_eventmesh-backend__controller
+                  value: registry.redhat.io/openshift-serverless-1-tech-preview/backstage-plugins-eventmesh-rhel8@sha256:5e28ee6c57a52b7f144bca484216562585e1b593c20ed155009f35568ae44df7
+                - name: IMAGE_KUBE_RBAC_PROXY
+                  value: registry.redhat.io/openshift4/ose-kube-rbac-proxy@sha256:e34f912158985525f6efb3c4b675f20854fc677c867d12fe3cd2e971309428dc
+                - name: IMAGE_KN_PLUGIN_EVENT_SENDER
+                  value: registry.redhat.io/openshift-serverless-1-tech-preview/knative-client-plugin-event-sender-rhel8@sha256:615c1659509869b87d1e1944f2b7bde8683b99e5c6828f98dd1066ef2be2cf99
+                - name: IMAGE_KN_CLIENT
+                  value: registry.redhat.io/openshift-serverless-1/client-kn-rhel8@sha256:735a6918003f933af603363f6db7f3688cbb6224af838b1cb6f5fcca9e2c51f6
+                - name: IMAGE_KN_PLUGIN_FUNC_UTIL
+                  value: registry.redhat.io/openshift-serverless-1/func-utils-rhel8@sha256:7b11f01ff32f7f41899c60d162389f46efccc3ec955b0bce1d993c47fd627db7
+                - name: IMAGE_KN_PLUGIN_FUNC_TEKTON_S2I
+                  value: registry.redhat.io/source-to-image/source-to-image-rhel8@sha256:6a6025914296a62fdf2092c3a40011bd9b966a6806b094d51eec5e1bd5026ef4
+                - name: IMAGE_KN_PLUGIN_FUNC_TEKTON_BUILDAH
+                  value: registry.redhat.io/rhel8/buildah@sha256:3d505d9c0f5d4cd5a4ec03b8d038656c6cdbdf5191e00ce6388f7e0e4d2f1b74
+                - name: IMAGE_KN_PLUGIN_FUNC_NODEJS_20_MINIMAL
+                  value: registry.redhat.io/ubi8/nodejs-20-minimal@sha256:1a493f45b1621f3f9de81d0c41f2e614803d4b6fe5c3233d0467063d5baf165d
+                - name: IMAGE_KN_PLUGIN_FUNC_OPENJDK_21
+                  value: registry.redhat.io/ubi8/openjdk-21@sha256:e8e2b2525e1ba56ec2e2cc582a4fba7c95210cb2e073f6744172cf5d41ff309b
+                - name: IMAGE_KN_PLUGIN_FUNC_PYTHON_39
+                  value: registry.redhat.io/ubi8/python-39@sha256:59a97ad8ec36453d8f6503f41a06585536b000611827183309fdc4dbb8cf9c27
+                - name: KAFKA_IMAGE_kafka-broker-receiver__kafka-broker-receiver
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+                - name: KAFKA_IMAGE_kafka-broker-dispatcher__kafka-broker-dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+                - name: KAFKA_IMAGE_kafka-channel-receiver__kafka-channel-receiver
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+                - name: KAFKA_IMAGE_kafka-channel-dispatcher__kafka-channel-dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+                - name: KAFKA_IMAGE_kafka-controller__controller
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-controller-rhel8@sha256:cd6f6210695039f6695668e8fbe9348d934d53d047f81f80aa2cd68da1d565cc
+                - name: KAFKA_IMAGE_kafka-sink-receiver__kafka-sink-receiver
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+                - name: KAFKA_IMAGE_kafka-source-dispatcher__kafka-source-dispatcher
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+                - name: KAFKA_IMAGE_kafka-webhook-eventing__kafka-webhook-eventing
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-webhook-rhel8@sha256:21b9a2e671cdc5c6d694b918d7fe794c0a91fa6487316240231b90827183a2ef
+                - name: KAFKA_IMAGE_kafka-controller-post-install__post-install
+                  value: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-post-install-rhel8@sha256:3bc7b79bfd0de429d111bbbbbf3f848b9469694ae2ad33d180a11dc12e875d67
+                - name: KAFKA_IMAGE_knative-kafka-storage-version-migrator__migrate
+                  value: registry.redhat.io/openshift-serverless-1/eventing-storage-version-migration-rhel8@sha256:fbc93a6137779bc2b2f131765f2db66d3ad1aaab8cc420e2fb1390694b41411d
+                - name: CURRENT_VERSION
+                  value: 1.34.0
+                - name: KNATIVE_SERVING_VERSION
+                  value: "1.14"
+                - name: KNATIVE_EVENTING_VERSION
+                  value: "1.14"
+                - name: KNATIVE_EVENTING_KAFKA_BROKER_VERSION
+                  value: "1.14"
+                image: registry.redhat.io/openshift-serverless-1/knative-rhel8-operator@sha256:8dcdc36aeb7c0c246095d32d7e1606a5219985278d25dcf29ee5f01dedd778aa
+                imagePullPolicy: Always
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8687
+                name: knative-openshift
+                ports:
+                - containerPort: 8080
+                  name: http-cli
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8687
+                resources: {}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+                volumeMounts:
+                - mountPath: /cli-artifacts
+                  name: cli-artifacts
+              initContainers:
+              - command:
+                - sh
+                - -c
+                - rm -rf /cli-artifacts/* && cp /usr/share/kn/**/* /cli-artifacts
+                  && chmod 444 /cli-artifacts/*
+                image: registry.redhat.io/openshift-serverless-1/kn-cli-artifacts-rhel8@sha256:7e36c484e5c005e291467bcdfbff2791ee6b4f52570b740035c453a67b957407
+                imagePullPolicy: Always
+                name: cli-artifacts
+                resources: {}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                  runAsNonRoot: true
+                volumeMounts:
+                - mountPath: /cli-artifacts
+                  name: cli-artifacts
+              serviceAccountName: knative-openshift
+              volumes:
+              - emptyDir: {}
+                name: cli-artifacts
+      - name: knative-openshift-ingress
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              name: knative-openshift-ingress
+          strategy: {}
+          template:
+            metadata:
+              creationTimestamp: null
+              labels:
+                name: knative-openshift-ingress
+            spec:
+              containers:
+              - env:
+                - name: METRICS_DOMAIN
+                  value: knative.dev/serving
+                - name: WATCH_NAMESPACE
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: OPERATOR_NAME
+                  value: knative-openshift-ingress
+                - name: SYSTEM_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: KUBERNETES_MIN_VERSION
+                  value: v1.0.0
+                image: registry.redhat.io/openshift-serverless-1/ingress-rhel8-operator@sha256:6c800066d3df98229ced683ff86e6ba66e73a01a2f32b1956952f3bffe556978
+                imagePullPolicy: Always
+                name: knative-openshift-ingress
+                ports:
+                - containerPort: 9090
+                  name: metrics
+                  protocol: TCP
+                resources: {}
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+              serviceAccountName: knative-openshift-ingress
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - serverless
+  - FaaS
+  - microservices
+  - scale to zero
+  - knative
+  - serving
+  - eventing
+  - kafka
+  links:
+  - name: Documentation
+    url: https://access.redhat.com/documentation/en-us/openshift_container_platform/4.15/html/serverless/index
+  - name: Source Repository
+    url: https://github.com/openshift-knative/serverless-operator
+  maintainers:
+  - email: support@redhat.com
+    name: Serverless Team
+  maturity: stable
+  minKubeVersion: 1.25.0
+  provider:
+    name: Red Hat
+  relatedImages:
+  - image: registry.redhat.io/openshift-serverless-1/serverless-rhel8-operator@sha256:61b971cbb4a6585c916e956a7a0f4096e49794188eea56cb09c2c89eebedd7df
+    name: knative-operator
+  - image: registry.redhat.io/openshift-serverless-1/knative-rhel8-operator@sha256:8dcdc36aeb7c0c246095d32d7e1606a5219985278d25dcf29ee5f01dedd778aa
+    name: knative-openshift
+  - image: registry.redhat.io/openshift-serverless-1/ingress-rhel8-operator@sha256:6c800066d3df98229ced683ff86e6ba66e73a01a2f32b1956952f3bffe556978
+    name: knative-openshift-ingress
+  - image: registry.redhat.io/openshift-serverless-1/serving-queue-rhel8@sha256:629183a90335e9159284f641103234e79a49e48785c59f3c800f74acea2faa64
+    name: IMAGE_queue-proxy
+  - image: registry.redhat.io/openshift-serverless-1/serving-activator-rhel8@sha256:22e62a4ac77f6fcefb041c5d7d5f2fd289a6c8ee06f3de98f6837ad0e876fadc
+    name: IMAGE_activator
+  - image: registry.redhat.io/openshift-serverless-1/serving-autoscaler-rhel8@sha256:74d578ddd1fb1b4a7b696ab2ba0dc59616fe7c730bc94cb2cdd93d6e53f15c69
+    name: IMAGE_autoscaler
+  - image: registry.redhat.io/openshift-serverless-1/serving-autoscaler-hpa-rhel8@sha256:7b7a3107853e467128952012c8647e0dcf3c40a2c81aca3aec90478dc160aab9
+    name: IMAGE_autoscaler-hpa
+  - image: registry.redhat.io/openshift-serverless-1/serving-controller-rhel8@sha256:f5d69ffded16f5008c2f936a3eb03488ba554dc004aa0fc24995242251ac6d5b
+    name: IMAGE_controller__controller
+  - image: registry.redhat.io/openshift-serverless-1/serving-webhook-rhel8@sha256:e2b0a4336567ca54f17d4ab48266cad9f0505b4b34a99e1ce39a57afb5d808be
+    name: IMAGE_webhook__webhook
+  - image: registry.redhat.io/openshift-serverless-1/serving-storage-version-migration-rhel8@sha256:620794a4937ea20858cee3ea8566286575dfa8e03ca5a2972a70da22748be127
+    name: IMAGE_storage-version-migration-serving-__migrate
+  - image: registry.redhat.io/openshift-service-mesh/proxyv2-rhel8@sha256:02b834fd74da71ec37f6a5c0d10aac9a679d1a0f4e510c4f77723ef2367e858a
+    name: IMAGE_kourier-gateway
+  - image: registry.redhat.io/openshift-serverless-1/kourier-control-rhel8@sha256:737793adc6f8d570f0af45eed1fa9fa95afba68b6c3c3aa67f38892d9625452f
+    name: IMAGE_net-kourier-controller__controller
+  - image: registry.redhat.io/openshift-serverless-1/net-istio-controller-rhel8@sha256:062c9c6a15a1feb37ceec917d45901b5eb2368bf0368a151782677a2eea097be
+    name: IMAGE_net-istio-controller__controller
+  - image: registry.redhat.io/openshift-serverless-1/net-istio-webhook-rhel8@sha256:d53d0d5bb4fb114fd46a0de22d26ff1eefd9579ad556079e8d65d483b8b94d5a
+    name: IMAGE_net-istio-webhook__webhook
+  - image: registry.redhat.io/openshift-serverless-1/eventing-controller-rhel8@sha256:040cd6cd7f4de080515a5386a61b7ae4f0c5a035bdb6243e9769d0c561564ce6
+    name: IMAGE_eventing-controller__eventing-controller
+  - image: registry.redhat.io/openshift-serverless-1/eventing-istio-controller-rhel8@sha256:489bc48ea89de2ae891d12a5a2ff4a14fc737d9ab2039b4df5defbaf783a306b
+    name: IMAGE_eventing-istio-controller__eventing-istio-controller
+  - image: registry.redhat.io/openshift-serverless-1/eventing-webhook-rhel8@sha256:37dc0c92be81c86eb25e05fca87ce906bcf928c4a90042182d146ac3593f3a73
+    name: IMAGE_eventing-webhook__eventing-webhook
+  - image: registry.redhat.io/openshift-serverless-1/eventing-storage-version-migration-rhel8@sha256:fbc93a6137779bc2b2f131765f2db66d3ad1aaab8cc420e2fb1390694b41411d
+    name: IMAGE_storage-version-migration-eventing-__migrate
+  - image: registry.redhat.io/openshift-serverless-1/eventing-mtchannel-broker-rhel8@sha256:aedb5d2b060292006ebbfbe1108c93af3c652decc240e19a6415083ddb2e7979
+    name: IMAGE_mt-broker-controller__mt-broker-controller
+  - image: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-filter-rhel8@sha256:73bba4048d7185c5816d25be2bdcad1597dc9d2eb0e6714d8c3e58f4c77d0282
+    name: IMAGE_mt-broker-filter__filter
+  - image: registry.redhat.io/openshift-serverless-1/eventing-mtbroker-ingress-rhel8@sha256:09f668747852d8ffe8fc7cca51c4e414a046b41b1e3d777466d143636148f55a
+    name: IMAGE_mt-broker-ingress__ingress
+  - image: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-controller-rhel8@sha256:2b8b052aa9d5281e033220cecbe1e41198d3f81d38d8ad863363104a64af793a
+    name: IMAGE_imc-controller__controller
+  - image: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+    name: IMAGE_imc-dispatcher__dispatcher
+  - image: registry.redhat.io/openshift-serverless-1/eventing-mtping-rhel8@sha256:b9bf89156a42a950ad188739806c9499084426acc0e19373f5c3832b668730d6
+    name: IMAGE_pingsource-mt-adapter__dispatcher
+  - image: registry.redhat.io/openshift-serverless-1/eventing-apiserver-receive-adapter-rhel8@sha256:9da2f46278867e2d5e2e680f1f90c6bec46c283ef7bada24091bc6c42311f968
+    name: IMAGE_APISERVER_RA_IMAGE
+  - image: registry.redhat.io/openshift-serverless-1/eventing-in-memory-channel-dispatcher-rhel8@sha256:1203cf6bcb136aa1c9d2ef8fdae9c24f055df4b60fc96ab512712108d076100c
+    name: IMAGE_DISPATCHER_IMAGE
+  - image: registry.redhat.io/openshift-serverless-1-tech-preview/backstage-plugins-eventmesh-rhel8@sha256:5e28ee6c57a52b7f144bca484216562585e1b593c20ed155009f35568ae44df7
+    name: IMAGE_eventmesh-backend__controller
+  - image: registry.redhat.io/openshift4/ose-kube-rbac-proxy@sha256:e34f912158985525f6efb3c4b675f20854fc677c867d12fe3cd2e971309428dc
+    name: IMAGE_KUBE_RBAC_PROXY
+  - image: registry.redhat.io/openshift-serverless-1-tech-preview/knative-client-plugin-event-sender-rhel8@sha256:615c1659509869b87d1e1944f2b7bde8683b99e5c6828f98dd1066ef2be2cf99
+    name: IMAGE_KN_PLUGIN_EVENT_SENDER
+  - image: registry.redhat.io/openshift-serverless-1/client-kn-rhel8@sha256:735a6918003f933af603363f6db7f3688cbb6224af838b1cb6f5fcca9e2c51f6
+    name: IMAGE_KN_CLIENT
+  - image: registry.redhat.io/openshift-serverless-1/func-utils-rhel8@sha256:7b11f01ff32f7f41899c60d162389f46efccc3ec955b0bce1d993c47fd627db7
+    name: IMAGE_KN_PLUGIN_FUNC_UTIL
+  - image: registry.redhat.io/source-to-image/source-to-image-rhel8@sha256:6a6025914296a62fdf2092c3a40011bd9b966a6806b094d51eec5e1bd5026ef4
+    name: IMAGE_KN_PLUGIN_FUNC_TEKTON_S2I
+  - image: registry.redhat.io/rhel8/buildah@sha256:3d505d9c0f5d4cd5a4ec03b8d038656c6cdbdf5191e00ce6388f7e0e4d2f1b74
+    name: IMAGE_KN_PLUGIN_FUNC_TEKTON_BUILDAH
+  - image: registry.redhat.io/ubi8/nodejs-20-minimal@sha256:1a493f45b1621f3f9de81d0c41f2e614803d4b6fe5c3233d0467063d5baf165d
+    name: IMAGE_KN_PLUGIN_FUNC_NODEJS_20_MINIMAL
+  - image: registry.redhat.io/ubi8/openjdk-21@sha256:e8e2b2525e1ba56ec2e2cc582a4fba7c95210cb2e073f6744172cf5d41ff309b
+    name: IMAGE_KN_PLUGIN_FUNC_OPENJDK_21
+  - image: registry.redhat.io/ubi8/python-39@sha256:59a97ad8ec36453d8f6503f41a06585536b000611827183309fdc4dbb8cf9c27
+    name: IMAGE_KN_PLUGIN_FUNC_PYTHON_39
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+    name: KAFKA_IMAGE_kafka-broker-receiver__kafka-broker-receiver
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+    name: KAFKA_IMAGE_kafka-broker-dispatcher__kafka-broker-dispatcher
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+    name: KAFKA_IMAGE_kafka-channel-receiver__kafka-channel-receiver
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+    name: KAFKA_IMAGE_kafka-channel-dispatcher__kafka-channel-dispatcher
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-controller-rhel8@sha256:cd6f6210695039f6695668e8fbe9348d934d53d047f81f80aa2cd68da1d565cc
+    name: KAFKA_IMAGE_kafka-controller__controller
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-receiver-rhel8@sha256:f469fc6f82e9ed233481180da108d0b1ef480ac165d4ffce5e9402d8aa080ab8
+    name: KAFKA_IMAGE_kafka-sink-receiver__kafka-sink-receiver
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-dispatcher-rhel8@sha256:e629f016372a1549ed03e3f448c170fe8bd7aeeab9cacdaf7bf0b20c59e296d0
+    name: KAFKA_IMAGE_kafka-source-dispatcher__kafka-source-dispatcher
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-webhook-rhel8@sha256:21b9a2e671cdc5c6d694b918d7fe794c0a91fa6487316240231b90827183a2ef
+    name: KAFKA_IMAGE_kafka-webhook-eventing__kafka-webhook-eventing
+  - image: registry.redhat.io/openshift-serverless-1/eventing-kafka-broker-post-install-rhel8@sha256:3bc7b79bfd0de429d111bbbbbf3f848b9469694ae2ad33d180a11dc12e875d67
+    name: KAFKA_IMAGE_kafka-controller-post-install__post-install
+  - image: registry.redhat.io/openshift-serverless-1/eventing-storage-version-migration-rhel8@sha256:fbc93a6137779bc2b2f131765f2db66d3ad1aaab8cc420e2fb1390694b41411d
+    name: KAFKA_IMAGE_knative-kafka-storage-version-migrator__migrate
+  - image: registry.redhat.io/openshift-serverless-1/svls-must-gather-rhel8@sha256:c7ea3d26e4220fcfde67b840b1cdb135bd9774ff84eb2e4673de81c9f3696d11
+    name: IMAGE_MUST_GATHER
+  replaces: serverless-operator.v1.33.2
+  version: 1.34.0
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 9876
+    deploymentName: knative-openshift
+    failurePolicy: Ignore
+    generateName: validating.knativeeventings.operator.serverless.openshift.io
+    rules:
+    - apiGroups:
+      - operator.knative.dev
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - knativeeventings
+    sideEffects: None
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-knativeeventings
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 9876
+    deploymentName: knative-openshift
+    failurePolicy: Ignore
+    generateName: validating.knativeservings.operator.serverless.openshift.io
+    rules:
+    - apiGroups:
+      - operator.knative.dev
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - knativeservings
+    sideEffects: None
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-knativeservings
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 9876
+    deploymentName: knative-openshift
+    failurePolicy: Ignore
+    generateName: validating.knativekafkas.operator.serverless.openshift.io
+    rules:
+    - apiGroups:
+      - operator.serverless.openshift.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - knativekafkas
+    sideEffects: None
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-knativekafkas
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 9876
+    deploymentName: knative-openshift
+    failurePolicy: Ignore
+    generateName: mutating.knativeeventings.operator.serverless.openshift.io
+    rules:
+    - apiGroups:
+      - operator.knative.dev
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - knativeeventings
+    sideEffects: None
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-knativeeventings
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 9876
+    deploymentName: knative-openshift
+    failurePolicy: Ignore
+    generateName: mutating.knativeservings.operator.serverless.openshift.io
+    rules:
+    - apiGroups:
+      - operator.knative.dev
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - knativeservings
+    sideEffects: None
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-knativeservings
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 8443
+    conversionCRDs:
+    - knativeservings.operator.knative.dev
+    deploymentName: knative-operator-webhook
+    generateName: conversion.knativeservings.operator.knative.dev
+    sideEffects: None
+    targetPort: 8443
+    type: ConversionWebhook
+    webhookPath: /resource-conversion
+  - admissionReviewVersions:
+    - v1beta1
+    containerPort: 8443
+    conversionCRDs:
+    - knativeeventings.operator.knative.dev
+    deploymentName: knative-operator-webhook
+    generateName: conversion.knativeeventings.operator.knative.dev
+    sideEffects: None
+    targetPort: 8443
+    type: ConversionWebhook
+    webhookPath: /resource-conversion
+status:
+  certsLastUpdated: "2024-10-16T16:05:05Z"
+  certsRotateAt: "2026-10-15T16:05:00Z"
+  cleanup: {}
+  conditions:
+  - lastTransitionTime: "2024-10-20T14:23:58Z"
+    lastUpdateTime: "2024-10-20T14:24:09Z"
+    message: 'installing: waiting for deployment knative-operator-webhook to become
+      ready: waiting for spec update of deployment "knative-operator-webhook" to be
+      observed...'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T14:25:11Z"
+    lastUpdateTime: "2024-10-20T14:25:11Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:05:12Z"
+    lastUpdateTime: "2024-10-20T17:05:12Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:05:14Z"
+    lastUpdateTime: "2024-10-20T17:05:14Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:05:15Z"
+    lastUpdateTime: "2024-10-20T17:05:15Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:05:17Z"
+    lastUpdateTime: "2024-10-20T17:05:17Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:05:17Z"
+    lastUpdateTime: "2024-10-20T17:05:30Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:05:31Z"
+    lastUpdateTime: "2024-10-20T17:05:31Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:16:31Z"
+    lastUpdateTime: "2024-10-20T17:16:31Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:16:33Z"
+    lastUpdateTime: "2024-10-20T17:16:33Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:16:34Z"
+    lastUpdateTime: "2024-10-20T17:16:34Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:16:36Z"
+    lastUpdateTime: "2024-10-20T17:16:36Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:16:36Z"
+    lastUpdateTime: "2024-10-20T17:16:40Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:17:26Z"
+    lastUpdateTime: "2024-10-20T17:17:26Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:25:59Z"
+    lastUpdateTime: "2024-10-20T17:25:59Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:26:05Z"
+    lastUpdateTime: "2024-10-20T17:26:05Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:26:06Z"
+    lastUpdateTime: "2024-10-20T17:26:06Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:26:07Z"
+    lastUpdateTime: "2024-10-20T17:26:07Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:26:07Z"
+    lastUpdateTime: "2024-10-20T17:26:11Z"
+    message: 'installing: waiting for deployment knative-openshift to become ready:
+      deployment "knative-openshift" not available: Deployment does not have minimum
+      availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:27:25Z"
+    lastUpdateTime: "2024-10-20T17:27:25Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  lastTransitionTime: "2024-10-20T17:27:25Z"
+  lastUpdateTime: "2024-10-20T17:27:25Z"
+  message: The operator is running in openshift-serverless but is managing this namespace
+  phase: Succeeded
+  reason: Copied
+  requirementStatus:
+  - group: operators.coreos.com
+    kind: ClusterServiceVersion
+    message: CSV minKubeVersion (1.25.0) less than server version (v1.29.7+6abe8a1)
+    name: serverless-operator.v1.34.0
+    status: Present
+    version: v1alpha1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: knativeeventings.operator.knative.dev
+    status: Present
+    uuid: ad904838-0aea-40c7-bbcb-5077d7986d4c
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: knativekafkas.operator.serverless.openshift.io
+    status: Present
+    uuid: 6fd2df1d-f875-4fa7-850c-6f0b7fad113b
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: knativeservings.operator.knative.dev
+    status: Present
+    uuid: 710aa17f-0d17-4556-8656-12696e0be2f4
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["sources.knative.dev"],"resources":["kafkasources","kafkasinks"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":[""],"resources":["configmaps","events","namespaces","serviceaccounts","services","secrets","endpoints","pods"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["apps"],"resources":["deployments","deployments/finalizers","statefulsets","statefulsets/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list"],"apiGroups":["autoscaling"],"resources":["horizontalpodautoscalers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","watch","update"],"apiGroups":["batch"],"resources":["jobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update"],"apiGroups":["policy"],"resources":["poddisruptionbudgets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","escalate","bind"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterroles","roles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterrolebindings","rolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["admissionregistration.k8s.io"],"resources":["mutatingwebhookconfigurations","validatingwebhookconfigurations"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["networking.k8s.io"],"resources":["networkpolicies"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["apiextensions.k8s.io"],"resources":["customresourcedefinitions","customresourcedefinitions/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update"],"apiGroups":["caching.internal.knative.dev"],"resources":["images"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["monitoring.coreos.com"],"resources":["servicemonitors"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["console.openshift.io"],"resources":["consolequickstarts","consoleclidownloads"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","watch","list"],"apiGroups":["config.openshift.io"],"resources":["clusteroperators","clusteroperators/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["route.openshift.io"],"resources":["routes","routes/custom-host"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["coordination.k8s.io"],"resources":["leases"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","patch"],"apiGroups":["operator.knative.dev"],"resources":["knativeservings","knativeservings/status","knativeservings/finalizers","knativeeventings","knativeeventings/status","knativeeventings/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","patch"],"apiGroups":["operator.serverless.openshift.io"],"resources":["knativekafkas","knativekafkas/status","knativekafkas/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["config.openshift.io"],"resources":["ingresses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","update","list","get","watch"],"apiGroups":["cert-manager.io"],"resources":["certificates","issuers","clusterissuers"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: knative-openshift
+    status: Present
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":[""],"resources":["configmaps","namespaces","secrets","serviceaccounts","services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","patch"],"apiGroups":[""],"resources":["events"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["apps"],"resources":["deployments","deployments/finalizers","statefulsets","statefulsets/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update"],"apiGroups":["autoscaling"],"resources":["horizontalpodautoscalers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","watch","update"],"apiGroups":["batch"],"resources":["jobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update"],"apiGroups":["policy"],"resources":["poddisruptionbudgets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","escalate","bind"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterroles","roles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterrolebindings","rolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["admissionregistration.k8s.io"],"resources":["mutatingwebhookconfigurations","validatingwebhookconfigurations"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["networking.k8s.io"],"resources":["networkpolicies"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["apiextensions.k8s.io"],"resources":["customresourcedefinitions","customresourcedefinitions/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update"],"apiGroups":["caching.internal.knative.dev"],"resources":["images"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["monitoring.coreos.com"],"resources":["servicemonitors"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["console.openshift.io"],"resources":["consolequickstarts","consoleclidownloads"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","watch","list"],"apiGroups":["config.openshift.io"],"resources":["clusteroperators","clusteroperators/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["route.openshift.io"],"resources":["routes","routes/custom-host"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["coordination.k8s.io"],"resources":["leases"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","patch"],"apiGroups":["operator.knative.dev"],"resources":["knativeservings","knativeservings/status","knativeservings/finalizers","knativeeventings","knativeeventings/status","knativeeventings/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch","patch"],"apiGroups":["operator.serverless.openshift.io"],"resources":["knativekafkas","knativekafkas/status","knativekafkas/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["config.openshift.io"],"resources":["ingresses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","update","list","get","watch"],"apiGroups":["cert-manager.io"],"resources":["certificates","issuers","clusterissuers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","update","get","list","watch"],"apiGroups":["networking.internal.knative.dev"],"resources":["certificates"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: knative-operator
+    status: Present
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list"],"apiGroups":[""],"resources":["events"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":[""],"resources":["configmaps"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch","patch"],"apiGroups":["networking.internal.knative.dev"],"resources":["ingresses","ingresses/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":["route.openshift.io"],"resources":["routes","routes/custom-host"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: knative-openshift-ingress
+    status: Present
+    version: v1

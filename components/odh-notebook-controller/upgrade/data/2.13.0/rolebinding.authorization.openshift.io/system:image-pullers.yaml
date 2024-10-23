@@ -1,0 +1,19 @@
+apiVersion: authorization.openshift.io/v1
+groupNames:
+- system:serviceaccounts:developer
+kind: RoleBinding
+metadata:
+  annotations:
+    openshift.io/description: Allows all pods in this namespace to pull images from
+      this namespace.  It is auto-managed by a controller; remove subjects to disable.
+  creationTimestamp: "2024-10-20T16:52:10Z"
+  name: system:image-pullers
+  namespace: developer
+  resourceVersion: "7162305"
+  uid: cae89996-d123-4e00-86c8-2b7c228bf457
+roleRef:
+  name: system:image-puller
+subjects:
+- kind: SystemGroup
+  name: system:serviceaccounts:developer
+userNames: null

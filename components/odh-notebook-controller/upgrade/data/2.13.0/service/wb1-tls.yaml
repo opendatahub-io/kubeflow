@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.alpha.openshift.io/serving-cert-signed-by: openshift-service-serving-signer@1724047309
+    service.beta.openshift.io/serving-cert-secret-name: wb1-tls
+    service.beta.openshift.io/serving-cert-signed-by: openshift-service-serving-signer@1724047309
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  labels:
+    notebook-name: wb1
+  name: wb1-tls
+  namespace: developer
+  ownerReferences:
+  - apiVersion: kubeflow.org/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Notebook
+    name: wb1
+    uid: a6f0f961-5aaf-4146-b4de-132fba4479dd
+  resourceVersion: "7173748"
+  uid: df4c104b-8efa-4d56-bc39-0bb80551cea4
+spec:
+  clusterIP: 10.217.5.3
+  clusterIPs:
+  - 10.217.5.3
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: oauth-proxy
+    port: 443
+    protocol: TCP
+    targetPort: oauth-proxy
+  selector:
+    statefulset: wb1
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

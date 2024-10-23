@@ -1,0 +1,16 @@
+apiVersion: authorization.openshift.io/v1
+groupNames: null
+kind: RoleBinding
+metadata:
+  creationTimestamp: "2024-10-20T16:52:09Z"
+  name: admin
+  namespace: developer
+  resourceVersion: "7162260"
+  uid: a94bf7e6-1c82-4fef-b9c7-c3dc23b0de42
+roleRef:
+  name: admin
+subjects:
+- kind: User
+  name: developer
+userNames:
+- developer

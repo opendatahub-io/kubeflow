@@ -1,0 +1,44 @@
+apiVersion: v1
+data:
+  service-ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIDUTCCAjmgAwIBAgIIRQ/ytaUhXzgwDQYJKoZIhvcNAQELBQAwNjE0MDIGA1UE
+    Awwrb3BlbnNoaWZ0LXNlcnZpY2Utc2VydmluZy1zaWduZXJAMTcyNDA0NzMwOTAe
+    Fw0yNDA4MTkwNjAxNDhaFw0yNjEwMTgwNjAxNDlaMDYxNDAyBgNVBAMMK29wZW5z
+    aGlmdC1zZXJ2aWNlLXNlcnZpbmctc2lnbmVyQDE3MjQwNDczMDkwggEiMA0GCSqG
+    SIb3DQEBAQUAA4IBDwAwggEKAoIBAQDcXi2cpZuzNXxbzJwmut+kCKMvPO2GT9DW
+    eqHYBElDgjlnYD2xuMm9ywXqudfrZrA7pPQqfpOVfTkJ4VDKxAjDt81FOlRiDBfa
+    kjXjkz81l/mIpHetP5rgmI8gesJCmnUTesEOBCwgZUDRVEzT5o3IfuhSIXEnGZXy
+    QfAkKpuK3GAxjaVHlpqv4Qm4SyL/y0b7isjSDkLpZGZZqF0lLK96IKMZeq/Q15dI
+    v9qo+XWsXDZS6rKUIbaEvLT0qgLb/Y+qtpEZQ6yW9UvSfByysP7kThUh8kfXnm8G
+    WbDwH7zJ+/UVAKmbNnjeZXvEwJ8YxJXOIB7P3Gh13lEYyfutUtMVAgMBAAGjYzBh
+    MA4GA1UdDwEB/wQEAwICpDAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTv88F4
+    P8fq60mSIEfV3ZNyVPMTxDAfBgNVHSMEGDAWgBTv88F4P8fq60mSIEfV3ZNyVPMT
+    xDANBgkqhkiG9w0BAQsFAAOCAQEAy8lLWxmQX1kBmsYgf4+oVDHYmjJ3sUPngfEX
+    xoxnRBbJbEql1LrAN3AhGIwwlD6SAWLRh7PRWjvZcG07gW84FhhB42GfJRu7cPXk
+    UXu0vRu21kvfzEFx10ZW9VloyQCvXkpZcAIg0PZXl+6+2AB0U5k0K9IMFw2oSHJ+
+    U7YwsIIypkBXoLUnZzhFWsa5QnTyBzpQNfQg1uNpMhnBIreGW2Y1BGzyRJonTB4k
+    iHXVLJ1Kl1svIFZKz3c0Id0y7/GlizemYmumkM7Y9GTzLBHB/C4YqF0511/OF3LM
+    4V7fPuohVeo1QFvhbj7U3Qw4oMZ2xXgkeJNDwYJstxUzv2+3Iw==
+    -----END CERTIFICATE-----
+kind: ConfigMap
+metadata:
+  annotations:
+    openshift.io/description: Configmap is added/updated with a data item containing
+      the CA signing bundle that can be used to verify service-serving certificates
+    openshift.io/owning-component: service-ca
+    service.beta.openshift.io/inject-cabundle: "true"
+  creationTimestamp: "2024-10-20T16:52:10Z"
+  labels:
+    app.kubernetes.io/part-of: tekton-pipelines
+  name: config-service-cabundle
+  namespace: developer
+  ownerReferences:
+  - apiVersion: operator.tekton.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TektonInstallerSet
+    name: rhosp-rbac-nzqjk
+    uid: 09fc39d1-9bd7-457d-935d-da3df00df309
+  resourceVersion: "7162322"
+  uid: af2099e9-f654-40a7-a0dc-edc60df5742b

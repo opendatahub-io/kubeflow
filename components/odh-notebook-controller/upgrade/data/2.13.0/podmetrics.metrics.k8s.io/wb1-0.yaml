@@ -1,0 +1,28 @@
+apiVersion: metrics.k8s.io/v1beta1
+containers:
+- name: wb1
+  usage:
+    cpu: 2176593n
+    memory: 75660Ki
+- name: oauth-proxy
+  usage:
+    cpu: 4276338n
+    memory: 19316Ki
+kind: PodMetrics
+metadata:
+  creationTimestamp: "2024-10-20T17:38:14Z"
+  labels:
+    app: wb1
+    apps.kubernetes.io/pod-index: "0"
+    controller-revision-hash: wb1-7d5498444b
+    notebook-name: wb1
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/odh-managed: "true"
+    opendatahub.io/user: developer
+    opendatahub.io/workbenches: "true"
+    statefulset: wb1
+    statefulset.kubernetes.io/pod-name: wb1-0
+  name: wb1-0
+  namespace: developer
+timestamp: "2024-10-20T17:37:56Z"
+window: 13.364s
