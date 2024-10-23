@@ -42,6 +42,7 @@ require (
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kubeflow/kubeflow/components/common v0.0.0-20220218084159-4ad0158e955e // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -78,3 +79,5 @@ require (
 )
 
 replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
+
+replace github.com/kubeflow/kubeflow/components/notebook-controller => ../notebook-controller
