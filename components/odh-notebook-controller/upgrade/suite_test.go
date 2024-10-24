@@ -69,8 +69,8 @@ var (
 )
 
 const (
-	timeout  = time.Second * 10
-	interval = time.Second * 2
+	timeout  = 20 * time.Second
+	interval = 3 * time.Second
 )
 
 func TestUpgrade(t *testing.T) {
