@@ -40,6 +40,7 @@ var _ = It("Upgrade from RHOAI 2.13", func() {
 
 	By("deploying the dumped 2.13 YAMLs", func() {
 		dyn, err := dynamic.NewForConfig(cfg)
+		Expect(err).To(Succeed())
 
 		// prepare a RESTMapper to find GVRs
 		dc, err := discovery.NewDiscoveryClientForConfig(cfg)
@@ -242,10 +243,7 @@ func applyYamlDirectory(dyn *dynamic.DynamicClient, mapper *restmapper.DeferredD
 		obj.SetUID(created.GetUID())
 		obj.SetResourceVersion(created.GetResourceVersion())
 		_, err = dyn.Resource(mapping.Resource).Namespace("developer").UpdateStatus(context.TODO(), obj, metav1.UpdateOptions{})
-		//if err != nil {
-		//	panic(err)
-		//}
-		//Expect(err).To(Succeed())
+		Expect(err).To(Succeed())
 	}
 }
 
