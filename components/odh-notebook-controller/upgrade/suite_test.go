@@ -78,7 +78,7 @@ func TestUpgrade(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
-var _ = BeforeSuite(func(_ SpecContext) {
+var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	//_ = Step("", func() string {
@@ -210,7 +210,7 @@ var _ = BeforeSuite(func(_ SpecContext) {
 		Expect(cli.Create(ctx, ns)).To(Succeed())
 	}
 
-}, NodeTimeout(60*time.Second))
+}, 60)
 
 var _ = AfterSuite(func() {
 	cancel()
