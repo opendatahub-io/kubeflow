@@ -19,7 +19,9 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
@@ -165,7 +167,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 	})
 
 	// New test case for RoleBinding reconciliation
-	When("ReconcileRoleBindings is called for a Notebook", func() {
+	When("Reconcile RoleBindings is called for a Notebook", func() {
 		const (
 			name      = "test-notebook-rolebinding"
 			namespace = "default"
@@ -175,6 +177,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		// Define the role and role-binding names and types used in the reconciliation
 		roleRefName := "ds-pipeline-user-access-dspa"
 		roleBindingName := "elyra-pipelines-" + name
+
+		BeforeEach(func() {
+			// Skip the tests if SET_PIPELINE_RBAC is not set to "true"
+			fmt.Printf("SET_PIPELINE_RBAC is: %s\n", os.Getenv("SET_PIPELINE_RBAC"))
+			if os.Getenv("SET_PIPELINE_RBAC") != "true" {
+				Skip("Skipping RoleBinding reconciliation tests as SET_PIPELINE_RBAC is not set to 'true'")
+			}
+		})
 
 		It("Should create a RoleBinding when the referenced Role exists", func() {
 			ctx := context.Background()
