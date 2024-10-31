@@ -54,3 +54,9 @@ spec:
             requests:
               cpu: 500m
               memory: 256Mi
+          env:
+            - name: SET_PIPELINE_RBAC
+              valueFrom:
+                configMapKeyRef:
+                  name: config
+                  key: SET_PIPELINE_RBAC

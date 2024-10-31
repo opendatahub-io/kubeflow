@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"os"
 	"reflect"
 	"strconv"
 	"time"
@@ -188,9 +189,11 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Call the Rolebinding reconciler
-	err = r.ReconcileRoleBindings(notebook, ctx)
-	if err != nil {
-		return ctrl.Result{}, err
+	if os.Getenv("SET_PIPELINE_RBAC") == "true" {
+		err = r.ReconcileRoleBindings(notebook, ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
