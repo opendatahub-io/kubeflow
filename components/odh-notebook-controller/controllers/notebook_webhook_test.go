@@ -18,6 +18,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -53,7 +54,9 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			// currently we expect that Notebook CR is always created,
 			// and when unable to resolve imagestream, image: is left alone
 			expectedImage string
-			// todo(jdanek): also consider Observing for the log message, https://www.youtube.com/watch?v=prLRI3VEVq4
+			// see https://www.youtube.com/watch?v=prLRI3VEVq4 for Observability Driven Development intro
+			expectedEvents   []string
+			unexpectedEvents []string
 		}{
 			{
 				name: "ImageStream with all that is needful",
@@ -109,6 +112,9 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 					},
 				},
 				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
+				unexpectedEvents: []string{
+					"imagestream-not-found",
+				},
 			},
 			{
 				name: "ImageStream with a tag without items (RHOAIENG-13916)",
@@ -158,23 +164,47 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 				},
 				// there is no update to the Notebook
 				expectedImage: ":some-tag",
+				expectedEvents: []string{
+					"imagestream-not-found",
+				},
 			},
 		}
 
+		BeforeEach(func() {
+			Expect(tracings.TraceProvider.ForceFlush(context.Background())).To(Succeed())
+			tracings.SpanExporter.Reset()
+		})
+
 		for _, testCase := range testCases {
-			testCase := testCase // create a copy to get correct capture in the `It` closure, https://go.dev/blog/loopvar-preview
-			It(fmt.Sprintf("Should create a Notebook resource successfully: %s", testCase.name), func() {
-				By("Creating a Notebook resource successfully")
-				Expect(cli.Create(ctx, testCase.imageStream, &client.CreateOptions{})).To(Succeed())
-				// if our webhook panics, then cli.Create will err
-				Expect(cli.Create(ctx, testCase.notebook, &client.CreateOptions{})).To(Succeed())
+			Context(fmt.Sprintf("The Notebook webhook test case: %s", testCase.name), func() {
+				It("Should create a Notebook resource successfully", func() {
+					By("Creating a Notebook resource successfully")
+					Expect(cli.Create(ctx, testCase.imageStream, &client.CreateOptions{})).To(Succeed())
+					// if our webhook panics, then cli.Create will err
+					Expect(cli.Create(ctx, testCase.notebook, &client.CreateOptions{})).To(Succeed())
 
-				By("Checking that the webhook modified the notebook CR with the expected image")
-				Expect(testCase.notebook.Spec.Template.Spec.Containers[0].Image).To(Equal(testCase.expectedImage))
+					By("Checking that the webhook modified the notebook CR with the expected image")
+					Expect(testCase.notebook.Spec.Template.Spec.Containers[0].Image).To(Equal(testCase.expectedImage))
 
-				By("Deleting the created resources")
-				Expect(cli.Delete(ctx, testCase.notebook, &client.DeleteOptions{})).To(Succeed())
-				Expect(cli.Delete(ctx, testCase.imageStream, &client.DeleteOptions{})).To(Succeed())
+					By("Checking telemetry events")
+					Expect(tracings.TraceProvider.ForceFlush(context.Background())).To(Succeed())
+					spans := tracings.SpanExporter.GetSpans()
+					events := make([]string, 0)
+					for _, span := range spans {
+						for _, event := range span.Events {
+							events = append(events, event.Name)
+						}
+					}
+					Expect(events).To(ContainElements(testCase.expectedEvents))
+					for _, unexpectedEvent := range testCase.unexpectedEvents {
+						Expect(events).ToNot(ContainElement(unexpectedEvent))
+					}
+				})
+				AfterEach(func() {
+					By("Deleting the created resources")
+					Expect(cli.Delete(ctx, testCase.notebook, &client.DeleteOptions{})).To(Succeed())
+					Expect(cli.Delete(ctx, testCase.imageStream, &client.DeleteOptions{})).To(Succeed())
+				})
 			})
 		}
 	})

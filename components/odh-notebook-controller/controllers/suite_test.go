@@ -18,27 +18,29 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"k8s.io/utils/ptr"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	netv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
+	"go.opentelemetry.io/otel"
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	routev1 "github.com/openshift/api/route/v1"
+	v1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,6 +65,7 @@ var (
 
 	ctx            context.Context
 	cancel         context.CancelFunc
+	otelShutdown   func(context.Context) error
 	managerStopped = make(chan struct{})
 
 	testNamespaces = []string{}
@@ -80,6 +83,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	var err error
 	ctx, cancel = context.WithCancel(context.Background())
 
 	// Initialize logger
@@ -88,6 +92,12 @@ var _ = BeforeSuite(func() {
 		TimeEncoder: zapcore.TimeEncoderOfLayout(time.RFC3339),
 	}
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseFlagOptions(&opts)))
+
+	// initialize tracer
+	// Set up OpenTelemetry.
+	otelShutdown, err = setupOTelSDK(ctx)
+	Expect(err).ToNot(HaveOccurred())
+	tracer = otel.Tracer("odh-notebook-controller/controllers/suite_test.go")
 
 	// Initialize test environment:
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest#Environment.Start
@@ -120,7 +130,6 @@ var _ = BeforeSuite(func() {
 		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG environment variable was not provided")
 	}
 
-	var err error
 	cfg, err = envTest.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
@@ -239,5 +248,8 @@ var _ = AfterSuite(func() {
 	By("Tearing down the test environment")
 	// TODO: Stop cert controller-runtime.certwatcher before manager
 	err := envTest.Stop()
+	Expect(err).NotTo(HaveOccurred())
+
+	err = otelShutdown(context.Background())
 	Expect(err).NotTo(HaveOccurred())
 })
