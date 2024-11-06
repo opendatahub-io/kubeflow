@@ -6,7 +6,3 @@ resources:
   - service.yaml
 configurations:
 - params.yaml
-configMapGenerator:
-- name: config
-  envs:
-  - params.env

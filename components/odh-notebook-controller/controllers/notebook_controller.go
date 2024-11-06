@@ -24,6 +24,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	netv1 "k8s.io/api/networking/v1"
@@ -189,7 +190,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Call the Rolebinding reconciler
-	if os.Getenv("SET_PIPELINE_RBAC") == "true" {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_RBAC"))) == "true" {
 		err = r.ReconcileRoleBindings(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
