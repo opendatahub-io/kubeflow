@@ -151,15 +151,15 @@ func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(
 func (r *OpenshiftNotebookReconciler) ReconcileRoleBindings(
 	notebook *nbv1.Notebook, ctx context.Context) error {
 
-	// Reconcile a RoleBinding for pipelines for the notebook service account
 	roleBindingName := "elyra-pipelines-" + notebook.Name
-	if err := r.reconcileRoleBinding(notebook, ctx, roleBindingName, "Role", "ds-pipeline-user-access-dspa"); err != nil {
-		return err
-	}
-
 	// If the notebook is marked for deletion, remove the associated RoleBinding
 	if !notebook.ObjectMeta.DeletionTimestamp.IsZero() {
 		return r.deleteRoleBinding(ctx, roleBindingName, notebook.Namespace)
+	}
+
+	// Reconcile a RoleBinding for pipelines for the notebook service account
+	if err := r.reconcileRoleBinding(notebook, ctx, roleBindingName, "Role", "ds-pipeline-user-access-dspa"); err != nil {
+		return err
 	}
 
 	return nil
