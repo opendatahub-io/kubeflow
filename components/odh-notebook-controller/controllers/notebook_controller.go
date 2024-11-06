@@ -193,6 +193,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_RBAC"))) == "true" {
 		err = r.ReconcileRoleBindings(notebook, ctx)
 		if err != nil {
+			log.Error(err, "Unable to Reconcile Rolebinding")
 			return ctrl.Result{}, err
 		}
 	}
