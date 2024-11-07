@@ -24,6 +24,7 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // NewRoleBinding defines the desired RoleBinding or ClusterRoleBinding object.
@@ -84,21 +85,6 @@ func (r *OpenshiftNotebookReconciler) checkRoleExists(ctx context.Context, roleR
 	return true, nil // Role or ClusterRole exists
 }
 
-// Helper function to delete the RoleBinding if the notebooks deleted
-func (r *OpenshiftNotebookReconciler) deleteRoleBinding(ctx context.Context, rolebindingName, namespace string) error {
-	roleBinding := &rbacv1.RoleBinding{}
-	err := r.Get(ctx, types.NamespacedName{Name: rolebindingName, Namespace: namespace}, roleBinding)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			return nil // RoleBinding not found, nothing to delete
-		}
-		return err // Some other error occurred
-	}
-
-	// Delete the RoleBinding
-	return r.Delete(ctx, roleBinding)
-}
-
 // reconcileRoleBinding manages creation, update, and deletion of RoleBindings and ClusterRoleBindings
 func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(
 	notebook *nbv1.Notebook, ctx context.Context, rolebindingName, roleRefKind, roleRefName string) error {
@@ -123,6 +109,13 @@ func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(
 	err = r.Get(ctx, types.NamespacedName{Name: rolebindingName, Namespace: notebook.Namespace}, found)
 	if err != nil && apierrs.IsNotFound(err) {
 		log.Info("Creating RoleBinding", "RoleBinding.Namespace", roleBinding.Namespace, "RoleBinding.Name", roleBinding.Name)
+
+		// Add .metatada.ownerReferences to the Rolebinding to be deleted by
+		// the Kubernetes garbage collector if the notebook is deleted
+		if err := ctrl.SetControllerReference(notebook, roleBinding, r.Scheme); err != nil {
+			log.Error(err, "Failed to set controller reference for RoleBinding")
+			return err
+		}
 		err = r.Create(ctx, roleBinding)
 		if err != nil {
 			log.Error(err, "Failed to create RoleBinding", "RoleBinding.Namespace", roleBinding.Namespace, "RoleBinding.Name", roleBinding.Name)
@@ -152,11 +145,6 @@ func (r *OpenshiftNotebookReconciler) ReconcileRoleBindings(
 	notebook *nbv1.Notebook, ctx context.Context) error {
 
 	roleBindingName := "elyra-pipelines-" + notebook.Name
-	// If the notebook is marked for deletion, remove the associated RoleBinding
-	if !notebook.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.deleteRoleBinding(ctx, roleBindingName, notebook.Namespace)
-	}
-
 	// Reconcile a RoleBinding for pipelines for the notebook service account
 	if err := r.reconcileRoleBinding(notebook, ctx, roleBindingName, "Role", "ds-pipeline-user-access-dspa"); err != nil {
 		return err
