@@ -94,37 +94,7 @@ var _ = It("Upgrade from RHOAI 2.13", func() {
 	})
 
 	// wait for controllers to stabilize reconciling all the YAMLs
-	EventuallyConsistently(ECCheck[[]*io_prometheus_client.MetricFamily]{
-		State: nil,
-		Fetch: func(g Gomega, s *[]*io_prometheus_client.MetricFamily) {
-			metrics, err := metrics.Registry.Gather()
-			Expect(err).To(Succeed())
-			*s = metrics
-		},
-		Check: func(g Gomega, s *[]*io_prometheus_client.MetricFamily) {
-			metricFamilies, err := metrics.Registry.Gather()
-			Expect(err).To(Succeed())
-
-			// these counters need to remain at zero for ConsistentDuration
-			metric := lookupMetricWithLabel(metricFamilies, "workqueue_depth", "name", "notebook")
-			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
-			metric = lookupMetricWithLabel(metricFamilies, "workqueue_unfinished_work_seconds", "name", "notebook")
-			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
-			metric = lookupMetricWithLabel(metricFamilies, "controller_runtime_webhook_requests_in_flight", "webhook", "/mutate-notebook-v1")
-			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
-
-			// and these counters are to stay constant
-			g.Expect(sumUpMetricsWithLabel(metricFamilies, "workqueue_adds_total", "webhook", "/mutate-notebook-v1")).To(
-				Equal(sumUpMetricsWithLabel(*s, "workqueue_adds_total", "webhook", "/mutate-notebook-v1")))
-			g.Expect(sumUpMetricsWithLabel(metricFamilies, "controller_runtime_reconcile_total", "", "")).To(
-				Equal(sumUpMetricsWithLabel(*s, "controller_runtime_reconcile_total", "", "")))
-			g.Expect(sumUpMetricsWithLabel(metricFamilies, "rest_client_requests_total", "", "")).To(
-				Equal(sumUpMetricsWithLabel(*s, "rest_client_requests_total", "", "")))
-		},
-		EventualTimeout:    timeout,
-		ConsistentInterval: 250 * time.Millisecond,
-		ConsistentDuration: interval,
-	})
+	waitForReconcilations()
 
 	By("compares notebook on cluster and notebook in YAMLs has same spec", func() {
 		var notebookCluster appsv1.StatefulSet
@@ -165,6 +135,40 @@ var _ = It("Upgrade from RHOAI 2.13", func() {
 
 	subctxCancel()
 })
+
+func waitForReconcilations() {
+	EventuallyConsistently(ECCheck[[]*io_prometheus_client.MetricFamily]{
+		State: nil,
+		Fetch: func(g Gomega, s *[]*io_prometheus_client.MetricFamily) {
+			metrics, err := metrics.Registry.Gather()
+			Expect(err).To(Succeed())
+			*s = metrics
+		},
+		Check: func(g Gomega, s *[]*io_prometheus_client.MetricFamily) {
+			metricFamilies, err := metrics.Registry.Gather()
+			Expect(err).To(Succeed())
+
+			// these counters need to remain at zero for ConsistentDuration
+			metric := lookupMetricWithLabel(metricFamilies, "workqueue_depth", "name", "notebook")
+			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
+			metric = lookupMetricWithLabel(metricFamilies, "workqueue_unfinished_work_seconds", "name", "notebook")
+			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
+			metric = lookupMetricWithLabel(metricFamilies, "controller_runtime_webhook_requests_in_flight", "webhook", "/mutate-notebook-v1")
+			g.Expect(metric.Gauge.GetValue()).To(Equal(0.0))
+
+			// and these counters are to stay constant
+			g.Expect(sumUpMetricsWithLabel(metricFamilies, "workqueue_adds_total", "webhook", "/mutate-notebook-v1")).To(
+				Equal(sumUpMetricsWithLabel(*s, "workqueue_adds_total", "webhook", "/mutate-notebook-v1")))
+			g.Expect(sumUpMetricsWithLabel(metricFamilies, "controller_runtime_reconcile_total", "", "")).To(
+				Equal(sumUpMetricsWithLabel(*s, "controller_runtime_reconcile_total", "", "")))
+			g.Expect(sumUpMetricsWithLabel(metricFamilies, "rest_client_requests_total", "", "")).To(
+				Equal(sumUpMetricsWithLabel(*s, "rest_client_requests_total", "", "")))
+		},
+		EventualTimeout:    timeout,
+		ConsistentInterval: 250 * time.Millisecond,
+		ConsistentDuration: interval,
+	})
+}
 
 func lookupMetricWithLabel(metricFamilies []*io_prometheus_client.MetricFamily, metricName, labelName, LabelValue string) (result *io_prometheus_client.Metric) {
 	for _, metric := range lookupMetricsWithLabel(metricFamilies, metricName, labelName, LabelValue) {
