@@ -174,6 +174,13 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
+	err = (&controllers2.CullingReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("Culler"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
 	// Setup ODH notebook controller
 	err = (&controllers.OpenshiftNotebookReconciler{
 		Client: mgr.GetClient(),
