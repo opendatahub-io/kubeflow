@@ -102,6 +102,16 @@ var _ = BeforeSuite(func() {
 			IgnoreErrorIfPathMissing: false,
 		},
 	}
+	if auditLogPath, found := os.LookupEnv("DEBUG_WRITE_AUDITLOG"); found {
+		envTest.ControlPlane.APIServer.Configure().
+			// https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#log-backend
+			Append("audit-log-maxage", "1").
+			Append("audit-log-maxbackup", "5").
+			Append("audit-log-maxsize", "100"). // in MiB
+			Append("audit-log-format", "json").
+			Append("audit-policy-file", filepath.Join("..", "envtest-audit-policy.yaml")).
+			Append("audit-log-path", auditLogPath)
+	}
 
 	var err error
 	cfg, err = envTest.Start()

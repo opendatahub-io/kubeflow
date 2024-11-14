@@ -1,0 +1,9 @@
+# https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#audit-policy
+# This is extremely verbose k8s apiserver logging that may be enabled for debugging of envtest-based tests
+---
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log all requests in developer namespace at the RequestResponse (maximum verbosity) level.
+  - level: RequestResponse
+    namespaces: ["developer"]
