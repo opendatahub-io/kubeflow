@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -128,6 +129,16 @@ var _ = BeforeSuite(func() {
 		}),
 	})
 	Expect(err).NotTo(HaveOccurred())
+
+	if kubeconfigPath, found := os.LookupEnv("DEBUG_WRITE_KUBECONFIG"); found {
+		user := envtest.User{Name: "MasterOfTheSystems", Groups: []string{"system:masters"}}
+		authedUser, err := envTest.ControlPlane.AddUser(user, nil)
+		Expect(err).NotTo(HaveOccurred())
+		config, err := authedUser.KubeConfig()
+		Expect(err).NotTo(HaveOccurred())
+		err = os.WriteFile(kubeconfigPath, config, 0600)
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	// Setup notebook controller
 	err = (&OpenshiftNotebookReconciler{
