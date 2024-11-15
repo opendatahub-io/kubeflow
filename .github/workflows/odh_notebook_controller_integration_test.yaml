@@ -222,6 +222,32 @@ jobs:
           kubectl describe pods -n opendatahub -l app=odh-notebook-controller
           kubectl logs -n opendatahub -l app=odh-notebook-controller
 
+      - name: Create oauth secrets, rhods-operator would've generated that when it sees the notebook (created in the next step), but we test without rhods-operator
+        run: |
+          notebookNamespace=default
+          notebookName=minimal-notebook
+
+          cat <<EOF | kubectl apply -f -
+          ---
+          kind: Secret
+          apiVersion: v1
+          metadata:
+            name: ${notebookName}-oauth-client-generated
+            namespace: ${notebookNamespace}
+          stringData:
+            secret: EXAMPLE_SECRET_xyz
+          type: Opaque
+          ---
+          kind: Secret
+          apiVersion: v1
+          metadata:
+            name: ${notebookName}-oauth-config-generated
+            namespace: ${notebookNamespace}
+          stringData:
+            cookie_secret: EXAMPLE_COOKIE_SECRET_x
+          type: Opaque
+          EOF
+
       - name: Create notebook and check it, this is from kubeflow readme
         run: |
           notebook_namespace=default
