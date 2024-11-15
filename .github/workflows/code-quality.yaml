@@ -87,5 +87,5 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go mod tidy
-          $(go env GOPATH)/bin/govulncheck ./...
+          $(go env GOPATH)/bin/govulncheck -show=verbose ./...
         working-directory: ${{ matrix.component }}
