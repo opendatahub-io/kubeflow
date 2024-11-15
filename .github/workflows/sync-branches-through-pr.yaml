@@ -1,47 +1,117 @@
 ---
-name: Sync branches through Pull Request
+name: Sync Branches
 
-on:  # yamllint disable-line rule:truthy
+on:
   workflow_dispatch:
     inputs:
       source:
-        description: Source branch
+        description: "From:"
         required: true
+        type: string
       target:
-        description: Target branch
+        description: "To:"
         required: true
+        type: string
 
 jobs:
-  sync:
-    permissions:
-      contents: write
-      pull-requests: write
+  sync-branches:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.target }}
-          fetch-depth: 0
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Ensure full history is fetched for merging
 
-      - name: Prepare sync branch
-        id: prepare
-        run: |
-          git fetch origin ${{ github.event.inputs.source }}
-          git reset --hard origin/${{ github.event.inputs.source }}
+    - name: Set up Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          TIMESTAMP=$(date +'%Y%m%d%H%M%S')
-          SYNC_BRANCH=sync__${{ github.event.inputs.source }}__${{ github.event.inputs.target }}__${TIMESTAMP}
-          echo "branch=$SYNC_BRANCH" >> $GITHUB_OUTPUT
+    - name: Merge source branch into target with conflict resolution
+      id: merge
+      run: |
+        set -e
+        SOURCE_BRANCH="${{ github.event.inputs.source }}"
+        TARGET_BRANCH="${{ github.event.inputs.target }}"
 
-      - name: Create pull request
-        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f  # v7.0.5
-        with:
-          branch: ${{ steps.prepare.outputs.branch }}
-          title: "Sync `${{ github.event.inputs.target }}` branch with `${{ github.event.inputs.source }}` branch"
-          body: |
-            :robot: This is an automated Pull Request created by `/.github/workflows/sync-branches-through-pr.yml`.
+        git fetch origin ${TARGET_BRANCH}:${TARGET_BRANCH}
+        git checkout ${TARGET_BRANCH}
 
-            It merges all commits from `${{ github.event.inputs.source }}` branch into `${{ github.event.inputs.target }}` branch.
+        git fetch origin ${SOURCE_BRANCH}:${SOURCE_BRANCH}
+        git merge --no-commit origin/${SOURCE_BRANCH} || true
 
-            :warning: **IMPORTANT NOTE**: Remember to delete the `${{ steps.prepare.outputs.branch }}` branch after merging the changes.
+        # Resolve conflicts for specific files
+        FILES=(
+          "components/notebook-controller/config/overlays/openshift/params.env"
+          "components/odh-notebook-controller/config/base/params.env"
+        )
+
+        for FILE in "${FILES[@]}"; do
+          if [[ -f "$FILE" && "$(git status --porcelain=v1 2>/dev/null | grep -c "$FILE")" -gt 0 ]]; then
+            echo "Resolving conflict for $FILE by keeping target branch version."
+            git checkout --ours "$FILE"
+            git add "$FILE"
+          fi
+        done
+
+        # Handle the Makefile in case there are other canges apart KF_TAG value
+        MAKEFILE="components/odh-notebook-controller/Makefile"
+        if [[ -f "$MAKEFILE" && "$(git status --porcelain=v1 2>/dev/null | grep -c "$MAKEFILE")" -gt 0 ]]; then
+          echo "Resolving conflicts in $MAKEFILE while preserving KF_TAG."
+          
+          # Extract KF_TAG from the target branch
+          KF_TAG_TARGET=$(cat "$MAKEFILE" | awk '
+            BEGIN { in_head = 0 }
+            /^<<<<<<< HEAD/ { in_head = 1; next }   # Enter HEAD block
+            /^=======/ { in_head = 0 }             # Exit HEAD block
+            in_head && /^KF_TAG \?=/ { print $0 }  # Extract full line
+          ' || echo "KF_TAG ?= main")
+
+
+          if [[ -z "$KF_TAG_TARGET" ]]; then
+            echo "KF_TAG not found in target branch; using a fallback value."
+            KF_TAG_TARGET="KF_TAG ?= main"
+          fi
+
+          # Process the conflicting Makefile
+          awk -v kf_tag="$KF_TAG_TARGET" '
+            BEGIN { conflict = 0 }
+            /^<<<<<<< / { conflict = 1; next }      # Start of conflict
+            /^=======/ { conflict = 2; next }      # Separator in conflict
+            /^>>>>>>> / { conflict = 0; next }     # End of conflict
+            conflict == 1 && /^KF_TAG \?=/ { next } # Ignore incoming KF_TAG
+            conflict == 2 && /^KF_TAG \?=/ { print kf_tag; next } # Use target KF_TAG
+            { print $0 }                           # Print other lines
+          ' "$MAKEFILE" > "$MAKEFILE.new"
+
+          # Replace original Makefile with resolved version
+          mv "$MAKEFILE.new" "$MAKEFILE"
+          echo "Preserved KF_TAG as: $KF_TAG_TARGET"
+
+          # Stage the resolved Makefile
+          git add "$MAKEFILE"
+        fi
+
+        # Commit the merge changes
+        git commit -m "Merge ${SOURCE_BRANCH} into ${TARGET_BRANCH} with resolved conflicts, preserving KF_TAG in Makefile" || echo "Nothing to commit"
+
+        # Create a new branch for the sync
+        TIMESTAMP=$(date +'%Y%m%d%H%M%S')
+        SYNC_BRANCH="sync__${SOURCE_BRANCH}__${TARGET_BRANCH}__${TIMESTAMP}"
+        git checkout -b $SYNC_BRANCH
+        git push origin $SYNC_BRANCH
+        echo "branch=$SYNC_BRANCH" >> $GITHUB_OUTPUT
+
+    - name: Create a Pull Request
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        SOURCE_BRANCH="${{ github.event.inputs.source }}"
+        TARGET_BRANCH="${{ github.event.inputs.target }}"
+        SYNC_BRANCH=$(echo "${{ steps.merge.outputs.branch }}")
+        gh pr create \
+          --title "Sync ${SOURCE_BRANCH} into ${TARGET_BRANCH}" \
+          --body ":robot: This is an automated PR" \
+          --base "${{ github.event.inputs.target }}" \
+          --head "${SYNC_BRANCH}"
