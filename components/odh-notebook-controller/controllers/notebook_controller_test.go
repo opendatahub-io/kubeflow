@@ -271,7 +271,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By creating a new Notebook")
 			notebook := createNotebook(Name, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
@@ -306,6 +305,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 2 certificates there in ca-bundle.crt
 			//   - both certificates are valid
+			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
+			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
@@ -376,7 +377,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
@@ -409,6 +409,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 2 certificates there in ca-bundle.crt
 			//   - both certificates are valid
+			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
+			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
