@@ -98,7 +98,8 @@ var _ = BeforeSuite(func() {
 		},
 	}
 
-	cfg, err := envTest.Start()
+	var err error
+	cfg, err = envTest.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
