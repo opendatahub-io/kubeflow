@@ -129,6 +129,10 @@ var _ = BeforeSuite(func() {
 		}),
 		// Issue#429: waiting in tests only wastes time and prints pointless context-cancelled errors
 		GracefulShutdownTimeout: ptr.To(time.Duration(0)),
+		// pass in test context because why not
+		BaseContext: func() context.Context {
+			return ctx
+		},
 	})
 	Expect(err).NotTo(HaveOccurred())
 
