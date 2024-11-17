@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"net"
 	"path/filepath"
 	"testing"
@@ -126,6 +127,8 @@ var _ = BeforeSuite(func() {
 			Port:    webhookInstallOptions.LocalServingPort,
 			CertDir: webhookInstallOptions.LocalServingCertDir,
 		}),
+		// Issue#429: waiting in tests only wastes time and prints pointless context-cancelled errors
+		GracefulShutdownTimeout: ptr.To(time.Duration(0)),
 	})
 	Expect(err).NotTo(HaveOccurred())
 
