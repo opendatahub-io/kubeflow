@@ -1120,7 +1120,7 @@ func createOAuthConfigmap(name, namespace string, label map[string]string, confi
 }
 
 // checkCertConfigMap checks the content of a config map defined by the name and namespace
-// It triest to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
+// It tries to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
 func checkCertConfigMap(ctx context.Context, namespace string, configMapName string, certFileName string, expNumberCerts int) {
 	configMap := &corev1.ConfigMap{}
 	key := types.NamespacedName{Namespace: namespace, Name: configMapName}
