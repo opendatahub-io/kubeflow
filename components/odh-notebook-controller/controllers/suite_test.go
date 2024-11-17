@@ -83,7 +83,7 @@ var _ = BeforeSuite(func() {
 	}
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseFlagOptions(&opts)))
 
-	// Initiliaze test environment:
+	// Initialize test environment:
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest#Environment.Start
 	By("Bootstrapping test environment")
 	envTest = &envtest.Environment{
@@ -110,7 +110,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(netv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
-	// Initiliaze Kubernetes client
+	// Initialize Kubernetes client
 	cli, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cli).NotTo(BeNil())
@@ -172,7 +172,6 @@ var _ = BeforeSuite(func() {
 	}).Should(Succeed())
 
 	// Verify kubernetes client is working
-	cli = mgr.GetClient()
 	Expect(cli).ToNot(BeNil())
 
 	for _, namespace := range testNamespaces {
