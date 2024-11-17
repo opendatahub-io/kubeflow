@@ -92,7 +92,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has created the Route")
 			Eventually(func() error {
@@ -106,7 +105,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual Route modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
 			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the Route spec")
 			Eventually(func() (string, error) {
@@ -123,7 +121,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Route when deleted", func() {
 			By("By deleting the notebook route")
 			Expect(cli.Delete(ctx, route)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Route")
 			Eventually(func() error {
@@ -152,7 +149,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
@@ -330,7 +326,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By updating the Notebook's image")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
@@ -339,7 +334,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook's image is updated")
 			Eventually(func() string {
@@ -482,7 +476,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has created Network policy to allow only controller traffic")
 			Eventually(func() error {
@@ -503,7 +496,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual NetworkPolicy modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"policyTypes":["Egress"]}}`))
 			Expect(cli.Patch(ctx, notebookNetworkPolicy, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the network policy spec")
 			Eventually(func() (string, error) {
@@ -520,7 +512,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Network Policy when deleted", func() {
 			By("By deleting the notebook OAuth Network Policy")
 			Expect(cli.Delete(ctx, notebookOAuthNetworkPolicy)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the OAuth Network policy")
 			Eventually(func() error {
@@ -657,7 +648,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the webhook has injected the sidecar container")
 			Expect(*notebook).To(BeMatchingK8sResource(expectedNotebook, CompareNotebooks))
@@ -679,7 +669,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
 			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the webhook has restored the Notebook spec")
 			Eventually(func() error {
@@ -704,7 +693,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Service Account when deleted", func() {
 			By("By deleting the notebook Service Account")
 			Expect(cli.Delete(ctx, serviceAccount)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Service Account")
 			Eventually(func() error {
@@ -748,7 +736,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Service when deleted", func() {
 			By("By deleting the notebook Service")
 			Expect(cli.Delete(ctx, service)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Service")
 			Eventually(func() error {
@@ -774,7 +761,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Secret when deleted", func() {
 			By("By deleting the notebook Secret")
 			Expect(cli.Delete(ctx, secret)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Secret")
 			Eventually(func() error {
@@ -824,7 +810,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Route when deleted", func() {
 			By("By deleting the notebook Route")
 			Expect(cli.Delete(ctx, route)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Route")
 			Eventually(func() error {
@@ -838,7 +823,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual Route modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
 			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the Route spec")
 			Eventually(func() (string, error) {
@@ -880,7 +864,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
