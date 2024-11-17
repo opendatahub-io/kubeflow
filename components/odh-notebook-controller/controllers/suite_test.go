@@ -55,11 +55,14 @@ import (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var (
-	cfg            *rest.Config
-	cli            client.Client
-	envTest        *envtest.Environment
+	cfg     *rest.Config
+	cli     client.Client
+	envTest *envtest.Environment
+
 	ctx            context.Context
 	cancel         context.CancelFunc
+	managerStopped = make(chan struct{})
+
 	testNamespaces = []string{}
 )
 
@@ -74,7 +77,7 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	ctx, cancel = context.WithCancel(context.TODO())
+	ctx, cancel = context.WithCancel(context.Background())
 
 	// Initialize logger
 	opts := zap.Options{
@@ -156,6 +159,7 @@ var _ = BeforeSuite(func() {
 	go func() {
 		defer GinkgoRecover()
 		err = mgr.Start(ctx)
+		managerStopped <- struct{}{}
 		Expect(err).ToNot(HaveOccurred(), "Failed to run manager")
 	}()
 
@@ -187,7 +191,10 @@ var _ = BeforeSuite(func() {
 }, 60)
 
 var _ = AfterSuite(func() {
+	By("Stopping the manager")
 	cancel()
+	<-managerStopped // Issue#429: waiting to avoid shutdown errors being logged
+
 	By("Tearing down the test environment")
 	// TODO: Stop cert controller-runtime.certwatcher before manager
 	err := envTest.Stop()
