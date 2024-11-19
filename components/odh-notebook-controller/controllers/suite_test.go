@@ -138,6 +138,9 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = os.WriteFile(kubeconfigPath, config, 0600)
 		Expect(err).NotTo(HaveOccurred())
+		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG is set, writing system:masters' Kubeconfig to %s", kubeconfigPath)
+	} else {
+		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG environment variable was not provided")
 	}
 
 	// Setup notebook controller

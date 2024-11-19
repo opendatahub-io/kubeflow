@@ -78,6 +78,13 @@ Run the following command to execute them:
 make test
 ```
 
+The following environment variables are used to enable additional debug options for the tests
+
+| Environment variable   | Description                                                                                                                                  |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| DEBUG_WRITE_KUBECONFIG | Writes a Kubeconfig file to disk. It can be used with `kubectl` or `k9s` to examine the envtest cluster when test is paused on a breakpoint. |
+|                        |                                                                                                                                              |
+
 ### Run locally
 
 Install the `notebooks.kubeflow.org` CRD from the [Kubeflow notebook
