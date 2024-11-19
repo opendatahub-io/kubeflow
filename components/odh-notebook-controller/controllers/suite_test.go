@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"net"
 	"path/filepath"
 	"testing"
@@ -86,7 +87,7 @@ var _ = BeforeSuite(func() {
 	}
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseFlagOptions(&opts)))
 
-	// Initiliaze test environment:
+	// Initialize test environment:
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest#Environment.Start
 	By("Bootstrapping test environment")
 	envTest = &envtest.Environment{
@@ -101,7 +102,8 @@ var _ = BeforeSuite(func() {
 		},
 	}
 
-	cfg, err := envTest.Start()
+	var err error
+	cfg, err = envTest.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
@@ -113,7 +115,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(netv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
-	// Initiliaze Kubernetes client
+	// Initialize Kubernetes client
 	cli, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cli).NotTo(BeNil())
@@ -129,6 +131,12 @@ var _ = BeforeSuite(func() {
 			Port:    webhookInstallOptions.LocalServingPort,
 			CertDir: webhookInstallOptions.LocalServingCertDir,
 		}),
+		// Issue#429: waiting in tests only wastes time and prints pointless context-cancelled errors
+		GracefulShutdownTimeout: ptr.To(time.Duration(0)),
+		// pass in test context because why not
+		BaseContext: func() context.Context {
+			return ctx
+		},
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -176,7 +184,6 @@ var _ = BeforeSuite(func() {
 	}).Should(Succeed())
 
 	// Verify kubernetes client is working
-	cli = mgr.GetClient()
 	Expect(cli).ToNot(BeNil())
 
 	for _, namespace := range testNamespaces {

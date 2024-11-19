@@ -283,6 +283,9 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 		for _, certFile := range configMapFileNames[configMapName] {
 
 			certData, ok := configMap.Data[certFile]
+			// RHOAIENG-15743: opendatahub-operator#1339 started adding '\n' unconditionally, which
+			// is breaking our `== ""` checks below. Trim the certData again.
+			certData = strings.TrimSpace(certData)
 			// If ca-bundle.crt is not found in the ConfigMap odh-trusted-ca-bundle
 			// no need to create the workbench-trusted-ca-bundle, as it is created
 			// by annotation inject-ca-bundle: "true"

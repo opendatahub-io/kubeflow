@@ -73,7 +73,7 @@ jobs:
         echo "Updating files in VERSION=${VERSION} with COMMIT_ID=${COMMIT_ID}"
         sed -E "s/(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/notebook-controller/config/overlays/openshift/params.env
         sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i  components/odh-notebook-controller/config/base/params.env
-        sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/odh-notebook-controller/Makefile
+        sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/odh-notebook-controller/makefile-vars.mk
 
         git status
         if [[ $(git status --porcelain | wc -l) -gt 0 ]]; then
@@ -82,8 +82,8 @@ jobs:
           git pull origin ${{ env.TEMP_UPDATER_BRANCH }}
           git add components/notebook-controller/config/overlays/openshift/params.env
           git add components/odh-notebook-controller/config/base/params.env
-          git add components/odh-notebook-controller/Makefile
-          git commit -m "Update odh and notebook-controller with image ${VERSION}-${COMMIT_ID}"
+          git add components/odh-notebook-controller/makefile-vars.mk
+          git commit -m ":robot: Update odh and notebook-controller with image ${VERSION}-${COMMIT_ID}"
           git push origin ${{ env.TEMP_UPDATER_BRANCH }}
           git log --oneline
         else
@@ -106,4 +106,5 @@ jobs:
             Have been updated the following related files:
               - components/notebook-controller/config/overlays/openshift/params.env
               - components/odh-notebook-controller/config/base/params.env
-              - components/odh-notebook-controller/Makefile
+              - components/odh-notebook-controller/makefile-vars.mk
+
