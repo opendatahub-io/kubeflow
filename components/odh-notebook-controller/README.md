@@ -78,6 +78,14 @@ Run the following command to execute them:
 make test
 ```
 
+Useful options for running tests (that are already included in the above `make` command) are
+
+| Option                     | Description                                                                                   |
+|----------------------------|-----------------------------------------------------------------------------------------------|
+| KUBEBUILDER_ASSETS=        | Environment variable that specifies path to where Kubebuilder has downloaded envtest binaries |
+| -ginkgo.v -ginkgo.progress | Enables verbose output from Ginkgo                                                            |
+| -test.v                    | Enables verbose output from Go tests (*testing.T)                                             |
+
 The following environment variables are used to enable additional debug options for the tests
 
 | Environment variable   | Description                                                                                                                                  |
