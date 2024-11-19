@@ -82,7 +82,7 @@ Useful options for running tests (that are already included in the above `make` 
 
 | Option                     | Description                                                                                   |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| KUBEBUILDER_ASSETS=        | Environment variable that specifies path to where Kubebuilder has downloaded envtest binaries |
+| KUBEBUILDER_ASSETS        | Environment variable that specifies path to where Kubebuilder has downloaded envtest binaries |
 | -ginkgo.v -ginkgo.progress | Enables verbose output from Ginkgo                                                            |
 | -test.v                    | Enables verbose output from Go tests (*testing.T)                                             |
 
