@@ -102,16 +102,6 @@ var _ = BeforeSuite(func() {
 			IgnoreErrorIfPathMissing: false,
 		},
 	}
-	if auditLogPath, found := os.LookupEnv("DEBUG_WRITE_AUDITLOG"); found {
-		envTest.ControlPlane.APIServer.Configure().
-			// https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#log-backend
-			Append("audit-log-maxage", "1").
-			Append("audit-log-maxbackup", "5").
-			Append("audit-log-maxsize", "100"). // in MiB
-			Append("audit-log-format", "json").
-			Append("audit-policy-file", filepath.Join("..", "envtest-audit-policy.yaml")).
-			Append("audit-log-path", auditLogPath)
-	}
 
 	var err error
 	cfg, err = envTest.Start()
@@ -119,6 +109,7 @@ var _ = BeforeSuite(func() {
 	Expect(cfg).NotTo(BeNil())
 
 	if kubeconfigPath, found := os.LookupEnv("DEBUG_WRITE_KUBECONFIG"); found {
+		// https://github.com/rancher/fleet/blob/main/integrationtests/utils/kubeconfig.go
 		user := envtest.User{Name: "MasterOfTheSystems", Groups: []string{"system:masters"}}
 		authedUser, err := envTest.ControlPlane.AddUser(user, nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -129,6 +120,20 @@ var _ = BeforeSuite(func() {
 		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG is set, writing system:masters' Kubeconfig to %s", kubeconfigPath)
 	} else {
 		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG environment variable was not provided")
+	}
+
+	if auditLogPath, found := os.LookupEnv("DEBUG_WRITE_AUDITLOG"); found {
+		envTest.ControlPlane.APIServer.Configure().
+			// https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#log-backend
+			Append("audit-log-maxage", "1").
+			Append("audit-log-maxbackup", "5").
+			Append("audit-log-maxsize", "100"). // in MiB
+			Append("audit-log-format", "json").
+			Append("audit-policy-file", filepath.Join("..", "envtest-audit-policy.yaml")).
+			Append("audit-log-path", auditLogPath)
+		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG is set, writing `envtest-audit-policy.yaml` auditlog to %s", auditLogPath)
+	} else {
+		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG environment variable was not provided")
 	}
 
 	// Register API objects
