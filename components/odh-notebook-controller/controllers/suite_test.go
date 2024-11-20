@@ -92,6 +92,9 @@ var _ = BeforeSuite(func() {
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest#Environment.Start
 	By("Bootstrapping test environment")
 	envTest = &envtest.Environment{
+		ControlPlane: envtest.ControlPlane{
+			APIServer: &envtest.APIServer{},
+		},
 		CRDInstallOptions: envtest.CRDInstallOptions{
 			Paths:              []string{filepath.Join("..", "config", "crd", "external")},
 			ErrorIfPathMissing: true,
@@ -101,6 +104,19 @@ var _ = BeforeSuite(func() {
 			Paths:                    []string{filepath.Join("..", "config", "webhook")},
 			IgnoreErrorIfPathMissing: false,
 		},
+	}
+	if auditLogPath, found := os.LookupEnv("DEBUG_WRITE_AUDITLOG"); found {
+		envTest.ControlPlane.APIServer.Configure().
+			// https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#log-backend
+			Append("audit-log-maxage", "1").
+			Append("audit-log-maxbackup", "5").
+			Append("audit-log-maxsize", "100"). // in MiB
+			Append("audit-log-format", "json").
+			Append("audit-policy-file", filepath.Join("..", "envtest-audit-policy.yaml")).
+			Append("audit-log-path", auditLogPath)
+		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG is set, writing `envtest-audit-policy.yaml` auditlog to %s", auditLogPath)
+	} else {
+		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG environment variable was not provided")
 	}
 
 	var err error
@@ -120,20 +136,6 @@ var _ = BeforeSuite(func() {
 		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG is set, writing system:masters' Kubeconfig to %s", kubeconfigPath)
 	} else {
 		GinkgoT().Logf("DEBUG_WRITE_KUBECONFIG environment variable was not provided")
-	}
-
-	if auditLogPath, found := os.LookupEnv("DEBUG_WRITE_AUDITLOG"); found {
-		envTest.ControlPlane.APIServer.Configure().
-			// https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#log-backend
-			Append("audit-log-maxage", "1").
-			Append("audit-log-maxbackup", "5").
-			Append("audit-log-maxsize", "100"). // in MiB
-			Append("audit-log-format", "json").
-			Append("audit-policy-file", filepath.Join("..", "envtest-audit-policy.yaml")).
-			Append("audit-log-path", auditLogPath)
-		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG is set, writing `envtest-audit-policy.yaml` auditlog to %s", auditLogPath)
-	} else {
-		GinkgoT().Logf("DEBUG_WRITE_AUDITLOG environment variable was not provided")
 	}
 
 	// Register API objects

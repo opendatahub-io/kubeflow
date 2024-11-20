@@ -7,3 +7,10 @@ rules:
   # Log all requests in `developer` namespace at the RequestResponse (maximum verbosity) level.
   - level: RequestResponse
     namespaces: ["developer"]
+
+# Use jq to analyze the log file this produces. For example:
+
+# jq 'select((.objectRef.apiGroup == "dscinitialization.opendatahub.io"
+#              or .objectRef.apiGroup == "datasciencecluster.opendatahub.io")
+#            and .user.username != "system:serviceaccount:redhat-ods-operator:redhat-ods-operator-controller-manager"
+#            and .verb != "get" and .verb != "watch" and .verb != "list")' < /tmp/kube-apiserver-audit.log

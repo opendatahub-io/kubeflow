@@ -91,7 +91,7 @@ The following environment variables are used to enable additional debug options 
 | Environment variable   | Description                                                                                                                                  |
 |------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
 | DEBUG_WRITE_KUBECONFIG | Writes a Kubeconfig file to disk. It can be used with `kubectl` or `k9s` to examine the envtest cluster when test is paused on a breakpoint. |
-|                        |                                                                                                                                              |
+| DEBUG_WRITE_AUDITLOG   | Writes kube-apiserver auditlogs to disk. The config is in `envtest-audit-policy.yaml`, set the namespace of interest there.                  |
 
 ### Run locally
 
