@@ -37,7 +37,7 @@ function cleanup() {
 trap cleanup EXIT
 
 # setup and deploy the controller
-oc new-project "${TEST_NAMESPACE}" --skip-config-write
+oc new-project "${TEST_NAMESPACE}"
 
 # deploy and run e2e tests
 make deploy
