@@ -1,3 +1,4 @@
+---
 name: Kubeflow Release Pipeline
 on:
   workflow_dispatch:
