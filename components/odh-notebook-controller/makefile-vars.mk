@@ -1,1 +1,1 @@
-KF_TAG ?= main-363bcdb
+KF_TAG ?= main
