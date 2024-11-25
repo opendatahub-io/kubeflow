@@ -15,7 +15,7 @@ jobs:
       source: "main"
       target: "v1.9-branch"
 
-  # 2. Poll for images to be available on quay.io the redyness of the images usually takes ~10 mins
+  # 2. Poll for images to be available on quay.io the readiness of the images usually takes ~10 mins
   wait-images-to-build-on-quay:
     needs: sync-main-to-release-branch
     runs-on: ubuntu-latest
@@ -29,7 +29,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y skopeo jq curl
 
-          # Get the latest Git hash from the v1.9t branch
+          # Get the latest Git hash from the target branch
           PAYLOAD=$(curl --silent -H 'Accept: application/vnd.github.v4.raw' https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits?sha=$BRANCH_NAME&per_page=1)
           GIT_HASH=$(echo "$PAYLOAD" | jq -r '.[0].sha' | cut -c 1-7)
           echo "GIT_HASH=$GIT_HASH"
