@@ -1,22 +1,42 @@
 ---
-# This is a gha updates automaticaly the notebook controller images. Can be run on demand before a new release
-name: Update Notebook Controller Images With Latest Commit ID
-on:  # yamllint disable-line rule:truthy
+# This workflow automatically updates the notebook controllers' image tags
+name: Update Notebook Controllers' Image Tags
+on:
   workflow_dispatch:
     inputs:
       branch-name:
-        description: "Provide name of the branch, ex: v1.9-branch"
+        description: "Provide name of the branch, used to commit changes"
         required: true
-        default: "v1.9-branch"
+        default: "main"
       organization:
         required: true
-        description: "Owner of origin notebooks repository used to open a PR"
+        description: "Owner of origin kubeflow repository"
         default: "opendatahub-io"
+      generate-pr:
+        description: "Create PR?"
+        required: true
+        default: "true"
+  workflow_call:
+    inputs:
+      branch-name:
+        description: "Provide name of the branch, used to commit changes"
+        required: true
+        type: string
+      organization:
+        description: "Owner of origin kubeflow repository"
+        required: true
+        type: string
+      generate-pr:
+        description: "Create PR?"
+        required: true
+        type: string
+
 env:
-  REPO_OWNER: ${{ github.event.inputs.organization }}
+  REPO_OWNER: ${{ inputs.organization }}
+  TEMP_UPDATER_BRANCH: temp-${{ inputs.branch-name }}-${{ github.run_id }}
+  BRANCH_NAME: ${{ inputs.branch-name }}
+  GENERATE_PR: ${{ inputs.generate-pr }}
   REPO_NAME: kubeflow
-  TEMP_UPDATER_BRANCH: temp-${{ github.run_id }}
-  BRANCH_NAME: ${{ github.event.inputs.branch-name }}
 
 jobs:
   update-notebook-controller-images:
@@ -31,23 +51,32 @@ jobs:
       with:
         ref: ${{ env.BRANCH_NAME }}
 
+    - name: Debug Inputs
+      run: |
+        echo "generate-pr: ${{ env.GENERATE_PR }}"
+        echo "branch-name: ${{ env.BRANCH_NAME }}"
+        echo "organization: ${{ env.REPO_OWNER }}"
+        echo "temp-branch-name: ${{ env.TEMP_UPDATER_BRANCH }}"
+
+
     - name: Checkout new branch
       run: |
-       echo ${{ env.TEMP_UPDATER_BRANCH }}
-       git checkout -b ${{ env.TEMP_UPDATER_BRANCH }}
-       git push --set-upstream origin ${{ env.TEMP_UPDATER_BRANCH }}
+        echo ${{ env.TEMP_UPDATER_BRANCH }}
+        git fetch origin
+        git checkout -b ${{ env.TEMP_UPDATER_BRANCH }} origin/${{ env.BRANCH_NAME }}
+        git push --set-upstream origin ${{ env.TEMP_UPDATER_BRANCH }}
 
     - name: Configure Git
       run: |
        git config --global user.email "github-actions[bot]@users.noreply.github.com"
        git config --global user.name "GitHub Actions"
 
-    - name: Retrive latest commit
+    - name: Retrieve latest commit
       id: commit-id
       shell: bash
       run: |
         PAYLOAD=$(curl --silent -H 'Accept: application/vnd.github.v4.raw' https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits?sha=$BRANCH_NAME&per_page=1)
-        echo "COMMIT_ID=$(echo $PAYLOAD | jq -r '.[0].sha[0:7]')" >> ${GITHUB_OUTPUT}
+        echo "GIT_HASH=$(echo $PAYLOAD | jq -r '.[0].sha[0:7]')" >> ${GITHUB_OUTPUT}
 
     - name: Extract version from branch-name
       id: version
@@ -57,7 +86,7 @@ jobs:
         else
           VERSION=$(echo "${{ env.BRANCH_NAME }}" | sed -E 's/^v([0-9]+\.[0-9]+)-.*/\1/')
 
-          # Check if VERSION is empty, then, assign the full branch name
+          # Check if VERSION is empty, then assign the full branch name
           if [[ -z "$VERSION" ]]; then
             VERSION="${{ env.BRANCH_NAME }}"
           fi
@@ -68,12 +97,12 @@ jobs:
     - name: Update related files
       id: apply-changes
       run: |
-        COMMIT_ID=${{ steps.commit-id.outputs.COMMIT_ID }}
+        GIT_HASH=${{ steps.commit-id.outputs.GIT_HASH }}
         VERSION=${{ steps.version.outputs.VERSION }}
-        echo "Updating files in VERSION=${VERSION} with COMMIT_ID=${COMMIT_ID}"
-        sed -E "s/(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/notebook-controller/config/overlays/openshift/params.env
-        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i  components/odh-notebook-controller/config/base/params.env
-        sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$COMMIT_ID/" -i components/odh-notebook-controller/makefile-vars.mk
+        echo "Updating files in VERSION=${VERSION} with GIT_HASH=${GIT_HASH}"
+        sed -E "s/(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/notebook-controller/config/overlays/openshift/params.env
+        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/config/base/params.env
+        sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/makefile-vars.mk
 
         git status
         if [[ $(git status --porcelain | wc -l) -gt 0 ]]; then
@@ -83,14 +112,14 @@ jobs:
           git add components/notebook-controller/config/overlays/openshift/params.env
           git add components/odh-notebook-controller/config/base/params.env
           git add components/odh-notebook-controller/makefile-vars.mk
-          git commit -m ":robot: Update odh and notebook-controller with image ${VERSION}-${COMMIT_ID}"
+          git commit -m "Update odh and notebook-controller with image ${VERSION}-${GIT_HASH}"
           git push origin ${{ env.TEMP_UPDATER_BRANCH }}
-          git log --oneline
         else
           echo "There were no changes detected on ${{ env.BRANCH_NAME }}"
         fi
-        
-    - name: Create Pull Request
+
+    - name: PR Cretation
+      if: ${{  env.GENERATE_PR == 'true' }}
       run: |
           gh pr create --repo https://github.com/$REPO_OWNER/$REPO_NAME.git \
             --title "$pr_title" \
@@ -99,7 +128,7 @@ jobs:
             --base ${{ env.BRANCH_NAME }}
       env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          pr_title: "[GHA] Update odh and notebook-controller with image ${{ steps.version.outputs.VERSION }}-${{ steps.commit-id.outputs.COMMIT_ID }}"
+          pr_title: "[GHA-${{ github.run_id }}] Update odh and notebook-controller with image ${{ steps.version.outputs.VERSION }}-${{ steps.commit-id.outputs.GIT_HASH }}"
           pr_body: |
             :robot: This is an automated Pull Request created by `/.github/workflows/notebook-controller-images-updater.yaml`.
 
@@ -108,3 +137,10 @@ jobs:
               - components/odh-notebook-controller/config/base/params.env
               - components/odh-notebook-controller/makefile-vars.mk
 
+    - name: Auto Merge Changes to Target Branch
+      if: ${{ env.GENERATE_PR != 'true' }}
+      run: |
+          git fetch origin
+          git checkout ${{ env.BRANCH_NAME }}
+          git merge --no-ff ${{ env.TEMP_UPDATER_BRANCH }} -m ":robot: Update odh and notebook-controller with image ${VERSION}-${GIT_HASH} auto-merged changes from ${{ env.TEMP_UPDATER_BRANCH }}"
+          git push origin ${{ env.BRANCH_NAME }}
