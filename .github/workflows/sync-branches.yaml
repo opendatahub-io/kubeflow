@@ -1,0 +1,94 @@
+name: Sync Branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "From:"
+        required: true
+        type: string
+      target:
+        description: "To:"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      source:
+        description: "From:"
+        required: true
+        type: string
+      target:
+        description: "To:"
+        required: true
+        type: string
+env:
+  SOURCE_BRANCH: ${{ inputs.source }}
+  TARGET_BRANCH: ${{ inputs.target }}
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Debug Inputs
+      run: |
+        echo "source: ${{ env.SOURCE_BRANCH }}"
+        echo "target: ${{ env.TARGET_BRANCH }}"
+
+
+    - name: Set up Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Merge source branch into target
+      run: |
+        set -e
+
+        # Fetch and checkout target branch
+        git fetch origin ${{ env.TARGET_BRANCH }}:${{ env.TARGET_BRANCH }}
+        git checkout ${{ env.TARGET_BRANCH }}
+
+        # Fetch and merge source branch
+        git fetch origin ${{ env.SOURCE_BRANCH }}:${{ env.SOURCE_BRANCH }}
+        git merge --no-commit origin/${{ env.SOURCE_BRANCH }} || true
+
+        # Known files to resolve the conflicts
+        FILES=(
+          "components/notebook-controller/config/overlays/openshift/params.env"
+          "components/odh-notebook-controller/config/base/params.env"
+          "components/odh-notebook-controller/makefile-vars.mk"
+        )
+
+        # Resolve conflicts for known files
+        for FILE in "${FILES[@]}"; do
+          if [[ -f "$FILE" && "$(git status --porcelain=v1 2>/dev/null | grep -c "$FILE")" -gt 0 ]]; then
+            echo "Resolving conflict for $FILE by keeping target branch version."
+            git checkout --ours "$FILE"
+            git add "$FILE"
+          fi
+        done
+
+        # Check for potential unresolved conflicts
+        if [[ -n "$(git ls-files -u)" ]]; then
+          echo "Unresolved conflicts detected in the following files:"
+          git ls-files -u
+          echo "Aborting merge due to unexpected conflicts."
+          exit 1
+        fi
+
+        # Commit changes if any
+        if [[ -n "$(git status --porcelain)" ]]; then
+          git commit -m "Merge ${{ env.SOURCE_BRANCH }} into ${{ env.TARGET_BRANCH }} with known resolved conflicts"
+        else
+          echo "No changes to commit. Skipping push."
+          exit 0
+        fi
+
+        # Push changes directly to target branch
+        git push origin ${{ env.TARGET_BRANCH }}
