@@ -1,0 +1,24 @@
+---
+name: Create Release
+on:
+  workflow_dispatch:
+    inputs:
+      input_var:
+        description: "Say Hi!"
+        required: true
+  workflow_call:
+    inputs:
+      input_var:
+        type: string
+        required: true
+
+env:
+  INPUT_VAR: ${{ inputs.input_var }}
+
+jobs:
+  say-hello:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Say Hello
+        run: echo "${{ env.INPUT_VAR }}, World!"
