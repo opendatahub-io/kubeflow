@@ -1,0 +1,133 @@
+name: Kubeflow Release Pipeline
+on:
+  workflow_dispatch:
+env:
+  REPO_OWNER: opendatahub-io
+  REPO_NAME: kubeflow
+  BRANCH_NAME: v1.9-branch
+
+jobs:
+  # 1. Sync changes to opendatahub:v1.9-branch from opendatahub:main
+  sync-main-to-release-branch:
+    uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
+    with:
+      source: "main"
+      target: "v1.9-branch"
+
+  # 2. Poll for images to be available on quay.io the redyness of the images usually takes ~10 mins
+  wait-images-to-build-on-quay:
+    needs: sync-main-to-release-branch
+    runs-on: ubuntu-latest
+    outputs:
+      images_ready: ${{ steps.check-images.outputs.images_ready }}
+    steps:
+      - name: Poll for images availability
+        id: check-images
+        run: |
+          # Install required tools
+          sudo apt-get update
+          sudo apt-get install -y skopeo jq curl
+
+          # Get the latest Git hash from the v1.9t branch
+          PAYLOAD=$(curl --silent -H 'Accept: application/vnd.github.v4.raw' https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/commits?sha=$BRANCH_NAME&per_page=1)
+          GIT_HASH=$(echo "$PAYLOAD" | jq -r '.[0].sha' | cut -c 1-7)
+          echo "GIT_HASH=$GIT_HASH"
+
+          # Images to check
+          IMAGES=(
+            "quay.io/opendatahub/kubeflow-notebook-controller:1.9-${GIT_HASH}"
+            "quay.io/opendatahub/odh-notebook-controller:1.9-${GIT_HASH}"
+          )
+          # Poll for image readiness total timeout=15m
+          MAX_ATTEMPTS=10
+          SLEEP_DURATION=90
+          for image in "${IMAGES[@]}"; do
+            for (( i=1; i<=MAX_ATTEMPTS; i++ )); do
+              echo "Checking availability of $image (Attempt $i/$MAX_ATTEMPTS)..."
+              if skopeo inspect docker://$image &>/dev/null; then
+                echo "$image is available!"
+                break
+              fi
+              if [[ $i -eq $MAX_ATTEMPTS ]]; then
+                echo "Timed out waiting for $image to become available."
+                exit 1
+              fi
+              sleep $SLEEP_DURATION
+            done
+          done
+          echo "images_ready=true" >> $GITHUB_ENV
+          echo "images_ready=true" >> $GITHUB_OUTPUT
+
+      - name: Images are ready
+        if: ${{ env.images_ready == 'true' }}
+        run: echo "All images are ready. Proceeding to the next step."
+
+  # 3. Once Images are availble then updates the notebook controllers’ image tags
+  update-release-images:
+    needs: wait-images-to-build-on-quay
+    if: ${{ needs.wait-images-to-build-on-quay.outputs.images_ready == 'true' }}
+    uses: opendatahub-io/kubeflow/.github/workflows/notebook-controller-images-updater.yaml@main
+    with:
+      branch-name: "v1.9-branch"
+      organization: "opendatahub-io"
+      generate-pr: "true"
+
+  # 4. Check PR merged status
+  check-pr-merged:
+    needs: update-release-images
+    runs-on: ubuntu-latest
+    outputs:
+      pr_merged: ${{ steps.check.outputs.pr_merged }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check if the PR is merged
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # PR to look for
+          PR_TITLE="[GHA-${{ github.run_id }}]"
+          # Fetch matching PRs
+          gh pr list --repo atheo89/kubeflow --state all --search "$PR_TITLE" --json number,title > pr_list.json
+          # Extract the PR number
+          PR_NUMBER=$(jq -r '.[0].number' pr_list.json)
+          echo "PR number: $PR_NUMBER"
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No matching PR found."
+            exit 1
+          fi
+
+          # Polling loop to wait for the PR to be merged total timeout=1h
+          MAX_ATTEMPTS=10
+          SLEEP_DURATION=360
+
+          for (( i=1; i<=MAX_ATTEMPTS; i++ )); do
+            echo "Checking if PR #$PR_NUMBER is merged (Attempt $i/$MAX_ATTEMPTS)..."
+            PR_STATE=$(gh pr view --repo atheo89/kubeflow $PR_NUMBER --json mergedAt --jq '.mergedAt')
+
+            if [ "$PR_STATE" = "null" ] || [ -z "$PR_STATE" ]; then
+              echo "PR #$PR_NUMBER is not merged yet. Waiting..."
+              sleep $SLEEP_DURATION
+            else
+              echo "PR #$PR_NUMBER is merged!"
+              echo "pr_merged=true" >> $GITHUB_ENV
+              echo "pr_merged=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+
+          echo "Timed out waiting for PR #$PR_NUMBER to be merged."
+          echo "pr_merged=false" >> $GITHUB_ENV
+          echo "pr_merged=false" >> $GITHUB_OUTPUT
+          exit 1
+
+  # 5. Create a release (Mock-Up workflow it will be fullfill by RHOAIENG-15391)
+  create-release:
+    needs: [update-release-images, check-pr-merged]
+    if: ${{ needs.check-pr-merged.outputs.pr_merged == 'true' }}
+    uses: opendatahub-io/kubeflow/.github/workflows/create-release.yaml@main
+    with:
+      input_var: "Eyo"
