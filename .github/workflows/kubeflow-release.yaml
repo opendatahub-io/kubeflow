@@ -2,7 +2,13 @@
 name: Kubeflow Release Pipeline
 on:
   workflow_dispatch:
+    inputs:
+      create-new-release:
+        description: "Create a new release?"
+        required: true
+        default: "true"
 env:
+  CREATE_NEW_RELEASE: ${{ inputs.create-new-release }}
   REPO_OWNER: opendatahub-io
   REPO_NAME: kubeflow
   BRANCH_NAME: v1.9-branch
@@ -128,7 +134,7 @@ jobs:
   # 5. Create a release (Mock-Up workflow it will be fullfill by RHOAIENG-15391)
   create-release:
     needs: [update-release-images, check-pr-merged]
-    if: ${{ needs.check-pr-merged.outputs.pr_merged == 'true' }}
+    if: ${{ needs.check-pr-merged.outputs.pr_merged == 'true' && inputs.create-new-release == 'true' }}
     uses: opendatahub-io/kubeflow/.github/workflows/create-release.yaml@main
     with:
       input_var: "Eyo"
