@@ -198,24 +198,7 @@ func (tc *testContext) ensureNetworkPolicyAllowingAccessToOnlyNotebookController
 
 func (tc *testContext) testNotebookValidation(nbMeta *metav1.ObjectMeta) error {
 	// Verify StatefulSet is running
-	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
-		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx,
-			nbMeta.Name, metav1.GetOptions{})
-
-		if err1 != nil {
-			if errors.IsNotFound(err1) {
-				return false, nil
-			} else {
-				log.Printf("Failed to get %s statefulset", nbMeta.Name)
-				return false, err1
-			}
-		}
-		if notebookStatefulSet.Status.AvailableReplicas == 1 &&
-			notebookStatefulSet.Status.ReadyReplicas == 1 {
-			return true, nil
-		}
-		return false, nil
-	})
+	err := tc.waitForStatefulSet(nbMeta, 1, 1)
 	if err != nil {
 		return fmt.Errorf("error validating notebook StatefulSet: %s", err)
 	}
@@ -283,7 +266,7 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error getting deployment %v: %v", controllerDeployment.Name, err)
 	}
 
-	defer tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta)
+	defer tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta, nbMeta)
 
 	err = tc.rolloutDeployment(controllerDeployment.ObjectMeta)
 	if err != nil {

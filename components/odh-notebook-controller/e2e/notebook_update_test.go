@@ -65,7 +65,8 @@ func (tc *testContext) testNotebookUpdate(nbContext notebookContext) error {
 	}
 
 	// Example update: Change the Notebook image
-	updatedNotebook.Spec.Template.Spec.Containers[0].Image = "new-image:latest"
+	newImage := "quay.io/opendatahub/workbench-images:jupyter-minimal-ubi9-python-3.11-20241119-3ceb400"
+	updatedNotebook.Spec.Template.Spec.Containers[0].Image = newImage
 
 	err = tc.customClient.Update(tc.ctx, updatedNotebook)
 	if err != nil {
@@ -79,7 +80,7 @@ func (tc *testContext) testNotebookUpdate(nbContext notebookContext) error {
 		if err != nil {
 			return false, err
 		}
-		if note.Spec.Template.Spec.Containers[0].Image == "new-image:latest" {
+		if note.Spec.Template.Spec.Containers[0].Image == newImage {
 			return true, nil
 		}
 		return false, nil

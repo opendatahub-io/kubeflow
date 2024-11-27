@@ -3,7 +3,6 @@ package e2e
 import (
 	"crypto/tls"
 	"fmt"
-	netv1 "k8s.io/api/networking/v1"
 	"log"
 	"net/http"
 	"time"
@@ -12,9 +11,11 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -130,17 +131,56 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 	return nil
 }
 
-func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depMeta metav1.ObjectMeta) {
+func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
+	// Verify StatefulSet is running expected number of replicas
+	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx,
+			nbMeta.Name, metav1.GetOptions{})
+
+		if err1 != nil {
+			if errors.IsNotFound(err1) {
+				return false, nil
+			} else {
+				log.Printf("Failed to get %s statefulset", nbMeta.Name)
+				return false, err1
+			}
+		}
+		if notebookStatefulSet.Status.AvailableReplicas == availableReplicas &&
+			notebookStatefulSet.Status.ReadyReplicas == readyReplicas {
+			return true, nil
+		}
+		return false, nil
+	})
+	return err
+}
+
+func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depMeta metav1.ObjectMeta, nbMeta *metav1.ObjectMeta) {
 	// Delete the culling configuration Configmap once the test is completed
 	err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Delete(tc.ctx,
 		cmMeta.Name, metav1.DeleteOptions{})
 	if err != nil {
-		log.Printf("error creating configmap notebook-controller-culler-config: %v ", err)
+		log.Printf("error deleting configmap notebook-controller-culler-config: %v ", err)
 	}
 	// Roll out the controller deployment
 	err = tc.rolloutDeployment(depMeta)
 	if err != nil {
 		log.Printf("error rolling out the deployment %v: %v ", depMeta.Name, err)
+	}
+
+	testNotebook := &nbv1.Notebook{
+		ObjectMeta: *nbMeta,
+	}
+	// The NBC added the annotation to stop the idle workbench: kubeflow-resource-stopped: '2024-11-26T17:20:42Z'
+	// To make the workbench running again, we need to also remove that annotation.
+	patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
+
+	if err := tc.customClient.Patch(tc.ctx, testNotebook, patch); err != nil {
+		log.Printf("failed to patch Notebook CR removing the kubeflow-resource-stopped annotation: %v ", err)
+	}
+	// now we should wait for pod to start again
+	err = tc.waitForStatefulSet(nbMeta, 1, 1)
+	if err != nil {
+		log.Printf("notebook StatefulSet: %s isn't ready as expected: %s", nbMeta.Name, err)
 	}
 }
 
