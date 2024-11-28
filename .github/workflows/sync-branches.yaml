@@ -30,21 +30,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Debug Inputs
-      run: |
-        echo "source: ${{ env.SOURCE_BRANCH }}"
-        echo "target: ${{ env.TARGET_BRANCH }}"
-
-
     - name: Set up Git
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Merge source branch into target
       run: |

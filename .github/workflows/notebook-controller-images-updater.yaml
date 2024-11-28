@@ -46,18 +46,15 @@ jobs:
       pull-requests: write
 
     steps:
+    - name: Configure Git
+      run: |
+       git config --global user.email "github-actions[bot]@users.noreply.github.com"
+       git config --global user.name "GitHub Actions"
+       
     - name: Checkout branch
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH_NAME }}
-
-    - name: Debug Inputs
-      run: |
-        echo "generate-pr: ${{ env.GENERATE_PR }}"
-        echo "branch-name: ${{ env.BRANCH_NAME }}"
-        echo "organization: ${{ env.REPO_OWNER }}"
-        echo "temp-branch-name: ${{ env.TEMP_UPDATER_BRANCH }}"
-
 
     - name: Checkout new branch
       run: |
@@ -65,11 +62,6 @@ jobs:
         git fetch origin
         git checkout -b ${{ env.TEMP_UPDATER_BRANCH }} origin/${{ env.BRANCH_NAME }}
         git push --set-upstream origin ${{ env.TEMP_UPDATER_BRANCH }}
-
-    - name: Configure Git
-      run: |
-       git config --global user.email "github-actions[bot]@users.noreply.github.com"
-       git config --global user.name "GitHub Actions"
 
     - name: Retrieve latest commit
       id: commit-id
@@ -119,7 +111,7 @@ jobs:
         fi
 
     - name: PR Cretation
-      if: ${{  env.GENERATE_PR == 'true' }}
+      if: ${{ env.GENERATE_PR == 'true' }}
       run: |
           gh pr create --repo https://github.com/$REPO_OWNER/$REPO_NAME.git \
             --title "$pr_title" \
