@@ -1,0 +1,40 @@
+addressType: IPv4
+apiVersion: discovery.k8s.io/v1
+endpoints:
+- addresses:
+  - 10.217.1.212
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+  nodeName: crc
+  targetRef:
+    kind: Pod
+    name: wb1-0
+    namespace: developer
+    uid: 0c7c198f-cff5-44ec-ae75-c6db14164818
+kind: EndpointSlice
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2024-10-20T17:05:55Z"
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  generateName: wb1-
+  generation: 2
+  labels:
+    endpointslice.kubernetes.io/managed-by: endpointslice-controller.k8s.io
+    kubernetes.io/service-name: wb1
+  name: wb1-hqz8b
+  namespace: developer
+  ownerReferences:
+  - apiVersion: v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Service
+    name: wb1
+    uid: 73456959-0225-402c-ad3d-c9442c2c9da8
+  resourceVersion: "7175295"
+  uid: 53ff2d56-620f-4fa4-980c-69fa8da41291
+ports:
+- name: http-wb1
+  port: 8888
+  protocol: TCP

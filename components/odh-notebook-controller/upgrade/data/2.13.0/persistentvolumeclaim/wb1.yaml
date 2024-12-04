@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    openshift.io/description: ""
+    openshift.io/display-name: wb1
+    pv.kubernetes.io/bind-completed: "yes"
+    pv.kubernetes.io/bound-by-controller: "yes"
+    volume.beta.kubernetes.io/storage-provisioner: kubevirt.io.hostpath-provisioner
+    volume.kubernetes.io/selected-node: crc
+    volume.kubernetes.io/storage-provisioner: kubevirt.io.hostpath-provisioner
+  creationTimestamp: "2024-10-20T17:05:54Z"
+  finalizers:
+  - kubernetes.io/pvc-protection
+  labels:
+    opendatahub.io/dashboard: "true"
+  name: wb1
+  namespace: developer
+  resourceVersion: "7173790"
+  uid: 634fb9f5-9321-4a0b-8660-6b1745cc5e2a
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: crc-csi-hostpath-provisioner
+  volumeMode: Filesystem
+  volumeName: pvc-634fb9f5-9321-4a0b-8660-6b1745cc5e2a
+status:
+  accessModes:
+  - ReadWriteOnce
+  capacity:
+    storage: 99Gi
+  phase: Bound

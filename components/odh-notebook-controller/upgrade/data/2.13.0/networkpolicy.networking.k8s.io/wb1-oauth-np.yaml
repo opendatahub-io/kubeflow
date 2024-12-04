@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  generation: 1
+  name: wb1-oauth-np
+  namespace: developer
+  ownerReferences:
+  - apiVersion: kubeflow.org/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Notebook
+    name: wb1
+    uid: a6f0f961-5aaf-4146-b4de-132fba4479dd
+  resourceVersion: "7173717"
+  uid: c99d434d-9e43-4646-b10d-cebc847dfff7
+spec:
+  ingress:
+  - ports:
+    - port: 8443
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      notebook-name: wb1
+  policyTypes:
+  - Ingress

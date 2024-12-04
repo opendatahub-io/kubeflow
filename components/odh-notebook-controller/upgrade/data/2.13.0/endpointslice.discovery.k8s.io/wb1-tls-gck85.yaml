@@ -1,0 +1,41 @@
+addressType: IPv4
+apiVersion: discovery.k8s.io/v1
+endpoints:
+- addresses:
+  - 10.217.1.212
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+  nodeName: crc
+  targetRef:
+    kind: Pod
+    name: wb1-0
+    namespace: developer
+    uid: 0c7c198f-cff5-44ec-ae75-c6db14164818
+kind: EndpointSlice
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2024-10-20T17:05:55Z"
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  generateName: wb1-tls-
+  generation: 2
+  labels:
+    endpointslice.kubernetes.io/managed-by: endpointslice-controller.k8s.io
+    kubernetes.io/service-name: wb1-tls
+    notebook-name: wb1
+  name: wb1-tls-gck85
+  namespace: developer
+  ownerReferences:
+  - apiVersion: v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Service
+    name: wb1-tls
+    uid: df4c104b-8efa-4d56-bc39-0bb80551cea4
+  resourceVersion: "7175305"
+  uid: 06344cc5-f7aa-4992-9fd5-c0719e7cb9e9
+ports:
+- name: oauth-proxy
+  port: 8443
+  protocol: TCP

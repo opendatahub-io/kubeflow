@@ -1,0 +1,14 @@
+apiVersion: v1
+imagePullSecrets:
+- name: builder-dockercfg-9k67n
+kind: ServiceAccount
+metadata:
+  annotations:
+    openshift.io/internal-registry-pull-secret-ref: builder-dockercfg-9k67n
+  creationTimestamp: "2024-10-20T16:52:09Z"
+  name: builder
+  namespace: developer
+  resourceVersion: "7162296"
+  uid: b0476086-caff-43fa-84d3-f87d75f2366f
+secrets:
+- name: builder-dockercfg-9k67n

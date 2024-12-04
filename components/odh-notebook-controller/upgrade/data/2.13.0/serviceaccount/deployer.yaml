@@ -1,0 +1,14 @@
+apiVersion: v1
+imagePullSecrets:
+- name: deployer-dockercfg-9mpng
+kind: ServiceAccount
+metadata:
+  annotations:
+    openshift.io/internal-registry-pull-secret-ref: deployer-dockercfg-9mpng
+  creationTimestamp: "2024-10-20T16:52:09Z"
+  name: deployer
+  namespace: developer
+  resourceVersion: "7162300"
+  uid: 09c3b93b-21e6-43eb-a3bb-820549aedfde
+secrets:
+- name: deployer-dockercfg-9mpng

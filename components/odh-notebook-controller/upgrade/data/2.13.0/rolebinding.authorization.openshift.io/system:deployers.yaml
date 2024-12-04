@@ -1,0 +1,21 @@
+apiVersion: authorization.openshift.io/v1
+groupNames: null
+kind: RoleBinding
+metadata:
+  annotations:
+    openshift.io/description: Allows deploymentconfigs in this namespace to rollout
+      pods in this namespace.  It is auto-managed by a controller; remove subjects
+      to disable.
+  creationTimestamp: "2024-10-20T16:52:10Z"
+  name: system:deployers
+  namespace: developer
+  resourceVersion: "7162301"
+  uid: 9560c42a-01b9-4c00-aadf-2ceb30b3901d
+roleRef:
+  name: system:deployer
+subjects:
+- kind: ServiceAccount
+  name: deployer
+  namespace: developer
+userNames:
+- system:serviceaccount:developer:deployer

@@ -1,0 +1,14 @@
+apiVersion: v1
+imagePullSecrets:
+- name: default-dockercfg-wg965
+kind: ServiceAccount
+metadata:
+  annotations:
+    openshift.io/internal-registry-pull-secret-ref: default-dockercfg-wg965
+  creationTimestamp: "2024-10-20T16:52:09Z"
+  name: default
+  namespace: developer
+  resourceVersion: "7162298"
+  uid: e61c7ba1-d7df-44c0-8c23-1a5638f137ac
+secrets:
+- name: default-dockercfg-wg965

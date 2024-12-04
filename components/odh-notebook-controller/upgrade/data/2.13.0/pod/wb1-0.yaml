@@ -1,0 +1,330 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    k8s.ovn.org/pod-networks: '{"default":{"ip_addresses":["10.217.1.212/23"],"mac_address":"0a:58:0a:d9:01:d4","gateway_ips":["10.217.0.1"],"routes":[{"dest":"10.217.0.0/22","nextHop":"10.217.0.1"},{"dest":"10.217.4.0/23","nextHop":"10.217.0.1"},{"dest":"100.64.0.0/16","nextHop":"10.217.0.1"}],"ip_address":"10.217.1.212/23","gateway_ip":"10.217.0.1"}}'
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+          "name": "ovn-kubernetes",
+          "interface": "eth0",
+          "ips": [
+              "10.217.1.212"
+          ],
+          "mac": "0a:58:0a:d9:01:d4",
+          "default": true,
+          "dns": {}
+      }]
+    openshift.io/scc: restricted-v2
+    seccomp.security.alpha.kubernetes.io/pod: runtime/default
+  creationTimestamp: "2024-10-20T17:05:57Z"
+  generateName: wb1-
+  labels:
+    app: wb1
+    apps.kubernetes.io/pod-index: "0"
+    controller-revision-hash: wb1-7d5498444b
+    notebook-name: wb1
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/odh-managed: "true"
+    opendatahub.io/user: developer
+    opendatahub.io/workbenches: "true"
+    statefulset: wb1
+    statefulset.kubernetes.io/pod-name: wb1-0
+  name: wb1-0
+  namespace: developer
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: StatefulSet
+    name: wb1
+    uid: 6dbaa329-8d91-410a-8fd3-6eeeeef0f436
+  resourceVersion: "7174967"
+  uid: 0c7c198f-cff5-44ec-ae75-c6db14164818
+spec:
+  affinity: {}
+  containers:
+  - env:
+    - name: NOTEBOOK_ARGS
+      value: |-
+        --ServerApp.port=8888
+                          --ServerApp.token=''
+                          --ServerApp.password=''
+                          --ServerApp.base_url=/notebook/developer/wb1
+                          --ServerApp.quit_button=False
+                          --ServerApp.tornado_settings={"user":"developer","hub_host":"https://rhods-dashboard-redhat-ods-applications.apps-crc.testing","hub_prefix":"/projects/developer"}
+    - name: JUPYTER_IMAGE
+      value: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/s2i-minimal-notebook:2024.1
+    - name: PIPELINES_SSL_SA_CERTS
+      value: /etc/pki/tls/custom-certs/ca-bundle.crt
+    - name: GIT_SSL_CAINFO
+      value: /etc/pki/tls/custom-certs/ca-bundle.crt
+    - name: PIP_CERT
+      value: /etc/pki/tls/custom-certs/ca-bundle.crt
+    - name: REQUESTS_CA_BUNDLE
+      value: /etc/pki/tls/custom-certs/ca-bundle.crt
+    - name: SSL_CERT_FILE
+      value: /etc/pki/tls/custom-certs/ca-bundle.crt
+    - name: NB_PREFIX
+      value: /notebook/developer/wb1
+    envFrom:
+    - secretRef:
+        name: aws-connection-s3
+    image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/s2i-minimal-notebook:2024.1
+    imagePullPolicy: Always
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /notebook/developer/wb1/api
+        port: notebook-port
+        scheme: HTTP
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      successThreshold: 1
+      timeoutSeconds: 1
+    name: wb1
+    ports:
+    - containerPort: 8888
+      name: notebook-port
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /notebook/developer/wb1/api
+        port: notebook-port
+        scheme: HTTP
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      successThreshold: 1
+      timeoutSeconds: 1
+    resources:
+      limits:
+        cpu: "2"
+        memory: 8Gi
+      requests:
+        cpu: "1"
+        memory: 8Gi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      runAsNonRoot: true
+      runAsUser: 1000770000
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /opt/app-root/src
+      name: wb1
+    - mountPath: /dev/shm
+      name: shm
+    - mountPath: /etc/pki/tls/custom-certs/ca-bundle.crt
+      name: trusted-ca
+      readOnly: true
+      subPath: ca-bundle.crt
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-nb7sr
+      readOnly: true
+    workingDir: /opt/app-root/src
+  - args:
+    - --provider=openshift
+    - --https-address=:8443
+    - --http-address=
+    - --openshift-service-account=wb1
+    - --cookie-secret-file=/etc/oauth/config/cookie_secret
+    - --cookie-expire=24h0m0s
+    - --tls-cert=/etc/tls/private/tls.crt
+    - --tls-key=/etc/tls/private/tls.key
+    - --upstream=http://localhost:8888
+    - --upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    - --email-domain=*
+    - --skip-provider-button
+    - --openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org","resourceName":"wb1","namespace":"$(NAMESPACE)"}
+    - --logout-url=https://rhods-dashboard-redhat-ods-applications.apps-crc.testing/projects/developer?notebookLogout=wb1
+    env:
+    - name: NAMESPACE
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.namespace
+    image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46
+    imagePullPolicy: Always
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /oauth/healthz
+        port: oauth-proxy
+        scheme: HTTPS
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      successThreshold: 1
+      timeoutSeconds: 1
+    name: oauth-proxy
+    ports:
+    - containerPort: 8443
+      name: oauth-proxy
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /oauth/healthz
+        port: oauth-proxy
+        scheme: HTTPS
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      successThreshold: 1
+      timeoutSeconds: 1
+    resources:
+      limits:
+        cpu: 100m
+        memory: 64Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      runAsNonRoot: true
+      runAsUser: 1000770000
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /etc/oauth/config
+      name: oauth-config
+    - mountPath: /etc/tls/private
+      name: tls-certificates
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-nb7sr
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: false
+  hostname: wb1-0
+  imagePullSecrets:
+  - name: wb1-dockercfg-rstpd
+  nodeName: crc
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext:
+    fsGroup: 1000770000
+    seLinuxOptions:
+      level: s0:c28,c7
+    seccompProfile:
+      type: RuntimeDefault
+  serviceAccount: wb1
+  serviceAccountName: wb1
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoSchedule
+    key: node.kubernetes.io/memory-pressure
+    operator: Exists
+  volumes:
+  - name: wb1
+    persistentVolumeClaim:
+      claimName: wb1
+  - emptyDir:
+      medium: Memory
+    name: shm
+  - configMap:
+      defaultMode: 420
+      items:
+      - key: ca-bundle.crt
+        path: ca-bundle.crt
+      name: workbench-trusted-ca-bundle
+      optional: true
+    name: trusted-ca
+  - name: oauth-config
+    secret:
+      defaultMode: 420
+      secretName: wb1-oauth-config
+  - name: tls-certificates
+    secret:
+      defaultMode: 420
+      secretName: wb1-tls
+  - name: kube-api-access-nb7sr
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+      - configMap:
+          items:
+          - key: service-ca.crt
+            path: service-ca.crt
+          name: openshift-service-ca.crt
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2024-10-20T17:07:41Z"
+    status: "True"
+    type: PodReadyToStartContainers
+  - lastProbeTime: null
+    lastTransitionTime: "2024-10-20T17:05:59Z"
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2024-10-20T17:07:50Z"
+    status: "True"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2024-10-20T17:07:50Z"
+    status: "True"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2024-10-20T17:05:58Z"
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: cri-o://a66c56cfd12a4083680bc7206523756b9607db68ba00cd9d7a769d127cbdcf7f
+    image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46
+    imageID: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46
+    lastState: {}
+    name: oauth-proxy
+    ready: true
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2024-10-20T17:07:40Z"
+  - containerID: cri-o://5cb4ad443e0e0d8f9d64005c2367ca725f2677ab0f3743cc59b5931583fc0ef5
+    image: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/s2i-minimal-notebook:2024.1
+    imageID: image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/s2i-minimal-notebook@sha256:eed810f98057c391799db3feea0a61baaaa6b154660d32d1737980020e335dc3
+    lastState: {}
+    name: wb1
+    ready: true
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2024-10-20T17:07:36Z"
+  hostIP: 192.168.126.11
+  hostIPs:
+  - ip: 192.168.126.11
+  phase: Running
+  podIP: 10.217.1.212
+  podIPs:
+  - ip: 10.217.1.212
+  qosClass: Burstable
+  startTime: "2024-10-20T17:05:59Z"

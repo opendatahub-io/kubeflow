@@ -1,0 +1,21 @@
+apiVersion: v1
+imagePullSecrets:
+- name: pipeline-dockercfg-xh56l
+kind: ServiceAccount
+metadata:
+  annotations:
+    openshift.io/internal-registry-pull-secret-ref: pipeline-dockercfg-xh56l
+  creationTimestamp: "2024-10-20T16:52:10Z"
+  name: pipeline
+  namespace: developer
+  ownerReferences:
+  - apiVersion: operator.tekton.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TektonConfig
+    name: config
+    uid: 07fd881c-9f26-4712-bbca-c707b18f9433
+  resourceVersion: "7162334"
+  uid: 262001ab-36ea-4cf8-853c-7ab5b1c2b219
+secrets:
+- name: pipeline-dockercfg-xh56l

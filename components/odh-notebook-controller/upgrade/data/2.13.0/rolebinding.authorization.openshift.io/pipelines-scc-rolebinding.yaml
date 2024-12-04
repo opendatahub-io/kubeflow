@@ -1,0 +1,24 @@
+apiVersion: authorization.openshift.io/v1
+groupNames: null
+kind: RoleBinding
+metadata:
+  creationTimestamp: "2024-10-20T16:52:11Z"
+  name: pipelines-scc-rolebinding
+  namespace: developer
+  ownerReferences:
+  - apiVersion: operator.tekton.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TektonInstallerSet
+    name: rhosp-rbac-nzqjk
+    uid: 09fc39d1-9bd7-457d-935d-da3df00df309
+  resourceVersion: "7162326"
+  uid: 4eeb89d0-741f-4df3-a953-a6805aa642ba
+roleRef:
+  name: pipelines-scc-clusterrole
+subjects:
+- kind: ServiceAccount
+  name: pipeline
+  namespace: developer
+userNames:
+- system:serviceaccount:developer:pipeline

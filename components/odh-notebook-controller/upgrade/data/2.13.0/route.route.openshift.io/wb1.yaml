@@ -1,0 +1,41 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  annotations:
+    openshift.io/host.generated: "true"
+  creationTimestamp: "2024-10-20T17:05:55Z"
+  labels:
+    notebook-name: wb1
+  name: wb1
+  namespace: developer
+  ownerReferences:
+  - apiVersion: kubeflow.org/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Notebook
+    name: wb1
+    uid: a6f0f961-5aaf-4146-b4de-132fba4479dd
+  resourceVersion: "7173745"
+  uid: 4653b776-2fef-41ae-8ad0-d749fc9b35a8
+spec:
+  host: wb1-developer.apps-crc.testing
+  port:
+    targetPort: oauth-proxy
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: reencrypt
+  to:
+    kind: Service
+    name: wb1-tls
+    weight: 100
+  wildcardPolicy: None
+status:
+  ingress:
+  - conditions:
+    - lastTransitionTime: "2024-10-20T17:05:55Z"
+      status: "True"
+      type: Admitted
+    host: wb1-developer.apps-crc.testing
+    routerCanonicalHostname: router-default.apps-crc.testing
+    routerName: default
+    wildcardPolicy: None

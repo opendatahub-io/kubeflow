@@ -1,0 +1,2820 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "datasciencecluster.opendatahub.io/v1",
+          "kind": "DataScienceCluster",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/created-by": "rhods-operator",
+              "app.kubernetes.io/instance": "default-dsc",
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "datasciencecluster",
+              "app.kubernetes.io/part-of": "rhods-operator"
+            },
+            "name": "default-dsc"
+          },
+          "spec": {
+            "components": {
+              "codeflare": {
+                "managementState": "Managed"
+              },
+              "dashboard": {
+                "managementState": "Managed"
+              },
+              "datasciencepipelines": {
+                "managementState": "Managed"
+              },
+              "kserve": {
+                "managementState": "Managed",
+                "serving": {
+                  "ingressGateway": {
+                    "certificate": {
+                      "type": "SelfSigned"
+                    }
+                  },
+                  "managementState": "Managed",
+                  "name": "knative-serving"
+                }
+              },
+              "kueue": {
+                "managementState": "Managed"
+              },
+              "modelmeshserving": {
+                "managementState": "Managed"
+              },
+              "ray": {
+                "managementState": "Managed"
+              },
+              "trainingoperator": {
+                "managementState": "Removed"
+              },
+              "trustyai": {
+                "managementState": "Removed"
+              },
+              "workbenches": {
+                "managementState": "Managed"
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "dscinitialization.opendatahub.io/v1",
+          "kind": "DSCInitialization",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/created-by": "rhods-operator",
+              "app.kubernetes.io/instance": "default-dsci",
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "dscinitialization",
+              "app.kubernetes.io/part-of": "rhods-operator"
+            },
+            "name": "default-dsci"
+          },
+          "spec": {
+            "applicationsNamespace": "redhat-ods-applications",
+            "monitoring": {
+              "managementState": "Managed",
+              "namespace": "redhat-ods-monitoring"
+            },
+            "serviceMesh": {
+              "controlPlane": {
+                "metricsCollection": "Istio",
+                "name": "data-science-smcp",
+                "namespace": "istio-system"
+              },
+              "managementState": "Managed"
+            },
+            "trustedCABundle": {
+              "customCABundle": "",
+              "managementState": "Managed"
+            }
+          }
+        }
+      ]
+    anaconda-cronjob-image: registry.redhat.io/openshift4/ose-cli@sha256:75bf9b911b6481dcf29f7942240d1555adaa607eec7fc61bedb7f624f87c36d4
+    capabilities: Full Lifecycle
+    categories: AI/Machine Learning, Big Data
+    certified: "False"
+    containerImage: registry.redhat.io/rhoai/odh-rhel8-operator@sha256:e79510dcb0ca6ac72381f8abb9c65249c5424785a6db08b61b2cbfa82d70d705
+    createdAt: "2024-09-11T08:39:18Z"
+    description: Operator for deployment and management of Red Hat OpenShift AI
+    features.operators.openshift.io/disconnected: "true"
+    features.operators.openshift.io/fips-compliant: "false"
+    features.operators.openshift.io/proxy-aware: "false"
+    features.operators.openshift.io/tls-profiles: "false"
+    features.operators.openshift.io/token-auth-aws: "false"
+    features.operators.openshift.io/token-auth-azure: "false"
+    features.operators.openshift.io/token-auth-gcp: "false"
+    odh-etcd-image: registry.redhat.io/rhel7/etcd@sha256:d3495b263b103681f1b09a558be43c21989bfc269eb90f84c2609042cebdc626
+    odh-ml-pipeline-envoy-proxy-image: registry.redhat.io/openshift-service-mesh/proxyv2-rhel8@sha256:a744c1b386fd5e4f94e43543e829df1bfdd1b564137917372a11da06872f4bcb
+    odh-ml-pipeline-mariadb-image: registry.redhat.io/rhel8/mariadb-103@sha256:3d30992e60774f887c4e7959c81b0c41b0d82d042250b3b56f05ab67fd4cdee1
+    odh-ml-pipeline-moveresult-image: registry.redhat.io/ubi8/ubi-micro@sha256:396baed3d689157d96aa7d8988fdfea7eb36684c8335eb391cf1952573e689c1
+    olm.operatorGroup: redhat-ods-operator-chkzv
+    olm.operatorNamespace: redhat-ods-operator
+    olm.skipRange: '>=2.10.0 <2.13.0'
+    operatorframework.io/initialization-resource: |-
+      {
+        "apiVersion": "datasciencecluster.opendatahub.io/v1",
+        "kind": "DataScienceCluster",
+        "metadata": {
+          "name": "default-dsc",
+          "labels": {
+            "app.kubernetes.io/name": "datasciencecluster",
+            "app.kubernetes.io/instance": "default-dsc",
+            "app.kubernetes.io/part-of": "rhods-operator",
+            "app.kubernetes.io/managed-by": "kustomize",
+            "app.kubernetes.io/created-by": "rhods-operator"
+          }
+        },
+        "spec": {
+          "components": {
+            "codeflare": {
+              "managementState": "Managed"
+            },
+            "dashboard": {
+              "managementState": "Managed"
+            },
+            "datasciencepipelines": {
+              "managementState": "Managed"
+            },
+            "kserve": {
+              "managementState": "Managed",
+              "serving": {
+                "ingressGateway": {
+                  "certificate": {
+                    "type": "OpenshiftDefaultIngress"
+                  }
+                },
+                "managementState": "Managed",
+                "name": "knative-serving"
+              }
+            },
+            "kueue": {
+              "managementState": "Managed"
+            },
+            "modelmeshserving": {
+              "managementState": "Managed"
+            },
+            "ray": {
+              "managementState": "Managed"
+            },
+            "trainingoperator": {
+              "managementState": "Removed"
+            },
+            "trustyai": {
+              "managementState": "Removed"
+            },
+            "workbenches": {
+              "managementState": "Managed"
+            }
+          }
+        }
+      }
+    operatorframework.io/properties: '{"properties":[{"type":"olm.gvk","value":{"group":"datasciencecluster.opendatahub.io","kind":"DataScienceCluster","version":"v1"}},{"type":"olm.gvk","value":{"group":"dscinitialization.opendatahub.io","kind":"DSCInitialization","version":"v1"}},{"type":"olm.gvk","value":{"group":"features.opendatahub.io","kind":"FeatureTracker","version":"v1"}},{"type":"olm.package","value":{"packageName":"rhods-operator","version":"2.13.0"}}]}'
+    operatorframework.io/suggested-namespace: redhat-ods-operator
+    operators.openshift.io/infrastructure-features: '["disconnected"]'
+    operators.openshift.io/valid-subscription: '["OpenShift AI"]'
+    operators.operatorframework.io/builder: operator-sdk-v1.24.1
+    operators.operatorframework.io/internal-objects: '[dscinitialization.opendatahub.io]'
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+    ose-cli-image: registry.redhat.io/openshift4/ose-cli@sha256:25fef269ac6e7491cb8340119a9b473acbeb53bc6970ad029fdaae59c3d0ca61
+    ose-oauth-proxy-dashboard-image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33
+    ose-oauth-proxy-dsp-image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33
+    ose-oauth-proxy-dw-image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:1ea6a01bf3e63cdcf125c6064cbd4a4a270deaf0f157b3eabb78f60556840366
+    ose-oauth-proxy-image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46
+    prometheus-alertmanager-image: registry.redhat.io/openshift4/ose-prometheus-alertmanager@sha256:169b788b3f8eb8909ecc1d698ab0a6bf103b49043c7f5fd569789b179928def6
+    prometheus-base-image: registry.redhat.io/openshift4/ose-prometheus@sha256:c432e571eb737d55323b5f350b5f714803bf525144cfee3f20782660d9bf10ad
+    prometheus-config-reloader-image: registry.redhat.io/openshift4/ose-prometheus-config-reloader@sha256:bd543e039c7c2b0857a7e0ce34d582b8954a8ad3a3f13a2eaaff2904cdae7c53
+    prometheus-operator-image: registry.redhat.io/openshift4/ose-prometheus-operator@sha256:4aeb07f66dc39889e3d0e66eee7c4ea2e39ce4025852d1d1eaf662af8bd8eeb6
+    repository: https://github.com/red-hat-data-services/rhods-operator
+    support: Red Hat OpenShift AI
+    ubi-minimal-image: registry.redhat.io/ubi8/ubi-minimal@sha256:5d2d4d4dbec470f8ffb679915e2a8ae25ad754cd9193fa966deee1ecb7b3ee00
+    ubi9-image: registry.redhat.io/ubi9@sha256:770cf07083e1c85ae69c25181a205b7cdef63c11b794c89b3b487d4670b4c328
+  creationTimestamp: "2024-10-20T16:52:30Z"
+  generation: 1
+  labels:
+    olm.copiedFrom: redhat-ods-operator
+    olm.managed: "true"
+  name: rhods-operator.2.13.0
+  namespace: developer
+  resourceVersion: "7200329"
+  uid: 8b2e406e-b959-4ba2-8c02-fddbc0bd5d98
+spec:
+  apiservicedefinitions: {}
+  cleanup:
+    enabled: false
+  customresourcedefinitions:
+    owned:
+    - description: DataScienceCluster is the Schema for the datascienceclusters API.
+      displayName: Data Science Cluster
+      kind: DataScienceCluster
+      name: datascienceclusters.datasciencecluster.opendatahub.io
+      specDescriptors:
+      - description: Override and fine tune specific component configurations.
+        displayName: Components
+        path: components
+      version: v1
+    - description: DSCInitialization is the Schema for the dscinitializations API.
+      displayName: DSC Initialization
+      kind: DSCInitialization
+      name: dscinitializations.dscinitialization.opendatahub.io
+      specDescriptors:
+      - description: Namespace for applications to be installed, non-configurable,
+          default to "redhat-ods-applications"
+        displayName: Applications Namespace
+        path: applicationsNamespace
+      - description: Enable monitoring on specified namespace
+        displayName: Monitoring
+        path: monitoring
+      - description: Configures Service Mesh as networking layer for Data Science
+          Clusters components. The Service Mesh is a mandatory prerequisite for single
+          model serving (KServe) and you should review this configuration if you are
+          planning to use KServe. For other components, it enhances user experience;
+          e.g. it provides unified authentication giving a Single Sign On experience.
+        displayName: Service Mesh
+        path: serviceMesh
+      - description: When set to `Managed`, adds odh-trusted-ca-bundle Configmap to
+          all namespaces that includes cluster-wide Trusted CA Bundle in .data["ca-bundle.crt"].
+          Additionally, this fields allows admins to add custom CA bundles to the
+          configmap using the .CustomCABundle field.
+        displayName: Trusted CABundle
+        path: trustedCABundle
+      - description: Internal development useful field to test customizations. This
+          is not recommended to be used in production environment.
+        displayName: Dev Flags
+        path: devFlags
+      statusDescriptors:
+      - description: Conditions describes the state of the DSCInitializationStatus
+          resource
+        displayName: Conditions
+        path: conditions
+      version: v1
+    - kind: FeatureTracker
+      name: featuretrackers.features.opendatahub.io
+      version: v1
+  description: |
+    Red Hat OpenShift AI is a complete platform for the entire lifecycle of your AI/ML projects.
+
+    When using Red Hat OpenShift AI, your users will find all the tools they would expect from a modern AI/ML platform in an interface that is intuitive, requires no local install, and is backed by the power of your OpenShift cluster.
+
+    Your Data Scientists will feel right at home with quick and simple access to the Notebook interface they are used to. They can leverage the default Notebook Images (Including PyTorch, tensorflow, and CUDA), or add custom ones. Your MLOps engineers will be able to leverage Data Science Pipelines to easily parallelize and/or schedule the required workloads. They can then quickly serve, monitor, and update the created AI/ML models. They can do that by either using the provided out-of-the-box OpenVino Server Model Runtime or by adding their own custom serving runtime instead. These activities are tied together with the concept of Data Science Projects, simplifying both organization and collaboration.
+
+    But beyond the individual features, one of the key aspects of this platform is its flexibility. Not only can you augment it with your own Customer Workbench Image and Custom Model Serving Runtime Images, but you will also have a consistent experience across any infrastructure footprint. Be it in the public cloud, private cloud, on-premises, and even in disconnected clusters. Red Hat OpenShift AI can be installed on any supported OpenShift. It can scale out or in depending on the size of your team and its computing requirements.
+
+    Finally, thanks to the operator-driven deployment and updates, the administrative load of the platform is very light, leaving everyone more time to focus on the work that makes a difference.
+
+    ### Components
+    * Dashboard
+    * Curated Workbench Images (incl CUDA, PyTorch, Tensorflow, code-server)
+    * Ability to add Custom Images
+    * Ability to leverage accelerators (such as NVIDIA GPU)
+    * Data Science Pipelines (including Elyra notebook interface)
+    * Model Serving using ModelMesh and Kserve.
+    * Ability to use other runtimes for serving
+    * Model Monitoring
+    * Distributed workloads (KubeRay, CodeFlare, Kueue, Training Operator)
+    * XAI explanations of predictive models (TrustyAI)
+  displayName: Red Hat OpenShift AI
+  icon:
+  - base64data: PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI3LjQuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkxvZ29zIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4PSIwcHgiIHk9IjBweCIKCSB2aWV3Qm94PSIwIDAgODM1LjkgMjQ0IiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCA4MzUuOSAyNDQ7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRkZGRkZGO30KCS5zdDF7ZmlsbDojRUUwMDAwO30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8cGF0aCBkPSJNMzAxLjMsMTgzLjFjMCw1LjItMSwxMC4xLTMsMTQuN2MtMiw0LjYtNC43LDguNi04LjEsMTJjLTMuNCwzLjQtNy40LDYtMTIuMSw4Yy00LjYsMS45LTkuNiwyLjktMTQuOSwyLjkKCQkJYy01LjMsMC0xMC4yLTEtMTQuOS0yLjljLTQuNi0xLjktOC43LTQuNi0xMi04Yy0zLjQtMy40LTYtNy4zLTgtMTJjLTItNC42LTMtOS41LTMtMTQuN2MwLTUuMiwxLTEwLjEsMy0xNC43YzItNC42LDQuNi04LjYsOC0xMgoJCQljMy40LTMuNCw3LjQtNiwxMi04YzQuNi0xLjksOS42LTIuOSwxNC45LTIuOWM1LjMsMCwxMC4yLDEsMTQuOSwyLjljNC42LDEuOSw4LjcsNC42LDEyLjEsOGMzLjQsMy40LDYuMSw3LjQsOC4xLDEyCgkJCUMzMDAuNCwxNzMsMzAxLjMsMTc3LjksMzAxLjMsMTgzLjF6IE0yOTAuMiwxODMuMWMwLTMuOS0wLjctNy41LTIuMS0xMC45Yy0xLjQtMy40LTMuMy02LjMtNS43LTguN2MtMi40LTIuNS01LjItNC40LTguNS01LjgKCQkJYy0zLjMtMS40LTYuOC0yLjEtMTAuNi0yLjFzLTcuMiwwLjctMTAuNSwyLjFjLTMuMywxLjQtNi4xLDMuMy04LjUsNS44Yy0yLjQsMi41LTQuMyw1LjQtNS43LDguN2MtMS40LDMuNC0yLjEsNy0yLjEsMTAuOQoJCQljMCwzLjksMC43LDcuNSwyLjEsMTAuOWMxLjQsMy40LDMuMyw2LjMsNS43LDguN2MyLjQsMi40LDUuMiw0LjQsOC41LDUuOGMzLjMsMS40LDYuOCwyLjEsMTAuNSwyLjFzNy4zLTAuNywxMC42LTIuMQoJCQljMy4zLTEuNCw2LjEtMy4zLDguNS01LjhjMi40LTIuNCw0LjMtNS4zLDUuNy04LjdDMjg5LjUsMTkwLjYsMjkwLjIsMTg3LDI5MC4yLDE4My4xeiIvPgoJCTxwYXRoIGQ9Ik0zMTEuNiwyNDEuMXYtNzQuNWgxMC4zdjVjMi4yLTEuOSw0LjctMy4zLDcuNS00LjNjMi44LTEsNS43LTEuNSw4LjctMS41YzMuNywwLDcuMiwwLjcsMTAuNSwyLjEKCQkJYzMuMywxLjQsNi4xLDMuNCw4LjUsNS44YzIuNCwyLjUsNC4zLDUuNCw1LjcsOC43YzEuNCwzLjMsMi4xLDYuOSwyLjEsMTAuNmMwLDMuOC0wLjcsNy40LTIuMSwxMC43Yy0xLjQsMy4zLTMuMyw2LjItNS43LDguNwoJCQljLTIuNCwyLjUtNS4zLDQuNC04LjYsNS44Yy0zLjMsMS40LTYuOSwyLjEtMTAuNywyLjFjLTMsMC01LjgtMC41LTguNS0xLjRjLTIuNy0wLjktNS4xLTIuMi03LjMtMy44djI1LjlIMzExLjZ6IE0zMzYuNywxNzQuOAoJCQljLTMuMSwwLTUuOCwwLjYtOC4zLDEuN2MtMi41LDEuMS00LjYsMi42LTYuMyw0LjZ2MjQuMWMxLjcsMS45LDMuOCwzLjQsNi4zLDQuNWMyLjYsMS4xLDUuMywxLjcsOC4zLDEuN2M1LjEsMCw5LjQtMS44LDEyLjgtNS4zCgkJCWMzLjQtMy41LDUuMS03LjgsNS4xLTEyLjljMC01LjItMS44LTkuNi01LjMtMTMuMUMzNDUuOSwxNzYuNiwzNDEuNywxNzQuOCwzMzYuNywxNzQuOHoiLz4KCQk8cGF0aCBkPSJNMzcyLjQsMTkzYzAtMy43LDAuNy03LjMsMi0xMC42YzEuNC0zLjMsMy4yLTYuMiw1LjYtOC43YzIuNC0yLjUsNS4yLTQuNCw4LjQtNS44YzMuMi0xLjQsNi43LTIuMSwxMC41LTIuMQoJCQljMy42LDAsNywwLjcsMTAuMSwyLjFjMy4yLDEuNCw1LjksMy40LDguMSw1LjhjMi4zLDIuNSw0LDUuNCw1LjQsOC44YzEuMywzLjQsMiw3LDIsMTAuOXYzaC00MS44YzAuNyw0LjQsMi43LDgsNiwxMC45CgkJCWMzLjMsMi45LDcuMyw0LjMsMTEuOSw0LjNjMi42LDAsNS0wLjQsNy40LTEuMmMyLjQtMC44LDQuNC0yLDYtMy40bDYuNyw2LjZjLTMuMSwyLjQtNi4zLDQuMi05LjYsNS4zYy0zLjMsMS4xLTYuOSwxLjctMTAuOSwxLjcKCQkJYy0zLjksMC03LjUtMC43LTEwLjktMi4xYy0zLjQtMS40LTYuMy0zLjMtOC44LTUuOGMtMi41LTIuNC00LjUtNS4zLTUuOS04LjdDMzczLjEsMjAwLjUsMzcyLjQsMTk2LjksMzcyLjQsMTkzeiBNMzk4LjcsMTc0LjUKCQkJYy00LDAtNy41LDEuMy0xMC40LDRjLTIuOSwyLjYtNC44LDYtNS41LDEwLjJoMzEuNGMtMC43LTQtMi41LTcuNC01LjQtMTAuMUM0MDUuOSwxNzUuOSw0MDIuNSwxNzQuNSwzOTguNywxNzQuNXoiLz4KCQk8cGF0aCBkPSJNNDM0LjMsMjE5LjV2LTUyLjloMTAuNHY1LjNjMi4xLTIuMSw0LjUtMy43LDcuMS00LjdjMi43LTEuMSw1LjYtMS42LDguOC0xLjZjNiwwLDExLDEuOSwxNC44LDUuOAoJCQljMy44LDMuOSw1LjgsOC44LDUuOCwxNC45djMzLjNoLTEwLjNWMTg4YzAtNC4xLTEuMi03LjMtMy41LTkuOGMtMi40LTIuNC01LjYtMy42LTkuNy0zLjZjLTIuOCwwLTUuMywwLjYtNy41LDEuOAoJCQljLTIuMiwxLjItNC4xLDIuOS01LjUsNS4xdjM4LjFINDM0LjN6Ii8+CgkJPHBhdGggZD0iTTQ4OCwyMDcuNWw2LjctNy43YzMuOSwzLjgsNy45LDYuNywxMiw4LjZjNC4xLDEuOSw4LjUsMi45LDEzLjEsMi45YzUuMywwLDkuNS0xLjEsMTIuOC0zLjRjMy4zLTIuMyw0LjktNS4yLDQuOS04LjcKCQkJYzAtMy4yLTEuMS01LjctMy4zLTcuNGMtMi4yLTEuOC02LTMuMS0xMS40LTRsLTEyLjItMmMtNi43LTEuMS0xMS43LTMuMy0xNS02LjRjLTMuMy0zLjItNC45LTcuMy00LjktMTIuNQoJCQljMC02LjIsMi40LTExLjMsNy4zLTE1LjFjNC45LTMuOCwxMS40LTUuOCwxOS41LTUuOGM1LjEsMCwxMC4zLDAuOCwxNS40LDIuNWM1LjEsMS43LDkuOCw0LjEsMTMuOSw3LjNsLTYsOC4zCgkJCWMtNC0zLTcuOS01LjItMTEuOS02LjdjLTQtMS41LTgtMi4yLTExLjktMi4yYy00LjcsMC04LjUsMS0xMS40LDNjLTIuOSwyLTQuNCw0LjYtNC40LDcuOGMwLDIuOSwxLDUuMiwzLDYuOAoJCQljMiwxLjYsNS4zLDIuOCwxMCwzLjVsMTEuOCwxLjljNy43LDEuMiwxMy4zLDMuNSwxNyw2LjhjMy42LDMuMyw1LjQsNy43LDUuNCwxMy40YzAsMy4zLTAuNyw2LjQtMi4xLDkuMQoJCQljLTEuNCwyLjctMy4zLDUuMS01LjksNy4xYy0yLjUsMi01LjYsMy41LTkuMiw0LjZjLTMuNiwxLjEtNy42LDEuNi0xMS45LDEuNmMtNS44LDAtMTEuNC0xLjEtMTYuOC0zLjQKCQkJQzQ5NywyMTQuOSw0OTIuMiwyMTEuNiw0ODgsMjA3LjV6Ii8+CgkJPHBhdGggZD0iTTU2Ny40LDE0NC41djc1LjFINTU3di03Mi44TDU2Ny40LDE0NC41eiBNNTU3LDIxOS41di01Mi45aDEwLjR2NS4zYzIuMS0yLjEsNC41LTMuNyw3LjEtNC43YzIuNy0xLjEsNS42LTEuNiw4LjgtMS42CgkJCWM2LDAsMTEsMS45LDE0LjgsNS44YzMuOCwzLjksNS44LDguOCw1LjgsMTQuOXYzMy4zaC0xMC4zVjE4OGMwLTQuMS0xLjItNy4zLTMuNS05LjhjLTIuNC0yLjQtNS42LTMuNi05LjctMy42CgkJCWMtMi44LDAtNS4zLDAuNi03LjUsMS44Yy0yLjIsMS4yLTQuMSwyLjktNS41LDUuMXYzOC4xSDU1N3oiLz4KCQk8cGF0aCBkPSJNNjIxLjEsMTU4LjFjLTEuNywwLTMuMi0wLjYtNC41LTEuOWMtMS4zLTEuMy0xLjktMi44LTEuOS00LjVjMC0xLjcsMC42LTMuMiwxLjktNC41YzEuMy0xLjMsMi44LTEuOSw0LjUtMS45CgkJCWMxLjcsMCwzLjIsMC42LDQuNSwxLjljMS4yLDEuMywxLjksMi44LDEuOSw0LjVjMCwxLjctMC42LDMuMi0xLjksNC41QzYyNC40LDE1Ny40LDYyMi45LDE1OC4xLDYyMS4xLDE1OC4xeiBNNjI2LjMsMTY2LjZ2NTIuOQoJCQloLTEwLjR2LTUyLjlINjI2LjN6Ii8+CgkJPHBhdGggZD0iTTYzNC4xLDE2Ni42aDEyLjN2LThjMC01LjMsMS41LTkuNSw0LjYtMTIuNWMzLTMsNy41LTQuNSwxMy40LTQuNWMxLjMsMCwyLjYsMC4xLDMuOSwwLjNjMS4zLDAuMiwyLjUsMC40LDMuNiwwLjd2OQoJCQljLTEuMi0wLjMtMi4zLTAuNi0zLjItMC43Yy0xLTAuMS0yLjEtMC4yLTMuMy0wLjJjLTIuOSwwLTUuMSwwLjctNi41LDJjLTEuNCwxLjMtMi4xLDMuNC0yLjEsNi4ydjcuOGgxNS4ydjguN2gtMTUuMnY0NC4yaC0xMC4zCgkJCXYtNDQuMmgtMTIuM1YxNjYuNnoiLz4KCQk8cGF0aCBkPSJNNjg3LjcsMjA2LjR2LTMxLjFoLTExLjJ2LTguN2gxMS4ydi0xMy41bDEwLjMtMi41djE2aDE1LjZ2OC43SDY5OFYyMDRjMCwyLjcsMC42LDQuNiwxLjgsNS43YzEuMiwxLjEsMy4yLDEuNyw2LDEuNwoJCQljMS41LDAsMi44LTAuMSw0LTAuM2MxLjEtMC4yLDIuMy0wLjUsMy42LTF2OC43Yy0xLjUsMC41LTMuMSwwLjktNC45LDEuMWMtMS44LDAuMy0zLjUsMC40LTUsMC40Yy01LjEsMC05LTEuMi0xMS44LTMuNgoJCQlTNjg3LjcsMjExLDY4Ny43LDIwNi40eiIvPgoJCTxwYXRoIGQ9Ik03MzcsMjE5LjVsMzAuMi03Mi44aDEyLjhsMjkuNyw3Mi44aC0xMS45bC04LjQtMjEuM2gtMzIuNmwtOC41LDIxLjNINzM3eiBNNzYwLjUsMTg5LjJoMjUuNGwtMTIuNy0zMS45TDc2MC41LDE4OS4yeiIvPgoJCTxwYXRoIGQ9Ik04MTcuMiwyMTkuNXYtNzIuOGgxMC45djcyLjhIODE3LjJ6Ii8+Cgk8L2c+Cgk8Zz4KCQk8Zz4KCQkJPHBhdGggY2xhc3M9InN0MSIgZD0iTTEyOSw4NWMxMi41LDAsMzAuNi0yLjYsMzAuNi0xNy41YzAtMS4yLDAtMi4zLTAuMy0zLjRsLTcuNC0zMi40Yy0xLjctNy4xLTMuMi0xMC4zLTE1LjctMTYuNgoJCQkJQzEyNi40LDEwLjIsMTA1LjMsMiw5OSwyYy01LjgsMC03LjUsNy41LTE0LjQsNy41Yy02LjcsMC0xMS42LTUuNi0xNy45LTUuNmMtNiwwLTkuOSw0LjEtMTIuOSwxMi41YzAsMC04LjQsMjMuNy05LjUsMjcuMgoJCQkJQzQ0LDQ0LjMsNDQsNDUsNDQsNDUuNUM0NCw1NC44LDgwLjMsODUsMTI5LDg1IE0xNjEuNSw3My42YzEuNyw4LjIsMS43LDkuMSwxLjcsMTAuMWMwLDE0LTE1LjcsMjEuOC0zNi40LDIxLjgKCQkJCUM4MCwxMDUuNSwzOS4xLDc4LjEsMzkuMSw2MGMwLTIuOCwwLjYtNS40LDEuNS03LjNDMjMuOCw1My41LDIsNTYuNSwyLDc1LjdDMiwxMDcuMiw3Ni42LDE0NiwxMzUuNywxNDYKCQkJCWM0NS4zLDAsNTYuNy0yMC41LDU2LjctMzYuNkMxOTIuMyw5Ni42LDE4MS40LDgyLjIsMTYxLjUsNzMuNiIvPgoJCQk8cGF0aCBkPSJNMTYxLjUsNzMuNmMxLjcsOC4yLDEuNyw5LjEsMS43LDEwLjFjMCwxNC0xNS43LDIxLjgtMzYuNCwyMS44QzgwLDEwNS41LDM5LjEsNzguMSwzOS4xLDYwYzAtMi44LDAuNi01LjQsMS41LTcuMwoJCQkJbDMuNy05LjFDNDQsNDQuMyw0NCw0NSw0NCw0NS41QzQ0LDU0LjgsODAuMyw4NSwxMjksODVjMTIuNSwwLDMwLjYtMi42LDMwLjYtMTcuNWMwLTEuMiwwLTIuMy0wLjMtMy40TDE2MS41LDczLjZ6Ii8+CgkJPC9nPgoJCTxwYXRoIGQ9Ik01ODEuMiw5NC4zYzAsMTEuOSw3LjIsMTcuNywyMC4yLDE3LjdjMy4yLDAsOC42LTAuNywxMS45LTEuN1Y5Ni41Yy0yLjgsMC44LTQuOSwxLjItNy43LDEuMmMtNS40LDAtNy40LTEuNy03LjQtNi43CgkJCVY2OS44aDE1LjZWNTUuNmgtMTUuNnYtMThsLTE3LDMuN3YxNC4zSDU3MHYxNC4yaDExLjNWOTQuM3ogTTUyOC4zLDk0LjZjMC0zLjcsMy43LTUuNSw5LjMtNS41YzMuNywwLDcsMC41LDEwLjEsMS4zdjcuMgoJCQljLTMuMiwxLjgtNi44LDIuNi0xMC42LDIuNkM1MzEuNiwxMDAuMiw1MjguMyw5OC4xLDUyOC4zLDk0LjYgTTUzMy41LDExMi4yYzYsMCwxMC44LTEuMywxNS40LTQuM3YzLjRoMTYuOFY3NS42CgkJCWMwLTEzLjYtOS4xLTIxLTI0LjQtMjFjLTguNSwwLTE2LjksMi0yNiw2LjFsNi4xLDEyLjVjNi41LTIuNywxMi00LjQsMTYuOC00LjRjNywwLDEwLjYsMi43LDEwLjYsOC4zdjIuNwoJCQljLTQtMS4xLTguMi0xLjYtMTIuNi0xLjZjLTE0LjMsMC0yMi45LDYtMjIuOSwxNi43QzUxMy4zLDEwNC43LDUyMS4xLDExMi4yLDUzMy41LDExMi4yIE00NDEuMSwxMTEuMmgxOC4xVjgyLjRoMzAuM3YyOC44aDE4LjEKCQkJVjM3LjZoLTE4LjF2MjguM2gtMzAuM1YzNy42aC0xOC4xVjExMS4yeiBNMzcyLjEsODMuNGMwLTgsNi4zLTE0LjEsMTQuNi0xNC4xYzQuNiwwLDguOCwxLjYsMTEuOCw0LjNWOTNjLTMsMi45LTcsNC40LTExLjgsNC40CgkJCUMzNzguNSw5Ny41LDM3Mi4xLDkxLjQsMzcyLjEsODMuNCBNMzk4LjcsMTExLjJoMTYuOFYzMy45bC0xNywzLjd2MjAuOWMtNC4yLTIuNC05LTMuNy0xNC4yLTMuN2MtMTYuMiwwLTI4LjksMTIuNS0yOC45LDI4LjUKCQkJYzAsMTYsMTIuNSwyOC42LDI4LjQsMjguNmM1LjUsMCwxMC42LTEuNywxNC45LTQuOFYxMTEuMnogTTMyMS41LDY4LjVjNS40LDAsOS45LDMuNSwxMS43LDguOEgzMTAKCQkJQzMxMS43LDcxLjgsMzE1LjksNjguNSwzMjEuNSw2OC41IE0yOTIuOCw4My41YzAsMTYuMiwxMy4zLDI4LjgsMzAuMywyOC44YzkuNCwwLDE2LjItMi41LDIzLjItOC40bC0xMS4zLTEwCgkJCWMtMi42LDIuNy02LjUsNC4yLTExLjEsNC4yYy02LjMsMC0xMS41LTMuNS0xMy43LTguOGgzOS42Vjg1YzAtMTcuNy0xMS45LTMwLjQtMjguMS0zMC40QzMwNS42LDU0LjcsMjkyLjgsNjcuMywyOTIuOCw4My41CgkJCSBNMjYzLjUsNTMuMWM2LDAsOS40LDMuOCw5LjQsOC4zcy0zLjQsOC4zLTkuNCw4LjNoLTE3LjlWNTMuMUgyNjMuNXogTTIyNy41LDExMS4yaDE4LjFWODQuNGgxMy44bDEzLjksMjYuOGgyMC4ybC0xNi4yLTI5LjQKCQkJYzguNy0zLjgsMTMuOS0xMS43LDEzLjktMjAuN2MwLTEzLjMtMTAuNC0yMy41LTI2LTIzLjVoLTM3LjdWMTExLjJ6Ii8+Cgk8L2c+CjwvZz4KPC9zdmc+Cg==
+    mediatype: image/svg+xml
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - '*'
+          resources:
+          - customresourcedefinitions
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - '*'
+          resources:
+          - deployments
+          verbs:
+          - '*'
+        - apiGroups:
+          - '*'
+          resources:
+          - replicasets
+          verbs:
+          - '*'
+        - apiGroups:
+          - '*'
+          resources:
+          - services
+          verbs:
+          - '*'
+        - apiGroups:
+          - '*'
+          resources:
+          - statefulsets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - addons.managed.openshift.io
+          resources:
+          - addons
+          verbs:
+          - get
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resources:
+          - mutatingwebhookconfigurations
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resources:
+          - validatingwebhookconfigurations
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - apiextensions.k8s.io
+          resources:
+          - customresourcedefinitions
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - watch
+        - apiGroups:
+          - apiregistration.k8s.io
+          resources:
+          - apiservices
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          verbs:
+          - '*'
+        - apiGroups:
+          - apps
+          resources:
+          - deployments/finalizers
+          verbs:
+          - '*'
+        - apiGroups:
+          - apps
+          resources:
+          - replicasets
+          verbs:
+          - '*'
+        - apiGroups:
+          - apps
+          resources:
+          - statefulsets
+          verbs:
+          - '*'
+        - apiGroups:
+          - argoproj.io
+          resources:
+          - workflows
+          verbs:
+          - '*'
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+          - get
+        - apiGroups:
+          - authorino.kuadrant.io
+          resources:
+          - authconfigs
+          verbs:
+          - '*'
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+          - get
+        - apiGroups:
+          - authorization.openshift.io
+          resources:
+          - clusterrolebindings
+          verbs:
+          - '*'
+        - apiGroups:
+          - authorization.openshift.io
+          resources:
+          - clusterroles
+          verbs:
+          - '*'
+        - apiGroups:
+          - authorization.openshift.io
+          resources:
+          - rolebindings
+          verbs:
+          - '*'
+        - apiGroups:
+          - authorization.openshift.io
+          resources:
+          - roles
+          verbs:
+          - '*'
+        - apiGroups:
+          - autoscaling
+          resources:
+          - horizontalpodautoscalers
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - autoscaling.openshift.io
+          resources:
+          - machineautoscalers
+          verbs:
+          - delete
+          - list
+          - patch
+          - get
+        - apiGroups:
+          - autoscaling.openshift.io
+          resources:
+          - machinesets
+          verbs:
+          - delete
+          - list
+          - patch
+          - get
+        - apiGroups:
+          - batch
+          resources:
+          - cronjobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - batch
+          resources:
+          - jobs
+          verbs:
+          - '*'
+        - apiGroups:
+          - batch
+          resources:
+          - jobs/status
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - build.openshift.io
+          resources:
+          - buildconfigs
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        - apiGroups:
+          - build.openshift.io
+          resources:
+          - buildconfigs/instantiate
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - watch
+        - apiGroups:
+          - build.openshift.io
+          resources:
+          - builds
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificates
+          - issuers
+          verbs:
+          - create
+          - patch
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - clusterversions
+          verbs:
+          - list
+          - watch
+          - get
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - ingresses
+          verbs:
+          - get
+        - apiGroups:
+          - console.openshift.io
+          resources:
+          - consolelinks
+          verbs:
+          - create
+          - delete
+          - get
+          - patch
+        - apiGroups:
+          - console.openshift.io
+          resources:
+          - odhquickstarts
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - clusterversions
+          verbs:
+          - list
+          - watch
+          - get
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps/status
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - ""
+          resources:
+          - deployments
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - endpoints
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - namespaces/finalizers
+          verbs:
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - ""
+          resources:
+          - persistentvolumeclaims
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - persistentvolumes
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - pods/exec
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - pods/log
+          verbs:
+          - '*'
+        - apiGroups:
+          - ""
+          resources:
+          - rhmis
+          verbs:
+          - list
+          - watch
+          - get
+        - apiGroups:
+          - ""
+          resources:
+          - secrets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - secrets/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - serviceaccounts
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - services
+          verbs:
+          - '*'
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - services/finalizers
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - custom.tekton.dev
+          resources:
+          - pipelineloops
+          verbs:
+          - '*'
+        - apiGroups:
+          - dashboard.opendatahub.io
+          resources:
+          - acceleratorprofiles
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+        - apiGroups:
+          - dashboard.opendatahub.io
+          resources:
+          - odhapplications
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+        - apiGroups:
+          - dashboard.opendatahub.io
+          resources:
+          - odhdocuments
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+        - apiGroups:
+          - datasciencecluster.opendatahub.io
+          resources:
+          - datascienceclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - datasciencecluster.opendatahub.io
+          resources:
+          - datascienceclusters/finalizers
+          verbs:
+          - patch
+          - update
+        - apiGroups:
+          - datasciencecluster.opendatahub.io
+          resources:
+          - datascienceclusters/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - datasciencepipelinesapplications.opendatahub.io
+          resources:
+          - datasciencepipelinesapplications
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - datasciencepipelinesapplications.opendatahub.io
+          resources:
+          - datasciencepipelinesapplications/finalizers
+          verbs:
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - datasciencepipelinesapplications.opendatahub.io
+          resources:
+          - datasciencepipelinesapplications/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - dscinitialization.opendatahub.io
+          resources:
+          - dscinitializations
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - dscinitialization.opendatahub.io
+          resources:
+          - dscinitializations/finalizers
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - dscinitialization.opendatahub.io
+          resources:
+          - dscinitializations/status
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - events.k8s.io
+          resources:
+          - events
+          verbs:
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        - apiGroups:
+          - extensions
+          resources:
+          - deployments
+          verbs:
+          - '*'
+        - apiGroups:
+          - extensions
+          resources:
+          - ingresses
+          verbs:
+          - delete
+          - get
+          - list
+          - patch
+          - watch
+        - apiGroups:
+          - extensions
+          resources:
+          - replicasets
+          verbs:
+          - '*'
+        - apiGroups:
+          - features.opendatahub.io
+          resources:
+          - featuretrackers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - features.opendatahub.io
+          resources:
+          - featuretrackers/status
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - image.openshift.io
+          resources:
+          - imagestreams
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - image.openshift.io
+          resources:
+          - imagestreamtags
+          verbs:
+          - get
+        - apiGroups:
+          - image.openshift.io
+          resources:
+          - registry/metrics
+          verbs:
+          - get
+        - apiGroups:
+          - integreatly.org
+          resources:
+          - rhmis
+          verbs:
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        - apiGroups:
+          - machine.openshift.io
+          resources:
+          - machineautoscalers
+          verbs:
+          - delete
+          - list
+          - patch
+          - get
+        - apiGroups:
+          - machine.openshift.io
+          resources:
+          - machinesets
+          verbs:
+          - delete
+          - list
+          - patch
+          - get
+        - apiGroups:
+          - machinelearning.seldon.io
+          resources:
+          - seldondeployments
+          verbs:
+          - '*'
+        - apiGroups:
+          - maistra.io
+          resources:
+          - servicemeshcontrolplanes
+          verbs:
+          - create
+          - get
+          - list
+          - patch
+          - update
+          - use
+          - watch
+        - apiGroups:
+          - maistra.io
+          resources:
+          - servicemeshmemberrolls
+          verbs:
+          - create
+          - get
+          - list
+          - patch
+          - update
+          - use
+          - watch
+        - apiGroups:
+          - maistra.io
+          resources:
+          - servicemeshmembers
+          verbs:
+          - create
+          - get
+          - list
+          - patch
+          - update
+          - use
+          - watch
+        - apiGroups:
+          - maistra.io
+          resources:
+          - servicemeshmembers/finalizers
+          verbs:
+          - create
+          - get
+          - list
+          - patch
+          - update
+          - use
+          - watch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - podmonitors
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheuses
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - patch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheuses/finalizers
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - patch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheuses/status
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - patch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheusrules
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - patch
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - servicemonitors
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - networking.istio.io
+          resources:
+          - envoyfilters
+          verbs:
+          - '*'
+        - apiGroups:
+          - networking.istio.io
+          resources:
+          - gateways
+          verbs:
+          - '*'
+        - apiGroups:
+          - networking.istio.io
+          resources:
+          - virtualservices
+          verbs:
+          - '*'
+        - apiGroups:
+          - networking.istio.io
+          resources:
+          - virtualservices/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - networking.istio.io
+          resources:
+          - virtualservices/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - ingresses
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - oauth.openshift.io
+          resources:
+          - oauthclients
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - opendatahub.io
+          resources:
+          - odhdashboardconfigs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - operator.authorino.kuadrant.io
+          resources:
+          - authorinos
+          verbs:
+          - '*'
+        - apiGroups:
+          - operator.knative.dev
+          resources:
+          - knativeservings
+          verbs:
+          - '*'
+        - apiGroups:
+          - operator.openshift.io
+          resources:
+          - consoles
+          verbs:
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        - apiGroups:
+          - operator.openshift.io
+          resources:
+          - ingresscontrollers
+          verbs:
+          - delete
+          - get
+          - list
+          - patch
+          - watch
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - catalogsources
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - clusterserviceversions
+          verbs:
+          - delete
+          - get
+          - list
+          - update
+          - watch
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - customresourcedefinitions
+          verbs:
+          - create
+          - delete
+          - get
+          - patch
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - operatorconditions
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - operators.coreos.com
+          resources:
+          - subscriptions
+          verbs:
+          - delete
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - ray.io
+          resources:
+          - rayclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+        - apiGroups:
+          - ray.io
+          resources:
+          - rayjobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ray.io
+          resources:
+          - rayservices
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterrolebindings
+          verbs:
+          - '*'
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterroles
+          verbs:
+          - '*'
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - rolebindings
+          verbs:
+          - '*'
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - roles
+          verbs:
+          - '*'
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routers/federate
+          verbs:
+          - get
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routers/metrics
+          verbs:
+          - get
+        - apiGroups:
+          - route.openshift.io
+          resources:
+          - routes
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - security.istio.io
+          resources:
+          - authorizationpolicies
+          verbs:
+          - '*'
+        - apiGroups:
+          - security.openshift.io
+          resources:
+          - securitycontextconstraints
+          verbs:
+          - '*'
+        - apiGroups:
+          - security.openshift.io
+          resourceNames:
+          - anyuid
+          resources:
+          - securitycontextconstraints
+          verbs:
+          - '*'
+        - apiGroups:
+          - security.openshift.io
+          resourceNames:
+          - restricted
+          resources:
+          - securitycontextconstraints
+          verbs:
+          - '*'
+        - apiGroups:
+          - serving.knative.dev
+          resources:
+          - services
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.knative.dev
+          resources:
+          - services/finalizers
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.knative.dev
+          resources:
+          - services/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - clusterservingruntimes
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - clusterservingruntimes/finalizers
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - clusterservingruntimes/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferencegraphs
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - get
+          - watch
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferencegraphs/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferenceservices
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferenceservices/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - inferenceservices/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - predictors
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - predictors/finalizers
+          verbs:
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - predictors/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - servingruntimes
+          verbs:
+          - '*'
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - servingruntimes/finalizers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - servingruntimes/status
+          verbs:
+          - patch
+          - update
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - trainedmodels
+          verbs:
+          - create
+          - delete
+          - list
+          - patch
+          - update
+          - watch
+          - get
+        - apiGroups:
+          - serving.kserve.io
+          resources:
+          - trainedmodels/status
+          verbs:
+          - delete
+          - patch
+          - update
+          - get
+        - apiGroups:
+          - snapshot.storage.k8s.io
+          resources:
+          - volumesnapshots
+          verbs:
+          - create
+          - delete
+          - get
+          - patch
+        - apiGroups:
+          - tekton.dev
+          resources:
+          - '*'
+          verbs:
+          - '*'
+        - apiGroups:
+          - template.openshift.io
+          resources:
+          - templates
+          verbs:
+          - '*'
+        - apiGroups:
+          - trustyai.opendatahub.io
+          resources:
+          - trustyaiservices
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - trustyai.opendatahub.io
+          resources:
+          - trustyaiservices/finalizers
+          verbs:
+          - update
+          - get
+        - apiGroups:
+          - trustyai.opendatahub.io
+          resources:
+          - trustyaiservices/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - user.openshift.io
+          resources:
+          - groups
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - watch
+        - apiGroups:
+          - user.openshift.io
+          resources:
+          - users
+          verbs:
+          - delete
+          - list
+          - patch
+          - watch
+          - get
+        serviceAccountName: redhat-ods-operator-controller-manager
+      deployments:
+      - label:
+          name: rhods-operator
+        name: rhods-operator
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              name: rhods-operator
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              creationTimestamp: null
+              labels:
+                name: rhods-operator
+            spec:
+              containers:
+              - args:
+                - --health-probe-bind-address=:8081
+                - --metrics-bind-address=0.0.0.0:8080
+                - --leader-elect
+                command:
+                - /manager
+                env:
+                - name: OPERATOR_NAME
+                  value: rhods-operator
+                - name: OPERATOR_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: DEFAULT_MANIFESTS_PATH
+                  value: /opt/manifests
+                - name: RELATED_IMAGE_ODH_DASHBOARD_IMAGE
+                  value: registry.redhat.io/rhoai/odh-dashboard-rhel8@sha256:8e903faa864fdfe311a6b4959daa970aa4651d76f4cbbc3db9c686ccfb7c7284
+                - name: RELATED_IMAGE_ODH_KF_NOTEBOOK_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-kf-notebook-controller-rhel8@sha256:10e2b1fb3dbc4e3879c65dfd1926f62dadfa45b119c6b2fd6ca314ad71993817
+                - name: RELATED_IMAGE_ODH_NOTEBOOK_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-notebook-controller-rhel8@sha256:33c54cb43b2248aef5dfce20c0cae7d730b4837b536ed2c21cf9f7094106a3ac
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_PERSISTENCEAGENT_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-persistenceagent-rhel8@sha256:5d293ed2cd602fd4ace40145b8e60b04f7048c514147ba886c549b716d4cb66d
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_API_SERVER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-api-server-rhel8@sha256:0b061fc48d4446c408097fd2082d1ed0a2963ba3dacad91e9174e122b7001587
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_CACHE_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-cache-rhel8@sha256:da874c5aac073e15cf696d6d49840e117d6e94b08a67672ab691724af87f6ab3
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_SCHEDULEDWORKFLOW_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-scheduledworkflow-rhel8@sha256:084c67d7f86fed342f2eb3c66c54beac8c5d42dc1edd0df42704fbc166aa4509
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_ARTIFACT_MANAGER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-artifact-manager-rhel8@sha256:cf04c492d8ad9d2782f91c629e264d90afe6a93332e56cffe03ac201e0a50ac5
+                - name: RELATED_IMAGE_ODH_DATA_SCIENCE_PIPELINES_OPERATOR_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-data-science-pipelines-operator-controller-rhel8@sha256:3ce792e6e01c2d9eec3bd24f11f1d80c9195aa6aa636e9b5b262a5628baa1405
+                - name: RELATED_IMAGE_ODH_MODELMESH_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-modelmesh-serving-controller-rhel8@sha256:b6dd136bdce16f5f26ae00f229441c43f62b1a16e64c5329b04df4e88de77c27
+                - name: RELATED_IMAGE_ODH_MODEL_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-model-controller-rhel8@sha256:7022044ea533c24131c18449bffd2acc9267f6b795e8b12fe645345b1f9ce87b
+                - name: RELATED_IMAGE_ODH_MM_REST_PROXY_IMAGE
+                  value: registry.redhat.io/rhoai/odh-mm-rest-proxy-rhel8@sha256:078478d8b55336e81b0080faef625c445dce39bc200765149f073039fb5f77ee
+                - name: RELATED_IMAGE_ODH_MODELMESH_IMAGE
+                  value: registry.redhat.io/rhoai/odh-modelmesh-rhel8@sha256:2eb179e9cd22bf4a85d990508ede72fe279ec92f9ac60dbfe4dbc43f7d444b09
+                - name: RELATED_IMAGE_ODH_MODELMESH_RUNTIME_ADAPTER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-modelmesh-runtime-adapter-rhel8@sha256:3d4e39039afe33ae7841258cc4bfe986755b9faefedf8a964f2c3826626d6d09
+                - name: RELATED_IMAGE_ODH_TRUSTYAI_SERVICE_IMAGE
+                  value: registry.redhat.io/rhoai/odh-trustyai-service-rhel8@sha256:d8779d034972f30712d134e0d5b09e3f79e91a4a544794a03207ebfacc771480
+                - name: RELATED_IMAGE_ODH_TRUSTYAI_SERVICE_OPERATOR_IMAGE
+                  value: registry.redhat.io/rhoai/odh-trustyai-service-operator-rhel8@sha256:62f44248375aa0dbb6686b26e28ee4defa3381a09941825ecd5d82533dac11b4
+                - name: RELATED_IMAGE_ODH_CODEFLARE_OPERATOR_IMAGE
+                  value: registry.redhat.io/rhoai/odh-codeflare-operator-rhel8@sha256:f7957a99974f5fde48821f833ac9b48aa6b3cf753176ce57172b15274728dc95
+                - name: RELATED_IMAGE_ODH_KUBERAY_OPERATOR_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-kuberay-operator-controller-rhel8@sha256:1547f6a4bf4f775efd25ff3eca9ff66212abfcd064fc11a9d1b5ec5c42992ffe
+                - name: RELATED_IMAGE_ODH_KUEUE_CONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-kueue-controller-rhel8@sha256:8dcdf40eb865db1d535096a427a87b529e69dd4cffa2b93efde54d9de92ac4de
+                - name: RELATED_IMAGE_ODH_MLMD_GRPC_SERVER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-mlmd-grpc-server-rhel8@sha256:293630db7b10a89b4695d5f84721879d137d7ef618965d9fe3a1b60506c070de
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_API_SERVER_V2_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-api-server-v2-rhel8@sha256:57c0aca35e6ca40f0d2db044decabdd5244c749da1233a04ed585f37566e5caa
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_PERSISTENCEAGENT_V2_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-persistenceagent-v2-rhel8@sha256:b90b63e3c5de629eb89798d818218104158a5401220397ddbc7072a390e46bdd
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_SCHEDULEDWORKFLOW_V2_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-scheduledworkflow-v2-rhel8@sha256:bd3c7607b526720ab63adc2e84be145ad186575c8ebe4bae99b93292aab6f530
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_DRIVER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-driver-rhel8@sha256:16a711ba5c770c3b93e9a5736735f972df9451a9a1903192fcb486aa929a44b7
+                - name: RELATED_IMAGE_ODH_ML_PIPELINES_LAUNCHER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-ml-pipelines-launcher-rhel8@sha256:e8aa5ae0a36dc50bdc740d6d9753b05f2174e68a7edbd6c5b0ce3afd194c7a6e
+                - name: RELATED_IMAGE_ODH_DATA_SCIENCE_PIPELINES_ARGO_ARGOEXEC_IMAGE
+                  value: registry.redhat.io/rhoai/odh-data-science-pipelines-argo-argoexec-rhel8@sha256:37572cc0c20b16760cabd7bdab399cd595510bfde8ccbfd96a4fc7678eb2efc1
+                - name: RELATED_IMAGE_ODH_DATA_SCIENCE_PIPELINES_ARGO_WORKFLOWCONTROLLER_IMAGE
+                  value: registry.redhat.io/rhoai/odh-data-science-pipelines-argo-workflowcontroller-rhel8@sha256:f9ffc83c23f959ae57a8a6a544afd5175c9f4230b017de6f64b033c582f107d2
+                - name: RELATED_IMAGE_ODH_TRAINING_OPERATOR_IMAGE
+                  value: registry.redhat.io/rhoai/odh-training-operator-rhel8@sha256:72aeeb54180dcbecff0d0eee795b17dda10e4554f780a5315939f9ef8b5f35e9
+                image: registry.redhat.io/rhoai/odh-rhel8-operator@sha256:e79510dcb0ca6ac72381f8abb9c65249c5424785a6db08b61b2cbfa82d70d705
+                imagePullPolicy: Always
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: rhods-operator
+                ports:
+                - containerPort: 8080
+                  name: http
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 4Gi
+                  requests:
+                    cpu: 500m
+                    memory: 256Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+              serviceAccountName: redhat-ods-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - Operator
+  - OpenShift
+  - Open Data Hub
+  - opendatahub
+  - Red Hat OpenShift AI
+  - notebooks
+  - serving
+  - training
+  - kserve
+  - distributed-workloads
+  - trustyai
+  links:
+  - name: Red Hat OpenShift AI
+    url: https://www.redhat.com/en/technologies/cloud-computing/openshift/openshift-ai
+  maintainers:
+  - email: managed-open-data-hub@redhat.com
+    name: Red Hat Openshift AI
+  maturity: stable
+  minKubeVersion: 1.25.0
+  provider:
+    name: Red Hat, Inc.
+  relatedImages:
+  - image: registry.redhat.io/rhoai/odh-rhel8-operator@sha256:e79510dcb0ca6ac72381f8abb9c65249c5424785a6db08b61b2cbfa82d70d705
+    name: odh-rhel8-operator-e79510dcb0ca6ac72381f8abb9c65249c5424785a6db08b61b2cbfa82d70d705-annotation
+  - image: registry.redhat.io/rhoai/odh-rhel8-operator@sha256:e79510dcb0ca6ac72381f8abb9c65249c5424785a6db08b61b2cbfa82d70d705
+    name: rhods-operator
+  - image: registry.redhat.io/rhoai/odh-dashboard-rhel8@sha256:8e903faa864fdfe311a6b4959daa970aa4651d76f4cbbc3db9c686ccfb7c7284
+    name: odh_dashboard_image
+  - image: registry.redhat.io/rhoai/odh-kf-notebook-controller-rhel8@sha256:10e2b1fb3dbc4e3879c65dfd1926f62dadfa45b119c6b2fd6ca314ad71993817
+    name: odh_kf_notebook_controller_image
+  - image: registry.redhat.io/rhoai/odh-notebook-controller-rhel8@sha256:33c54cb43b2248aef5dfce20c0cae7d730b4837b536ed2c21cf9f7094106a3ac
+    name: odh_notebook_controller_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-persistenceagent-rhel8@sha256:5d293ed2cd602fd4ace40145b8e60b04f7048c514147ba886c549b716d4cb66d
+    name: odh_ml_pipelines_persistenceagent_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-api-server-rhel8@sha256:0b061fc48d4446c408097fd2082d1ed0a2963ba3dacad91e9174e122b7001587
+    name: odh_ml_pipelines_api_server_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-cache-rhel8@sha256:da874c5aac073e15cf696d6d49840e117d6e94b08a67672ab691724af87f6ab3
+    name: odh_ml_pipelines_cache_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-scheduledworkflow-rhel8@sha256:084c67d7f86fed342f2eb3c66c54beac8c5d42dc1edd0df42704fbc166aa4509
+    name: odh_ml_pipelines_scheduledworkflow_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-artifact-manager-rhel8@sha256:cf04c492d8ad9d2782f91c629e264d90afe6a93332e56cffe03ac201e0a50ac5
+    name: odh_ml_pipelines_artifact_manager_image
+  - image: registry.redhat.io/rhoai/odh-data-science-pipelines-operator-controller-rhel8@sha256:3ce792e6e01c2d9eec3bd24f11f1d80c9195aa6aa636e9b5b262a5628baa1405
+    name: odh_data_science_pipelines_operator_controller_image
+  - image: registry.redhat.io/rhoai/odh-modelmesh-serving-controller-rhel8@sha256:b6dd136bdce16f5f26ae00f229441c43f62b1a16e64c5329b04df4e88de77c27
+    name: odh_modelmesh_controller_image
+  - image: registry.redhat.io/rhoai/odh-model-controller-rhel8@sha256:7022044ea533c24131c18449bffd2acc9267f6b795e8b12fe645345b1f9ce87b
+    name: odh_model_controller_image
+  - image: registry.redhat.io/rhoai/odh-mm-rest-proxy-rhel8@sha256:078478d8b55336e81b0080faef625c445dce39bc200765149f073039fb5f77ee
+    name: odh_mm_rest_proxy_image
+  - image: registry.redhat.io/rhoai/odh-modelmesh-rhel8@sha256:2eb179e9cd22bf4a85d990508ede72fe279ec92f9ac60dbfe4dbc43f7d444b09
+    name: odh_modelmesh_image
+  - image: registry.redhat.io/rhoai/odh-modelmesh-runtime-adapter-rhel8@sha256:3d4e39039afe33ae7841258cc4bfe986755b9faefedf8a964f2c3826626d6d09
+    name: odh_modelmesh_runtime_adapter_image
+  - image: registry.redhat.io/rhoai/odh-trustyai-service-rhel8@sha256:d8779d034972f30712d134e0d5b09e3f79e91a4a544794a03207ebfacc771480
+    name: odh_trustyai_service_image
+  - image: registry.redhat.io/rhoai/odh-trustyai-service-operator-rhel8@sha256:62f44248375aa0dbb6686b26e28ee4defa3381a09941825ecd5d82533dac11b4
+    name: odh_trustyai_service_operator_image
+  - image: registry.redhat.io/rhoai/odh-codeflare-operator-rhel8@sha256:f7957a99974f5fde48821f833ac9b48aa6b3cf753176ce57172b15274728dc95
+    name: odh_codeflare_operator_image
+  - image: registry.redhat.io/rhoai/odh-kuberay-operator-controller-rhel8@sha256:1547f6a4bf4f775efd25ff3eca9ff66212abfcd064fc11a9d1b5ec5c42992ffe
+    name: odh_kuberay_operator_controller_image
+  - image: registry.redhat.io/rhoai/odh-kueue-controller-rhel8@sha256:8dcdf40eb865db1d535096a427a87b529e69dd4cffa2b93efde54d9de92ac4de
+    name: odh_kueue_controller_image
+  - image: registry.redhat.io/rhoai/odh-mlmd-grpc-server-rhel8@sha256:293630db7b10a89b4695d5f84721879d137d7ef618965d9fe3a1b60506c070de
+    name: odh_mlmd_grpc_server_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-api-server-v2-rhel8@sha256:57c0aca35e6ca40f0d2db044decabdd5244c749da1233a04ed585f37566e5caa
+    name: odh_ml_pipelines_api_server_v2_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-persistenceagent-v2-rhel8@sha256:b90b63e3c5de629eb89798d818218104158a5401220397ddbc7072a390e46bdd
+    name: odh_ml_pipelines_persistenceagent_v2_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-scheduledworkflow-v2-rhel8@sha256:bd3c7607b526720ab63adc2e84be145ad186575c8ebe4bae99b93292aab6f530
+    name: odh_ml_pipelines_scheduledworkflow_v2_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-driver-rhel8@sha256:16a711ba5c770c3b93e9a5736735f972df9451a9a1903192fcb486aa929a44b7
+    name: odh_ml_pipelines_driver_image
+  - image: registry.redhat.io/rhoai/odh-ml-pipelines-launcher-rhel8@sha256:e8aa5ae0a36dc50bdc740d6d9753b05f2174e68a7edbd6c5b0ce3afd194c7a6e
+    name: odh_ml_pipelines_launcher_image
+  - image: registry.redhat.io/rhoai/odh-data-science-pipelines-argo-argoexec-rhel8@sha256:37572cc0c20b16760cabd7bdab399cd595510bfde8ccbfd96a4fc7678eb2efc1
+    name: odh_data_science_pipelines_argo_argoexec_image
+  - image: registry.redhat.io/rhoai/odh-data-science-pipelines-argo-workflowcontroller-rhel8@sha256:f9ffc83c23f959ae57a8a6a544afd5175c9f4230b017de6f64b033c582f107d2
+    name: odh_data_science_pipelines_argo_workflowcontroller_image
+  - image: registry.redhat.io/rhoai/odh-training-operator-rhel8@sha256:72aeeb54180dcbecff0d0eee795b17dda10e4554f780a5315939f9ef8b5f35e9
+    name: odh_training_operator_image
+  - image: registry.redhat.io/openshift-service-mesh/proxyv2-rhel8@sha256:a744c1b386fd5e4f94e43543e829df1bfdd1b564137917372a11da06872f4bcb
+    name: proxyv2-rhel8-a744c1b386fd5e4f94e43543e829df1bfdd1b564137917372a11da06872f4bcb-annotation
+  - image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33
+    name: ose-oauth-proxy-ab112105ac37352a2a4916a39d6736f5db6ab4c29bad4467de8d613e80e9bb33-annotation
+  - image: registry.redhat.io/rhel8/mariadb-103@sha256:3d30992e60774f887c4e7959c81b0c41b0d82d042250b3b56f05ab67fd4cdee1
+    name: mariadb-103-3d30992e60774f887c4e7959c81b0c41b0d82d042250b3b56f05ab67fd4cdee1-annotation
+  - image: registry.redhat.io/ubi8/ubi-micro@sha256:396baed3d689157d96aa7d8988fdfea7eb36684c8335eb391cf1952573e689c1
+    name: ubi-micro-396baed3d689157d96aa7d8988fdfea7eb36684c8335eb391cf1952573e689c1-annotation
+  - image: registry.redhat.io/openshift4/ose-cli@sha256:25fef269ac6e7491cb8340119a9b473acbeb53bc6970ad029fdaae59c3d0ca61
+    name: ose-cli-25fef269ac6e7491cb8340119a9b473acbeb53bc6970ad029fdaae59c3d0ca61-annotation
+  - image: registry.redhat.io/openshift4/ose-prometheus-operator@sha256:4aeb07f66dc39889e3d0e66eee7c4ea2e39ce4025852d1d1eaf662af8bd8eeb6
+    name: ose-prometheus-operator-4aeb07f66dc39889e3d0e66eee7c4ea2e39ce4025852d1d1eaf662af8bd8eeb6-annotation
+  - image: registry.redhat.io/openshift4/ose-prometheus-config-reloader@sha256:bd543e039c7c2b0857a7e0ce34d582b8954a8ad3a3f13a2eaaff2904cdae7c53
+    name: ose-prometheus-config-reloader-bd543e039c7c2b0857a7e0ce34d582b8954a8ad3a3f13a2eaaff2904cdae7c53-annotation
+  - image: registry.redhat.io/openshift4/ose-prometheus-alertmanager@sha256:169b788b3f8eb8909ecc1d698ab0a6bf103b49043c7f5fd569789b179928def6
+    name: ose-prometheus-alertmanager-169b788b3f8eb8909ecc1d698ab0a6bf103b49043c7f5fd569789b179928def6-annotation
+  - image: registry.redhat.io/openshift4/ose-prometheus@sha256:c432e571eb737d55323b5f350b5f714803bf525144cfee3f20782660d9bf10ad
+    name: ose-prometheus-c432e571eb737d55323b5f350b5f714803bf525144cfee3f20782660d9bf10ad-annotation
+  - image: registry.redhat.io/ubi9@sha256:770cf07083e1c85ae69c25181a205b7cdef63c11b794c89b3b487d4670b4c328
+    name: ubi9-770cf07083e1c85ae69c25181a205b7cdef63c11b794c89b3b487d4670b4c328-annotation
+  - image: registry.redhat.io/ubi8/ubi-minimal@sha256:5d2d4d4dbec470f8ffb679915e2a8ae25ad754cd9193fa966deee1ecb7b3ee00
+    name: ubi-minimal-5d2d4d4dbec470f8ffb679915e2a8ae25ad754cd9193fa966deee1ecb7b3ee00-annotation
+  - image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:1ea6a01bf3e63cdcf125c6064cbd4a4a270deaf0f157b3eabb78f60556840366
+    name: ose-oauth-proxy-1ea6a01bf3e63cdcf125c6064cbd4a4a270deaf0f157b3eabb78f60556840366-annotation
+  - image: registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46
+    name: ose-oauth-proxy-4bef31eb993feb6f1096b51b4876c65a6fb1f4401fee97fa4f4542b6b7c9bc46-annotation
+  - image: registry.redhat.io/rhel7/etcd@sha256:d3495b263b103681f1b09a558be43c21989bfc269eb90f84c2609042cebdc626
+    name: etcd-d3495b263b103681f1b09a558be43c21989bfc269eb90f84c2609042cebdc626-annotation
+  - image: registry.redhat.io/openshift4/ose-cli@sha256:75bf9b911b6481dcf29f7942240d1555adaa607eec7fc61bedb7f624f87c36d4
+    name: ose-cli-75bf9b911b6481dcf29f7942240d1555adaa607eec7fc61bedb7f624f87c36d4-annotation
+  replaces: rhods-operator.2.12.0
+  version: 2.13.0
+status:
+  cleanup: {}
+  conditions:
+  - lastTransitionTime: "2024-10-20T17:05:15Z"
+    lastUpdateTime: "2024-10-20T17:05:17Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:05:43Z"
+    lastUpdateTime: "2024-10-20T17:05:43Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:16:32Z"
+    lastUpdateTime: "2024-10-20T17:16:32Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:16:33Z"
+    lastUpdateTime: "2024-10-20T17:16:33Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:16:35Z"
+    lastUpdateTime: "2024-10-20T17:16:35Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:16:37Z"
+    lastUpdateTime: "2024-10-20T17:16:37Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:16:37Z"
+    lastUpdateTime: "2024-10-20T17:16:39Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:17:32Z"
+    lastUpdateTime: "2024-10-20T17:17:32Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:25:58Z"
+    lastUpdateTime: "2024-10-20T17:25:58Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:26:00Z"
+    lastUpdateTime: "2024-10-20T17:26:00Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:26:05Z"
+    lastUpdateTime: "2024-10-20T17:26:05Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:26:06Z"
+    lastUpdateTime: "2024-10-20T17:26:06Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:26:06Z"
+    lastUpdateTime: "2024-10-20T17:26:07Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:27:42Z"
+    lastUpdateTime: "2024-10-20T17:27:42Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:36:29Z"
+    lastUpdateTime: "2024-10-20T17:36:29Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2024-10-20T17:36:30Z"
+    lastUpdateTime: "2024-10-20T17:36:30Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2024-10-20T17:36:30Z"
+    lastUpdateTime: "2024-10-20T17:36:30Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2024-10-20T17:36:31Z"
+    lastUpdateTime: "2024-10-20T17:36:31Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2024-10-20T17:36:31Z"
+    lastUpdateTime: "2024-10-20T17:36:32Z"
+    message: 'installing: waiting for deployment rhods-operator to become ready: deployment
+      "rhods-operator" not available: Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2024-10-20T17:36:42Z"
+    lastUpdateTime: "2024-10-20T17:36:42Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  lastTransitionTime: "2024-10-20T17:36:42Z"
+  lastUpdateTime: "2024-10-20T17:36:42Z"
+  message: The operator is running in redhat-ods-operator but is managing this namespace
+  phase: Succeeded
+  reason: Copied
+  requirementStatus:
+  - group: operators.coreos.com
+    kind: ClusterServiceVersion
+    message: CSV minKubeVersion (1.25.0) less than server version (v1.29.7+6abe8a1)
+    name: rhods-operator.2.13.0
+    status: Present
+    version: v1alpha1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: datascienceclusters.datasciencecluster.opendatahub.io
+    status: Present
+    uuid: 4d2e9183-a35d-42dd-8635-0c1f8a6e1857
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: dscinitializations.dscinitialization.opendatahub.io
+    status: Present
+    uuid: fa63d1a1-98d0-4903-8289-79c3f6b33412
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: featuretrackers.features.opendatahub.io
+    status: Present
+    uuid: ea49513c-48e5-40fe-9a37-faebc7fc3a7b
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["*"],"resources":["customresourcedefinitions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["*"],"resources":["deployments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["*"],"resources":["replicasets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["*"],"resources":["services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["*"],"resources":["statefulsets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["addons.managed.openshift.io"],"resources":["addons"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["admissionregistration.k8s.io"],"resources":["mutatingwebhookconfigurations"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["admissionregistration.k8s.io"],"resources":["validatingwebhookconfigurations"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","watch"],"apiGroups":["apiextensions.k8s.io"],"resources":["customresourcedefinitions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["apiregistration.k8s.io"],"resources":["apiservices"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["apps"],"resources":["deployments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["apps"],"resources":["deployments/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["apps"],"resources":["replicasets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["apps"],"resources":["statefulsets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["argoproj.io"],"resources":["workflows"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get"],"apiGroups":["authentication.k8s.io"],"resources":["tokenreviews"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["authorino.kuadrant.io"],"resources":["authconfigs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get"],"apiGroups":["authorization.k8s.io"],"resources":["subjectaccessreviews"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["authorization.openshift.io"],"resources":["clusterrolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["authorization.openshift.io"],"resources":["clusterroles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["authorization.openshift.io"],"resources":["rolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["authorization.openshift.io"],"resources":["roles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["autoscaling"],"resources":["horizontalpodautoscalers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","get"],"apiGroups":["autoscaling.openshift.io"],"resources":["machineautoscalers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","get"],"apiGroups":["autoscaling.openshift.io"],"resources":["machinesets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["batch"],"resources":["cronjobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["batch"],"resources":["jobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["batch"],"resources":["jobs/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","watch","get"],"apiGroups":["build.openshift.io"],"resources":["buildconfigs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","watch"],"apiGroups":["build.openshift.io"],"resources":["buildconfigs/instantiate"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","watch","get"],"apiGroups":["build.openshift.io"],"resources":["builds"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","patch"],"apiGroups":["cert-manager.io"],"resources":["certificates","issuers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["list","watch","get"],"apiGroups":["config.openshift.io"],"resources":["clusterversions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["config.openshift.io"],"resources":["ingresses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","patch"],"apiGroups":["console.openshift.io"],"resources":["consolelinks"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch"],"apiGroups":["console.openshift.io"],"resources":["odhquickstarts"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["coordination.k8s.io"],"resources":["leases"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["list","watch","get"],"apiGroups":[""],"resources":["clusterversions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["configmaps"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","patch","update"],"apiGroups":[""],"resources":["configmaps/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["deployments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","update","watch"],"apiGroups":[""],"resources":["endpoints"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["events"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["namespaces"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","update","watch","get"],"apiGroups":[""],"resources":["namespaces/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["persistentvolumeclaims"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["persistentvolumes"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["pods"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["pods/exec"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":[""],"resources":["pods/log"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["list","watch","get"],"apiGroups":[""],"resources":["rhmis"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["secrets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["secrets/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["serviceaccounts"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*","create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":[""],"resources":["services/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["custom.tekton.dev"],"resources":["pipelineloops"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch"],"apiGroups":["dashboard.opendatahub.io"],"resources":["acceleratorprofiles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch"],"apiGroups":["dashboard.opendatahub.io"],"resources":["odhapplications"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch"],"apiGroups":["dashboard.opendatahub.io"],"resources":["odhdocuments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["datasciencecluster.opendatahub.io"],"resources":["datascienceclusters"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["patch","update"],"apiGroups":["datasciencecluster.opendatahub.io"],"resources":["datascienceclusters/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","patch","update"],"apiGroups":["datasciencecluster.opendatahub.io"],"resources":["datascienceclusters/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["datasciencepipelinesapplications.opendatahub.io"],"resources":["datasciencepipelinesapplications"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["patch","update","get"],"apiGroups":["datasciencepipelinesapplications.opendatahub.io"],"resources":["datasciencepipelinesapplications/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","patch","update"],"apiGroups":["datasciencepipelinesapplications.opendatahub.io"],"resources":["datasciencepipelinesapplications/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["dscinitialization.opendatahub.io"],"resources":["dscinitializations"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","patch","update"],"apiGroups":["dscinitialization.opendatahub.io"],"resources":["dscinitializations/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","patch","update"],"apiGroups":["dscinitialization.opendatahub.io"],"resources":["dscinitializations/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","watch","get"],"apiGroups":["events.k8s.io"],"resources":["events"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["extensions"],"resources":["deployments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","list","patch","watch"],"apiGroups":["extensions"],"resources":["ingresses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["extensions"],"resources":["replicasets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["features.opendatahub.io"],"resources":["featuretrackers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","patch","update"],"apiGroups":["features.opendatahub.io"],"resources":["featuretrackers/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["image.openshift.io"],"resources":["imagestreams"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["image.openshift.io"],"resources":["imagestreamtags"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["image.openshift.io"],"resources":["registry/metrics"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","watch","get"],"apiGroups":["integreatly.org"],"resources":["rhmis"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","get"],"apiGroups":["machine.openshift.io"],"resources":["machineautoscalers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","get"],"apiGroups":["machine.openshift.io"],"resources":["machinesets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["machinelearning.seldon.io"],"resources":["seldondeployments"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get","list","patch","update","use","watch"],"apiGroups":["maistra.io"],"resources":["servicemeshcontrolplanes"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get","list","patch","update","use","watch"],"apiGroups":["maistra.io"],"resources":["servicemeshmemberrolls"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get","list","patch","update","use","watch"],"apiGroups":["maistra.io"],"resources":["servicemeshmembers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","get","list","patch","update","use","watch"],"apiGroups":["maistra.io"],"resources":["servicemeshmembers/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["monitoring.coreos.com"],"resources":["podmonitors"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","deletecollection","get","patch"],"apiGroups":["monitoring.coreos.com"],"resources":["prometheuses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","deletecollection","get","patch"],"apiGroups":["monitoring.coreos.com"],"resources":["prometheuses/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","deletecollection","get","patch"],"apiGroups":["monitoring.coreos.com"],"resources":["prometheuses/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","deletecollection","get","patch"],"apiGroups":["monitoring.coreos.com"],"resources":["prometheusrules"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","deletecollection","get","list","patch","update","watch"],"apiGroups":["monitoring.coreos.com"],"resources":["servicemonitors"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["networking.istio.io"],"resources":["envoyfilters"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["networking.istio.io"],"resources":["gateways"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["networking.istio.io"],"resources":["virtualservices"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["networking.istio.io"],"resources":["virtualservices/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["networking.istio.io"],"resources":["virtualservices/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["networking.k8s.io"],"resources":["ingresses"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["networking.k8s.io"],"resources":["networkpolicies"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["oauth.openshift.io"],"resources":["oauthclients"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["opendatahub.io"],"resources":["odhdashboardconfigs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["operator.authorino.kuadrant.io"],"resources":["authorinos"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["operator.knative.dev"],"resources":["knativeservings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","watch","get"],"apiGroups":["operator.openshift.io"],"resources":["consoles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","list","patch","watch"],"apiGroups":["operator.openshift.io"],"resources":["ingresscontrollers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["operators.coreos.com"],"resources":["catalogsources"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","list","update","watch"],"apiGroups":["operators.coreos.com"],"resources":["clusterserviceversions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","patch"],"apiGroups":["operators.coreos.com"],"resources":["customresourcedefinitions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":["operators.coreos.com"],"resources":["operatorconditions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","get","list","watch"],"apiGroups":["operators.coreos.com"],"resources":["subscriptions"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch"],"apiGroups":["ray.io"],"resources":["rayclusters"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["ray.io"],"resources":["rayjobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["ray.io"],"resources":["rayservices"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterrolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["clusterroles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["rolebindings"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["rbac.authorization.k8s.io"],"resources":["roles"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["route.openshift.io"],"resources":["routers/federate"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get"],"apiGroups":["route.openshift.io"],"resources":["routers/metrics"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["route.openshift.io"],"resources":["routes"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["security.istio.io"],"resources":["authorizationpolicies"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["security.openshift.io"],"resources":["securitycontextconstraints"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["security.openshift.io"],"resources":["securitycontextconstraints"],"resourceNames":["anyuid"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["security.openshift.io"],"resources":["securitycontextconstraints"],"resourceNames":["restricted"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.knative.dev"],"resources":["services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.knative.dev"],"resources":["services/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.knative.dev"],"resources":["services/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.kserve.io"],"resources":["clusterservingruntimes"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.kserve.io"],"resources":["clusterservingruntimes/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["clusterservingruntimes/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","get","watch"],"apiGroups":["serving.kserve.io"],"resources":["inferencegraphs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["inferencegraphs/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["serving.kserve.io"],"resources":["inferenceservices"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["serving.kserve.io"],"resources":["inferenceservices/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["inferenceservices/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.kserve.io"],"resources":["predictors"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["predictors/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["predictors/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["serving.kserve.io"],"resources":["servingruntimes"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["serving.kserve.io"],"resources":["servingruntimes/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["patch","update"],"apiGroups":["serving.kserve.io"],"resources":["servingruntimes/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","list","patch","update","watch","get"],"apiGroups":["serving.kserve.io"],"resources":["trainedmodels"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","patch","update","get"],"apiGroups":["serving.kserve.io"],"resources":["trainedmodels/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","patch"],"apiGroups":["snapshot.storage.k8s.io"],"resources":["volumesnapshots"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["tekton.dev"],"resources":["*"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["*"],"apiGroups":["template.openshift.io"],"resources":["templates"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["trustyai.opendatahub.io"],"resources":["trustyaiservices"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["update","get"],"apiGroups":["trustyai.opendatahub.io"],"resources":["trustyaiservices/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","patch","update"],"apiGroups":["trustyai.opendatahub.io"],"resources":["trustyaiservices/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","watch"],"apiGroups":["user.openshift.io"],"resources":["groups"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["delete","list","patch","watch","get"],"apiGroups":["user.openshift.io"],"resources":["users"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: redhat-ods-operator-controller-manager
+    status: Present
+    version: v1
