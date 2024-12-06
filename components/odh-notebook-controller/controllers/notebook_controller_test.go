@@ -47,7 +47,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 	// Define utility constants for testing timeouts/durations and intervals.
 	const (
 		duration = 10 * time.Second
-		interval = 2 * time.Second
+		interval = 111 * time.Millisecond
 	)
 
 	When("Creating a Notebook", func() {
@@ -93,7 +93,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has created the Route")
 			Eventually(func() error {
@@ -107,7 +106,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual Route modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
 			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the Route spec")
 			Eventually(func() (string, error) {
@@ -124,7 +122,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Route when deleted", func() {
 			By("By deleting the notebook route")
 			Expect(cli.Delete(ctx, route)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Route")
 			Eventually(func() error {
@@ -153,7 +150,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
@@ -276,7 +272,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By creating a new Notebook")
 			notebook := createNotebook(Name, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
@@ -311,6 +306,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 2 certificates there in ca-bundle.crt
 			//   - both certificates are valid
+			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
+			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
@@ -331,7 +328,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By updating the Notebook's image")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
@@ -340,7 +336,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook's image is updated")
 			Eventually(func() string {
@@ -383,7 +378,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
@@ -416,6 +410,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 2 certificates there in ca-bundle.crt
 			//   - both certificates are valid
+			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
+			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
@@ -483,7 +479,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has created Network policy to allow only controller traffic")
 			Eventually(func() error {
@@ -505,7 +500,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual NetworkPolicy modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"policyTypes":["Egress"]}}`))
 			Expect(cli.Patch(ctx, notebookNetworkPolicy, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the network policy spec")
 			Eventually(func() (string, error) {
@@ -523,7 +517,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Network Policy when deleted", func() {
 			By("By deleting the notebook OAuth Network Policy")
 			Expect(cli.Delete(ctx, notebookOAuthNetworkPolicy)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the OAuth Network policy")
 			Eventually(func() error {
@@ -661,7 +654,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the webhook has injected the sidecar container")
 			Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrueBecause(cmp.Diff(*notebook, expectedNotebook)))
@@ -686,7 +678,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
 			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the webhook has restored the Notebook spec")
 			Eventually(func() error {
@@ -712,7 +703,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Service Account when deleted", func() {
 			By("By deleting the notebook Service Account")
 			Expect(cli.Delete(ctx, serviceAccount)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Service Account")
 			Eventually(func() error {
@@ -757,7 +747,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Service when deleted", func() {
 			By("By deleting the notebook Service")
 			Expect(cli.Delete(ctx, service)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Service")
 			Eventually(func() error {
@@ -783,7 +772,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Secret when deleted", func() {
 			By("By deleting the notebook Secret")
 			Expect(cli.Delete(ctx, secret)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Secret")
 			Eventually(func() error {
@@ -833,7 +821,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the Route when deleted", func() {
 			By("By deleting the notebook Route")
 			Expect(cli.Delete(ctx, route)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has recreated the Route")
 			Eventually(func() error {
@@ -847,7 +834,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating a manual Route modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
 			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the controller has restored the Route spec")
 			Eventually(func() (string, error) {
@@ -889,7 +875,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
 
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
@@ -1129,7 +1114,7 @@ func createOAuthConfigmap(name, namespace string, label map[string]string, confi
 }
 
 // checkCertConfigMap checks the content of a config map defined by the name and namespace
-// It triest to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
+// It tries to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
 func checkCertConfigMap(ctx context.Context, namespace string, configMapName string, certFileName string, expNumberCerts int) {
 	configMap := &corev1.ConfigMap{}
 	key := types.NamespacedName{Namespace: namespace, Name: configMapName}
