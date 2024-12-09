@@ -83,6 +83,8 @@ jobs:
       branch-name: "v1.9-branch"
       organization: "opendatahub-io"
       generate-pr: "true"
+    secrets:
+      GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
 
   # 4. Check PR merged status
   check-pr-merged:
