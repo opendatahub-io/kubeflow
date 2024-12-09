@@ -1,7 +1,66 @@
-#!/usr/bin/env bash
+#! /usr/bin/env bash
+
+## Description:
+## 
+## This script will ensure a components/notebook-controller/config/component_metadata.yaml file exists and is compliant with
+## https://issues.redhat.com/browse/RHOAISTRAT-327.
+##    - Lots of discussion around the acceptance criteria from this work was also captured in Slack
+##      - see: https://redhat-internal.slack.com/archives/C05NXTEHLGY/p1731327116001979
+##
+## By default, information to populate component_metadata.yaml is extracted from 2 files in the repo:
+##    - ./components/notebook-controller/PROJECT
+##    - ./releasing/version/VERSION
+##
+## If component_metadata.yaml file exists, and attempting to generate any of the required attributes results in an empty string, 
+## then the existing value is preserved.  
+##
+## The script is designed to generate appropriate attribute values implicitly.  It should be able to be executed without providing
+## any of the optional arguments.  In the event an optional argument is provided on the command line, that value is used as-is.
+##
+## It should be noted that while the component_metadata.yaml specification has a root level attribute of 'releases' that is a list,
+## this script only interacts with index 0.
+##
+## Dependencies: 
+##     
+##    - yq:   https://mikefarah.gitbook.io/yq
+##
+## Usage: 
+##
+##      generate-metadata-yaml.sh [-o <output file>] [-n <name>] [-v <version>] [-r <repoUrl>] [-p] [-x] [-h]"
+##          - Intended (eventually) to be invoked as part of a GitHub Action workflow.
+##          - Arguments
+##              - [optional] -o <output file>
+##                  - where the script will write its output
+##                  - defaults to ./components/notebook-controller/config/component-metadata.yaml
+##              - [optional] -n <name>
+##                  - name attribute of 'releases' element at index 0
+##                  - defaults to a value derived from the 'projectName' attribute of ./components/notebook-controller/PROJECT
+##                      - value of 'projectName' is split on the '-' character, each word has the 1st letter uppercased, and then 
+##                      results are joined back together delimited by whitespace
+##                        - ex: notebook-controller -> Notebook Controller
+##              - [optional] -v <version>
+##                  - version attribute of 'releases' element at index 0
+##                  - defaults to a value derived from contents of ./releasing/version/VERSION
+##                      - 1st line of VERSION is read, and any leading 'v' character is removed from content
+##                        - ex: v1.9.0 -> 1.9.0
+##              - [optional] -r <repoUrl>
+##                  - repoUrl attribute of 'releases' element at index 0
+##                  - defaults to a value derived from the 'repo' attribute of ./components/notebook-controller/PROJECT
+##                      - value of 'repo' is split on the '/' character, 1st 3 elements are joined together by the '/' character, 
+##                      and then 'https://' prefix is added
+##                        - ex: github.com/kubeflow/kubeflow/components/notebook-controller -> https://github.com/kubeflow/kubeflow
+##              - [optional] -x 
+##                  - enables tracing on the shell script
+##              - [optional] -h
+##                  - prints a simple usage message
+##  
+##
+
 
 set -uo pipefail
 
+# Description: 
+#   Simple trap function that ensures shell tracing is disabled upon script exit.
 function trap_exit() {
 	rc=$?
 
@@ -12,17 +71,33 @@ function trap_exit() {
 
 trap "trap_exit" EXIT
 
+# Description: 
+#   Helper function that gets invoked when '-h' passed as a command line argument.
+#
+# Returns:
+#   Simple string outlining functionality of the script
+_usage()
+{
+	printf "%s\n" "Usage: $(basename "${0}") -o <output file> [-n <name>] [-v <version>] [-r <repoUrl>] [-p] [-x] [-h]"
+}
+
+# Description: 
+#   Computes the default component_metadata.yaml 'name', 'version', and 'repoUrl' attributes for the 0th element of 'releases'.  If the
+#   value of any attribute was provided on the command line, that value is used as-is and subsequent processing is skipped.
+#
+# Outputs:
+#   metadata_repo_url
+#   metadata_name
+#   metadata_version
 _derive_metadata()
 {
-  # inspired from https://stackoverflow.com/a/29835459
-  current_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
   kf_project_file="${current_dir}/PROJECT"
   if [ -e "${kf_project_file}" ]; then
 
     if [ -z "${metadata_repo_url}" ]; then
       project_repo_reference=$(yq -e '.repo' "${kf_project_file}")
-      project_repo_parts=( $(printf "%s" ${project_repo_reference##https://} | tr '/' ' ') )
+      readarray -td/ project_repo_parts <<< "${project_repo_reference##https://}/"
       github_host="${project_repo_parts[0]}"
       github_owner="${project_repo_parts[1]}"
       github_repo="${project_repo_parts[2]}"
@@ -31,9 +106,12 @@ _derive_metadata()
     fi
 
     if [ -z "${metadata_name}" ]; then
-      project_domain=$(yq -e '.domain' "${kf_project_file}")
-      project_name=$(yq -e '.projectName' "${kf_project_file}")
-      metadata_name="${project_domain} ${project_name}"
+      readarray -td- name_parts <<< "$(yq e '.projectName' PROJECT)-"
+      unset 'name_parts[-1]'
+      for i in "${!name_parts[@]}"; do
+        name_parts[i]="$(tr '[:lower:]' '[:upper:]' <<< "${name_parts[i]:0:1}")${name_parts[i]:1}"
+      done
+      metadata_name="$(printf '%s' "${name_parts[*]}")"
     fi
 
   fi
@@ -42,27 +120,41 @@ _derive_metadata()
     repo_root=$(git rev-parse --show-toplevel)
     version_file="${repo_root}/releasing/version/VERSION"
 
-    metadata_version=$(cat "${version_file}" | head -n 1)
+    raw_version=$(head -n 1 < "${version_file}")
+    metadata_version="${raw_version##v}"
   fi
 }
 
+# Description: 
+#   Computes the component_metadata.yaml 'name', 'version', and 'repoUrl' attributes for the 0th element of 'releases'
+#   based on an existing component_metadata.yaml file.  Processing is skipped for any output variable that already has
+#   a non-zero length string value.
+#
+# Outputs:
+#   metadata_repo_url
+#   metadata_name
+#   metadata_version
 _fallback_to_existing_values()
 {
-  if [ -n "${existing_fallback}" ]; then
+  if [ -e "${output_file}" ]; then
     if [ -z "${metadata_repo_url}" ]; then
-      metadata_repo_url=$(yq -e '.releases[0].repoUrl' "${output_file}")
+      metadata_repo_url=$(yq -e '.releases[0].repoUrl // ""' "${output_file}")
     fi
 
     if [ -z "${metadata_version}" ]; then
-      metadata_version=$(yq -e '.releases[0].version' "${output_file}")
+      metadata_version=$(yq -e '.releases[0].version // ""' "${output_file}")
     fi
 
     if [ -z "${metadata_name}" ]; then
-      metadata_name=$(yq -e '.releases[0].name' "${output_file}")
+      metadata_name=$(yq -e '.releases[0].name // ""' "${output_file}")
     fi
   fi
 }
 
+# Description: 
+#   Validation function that ensures all required attributes have non-zero length.  Any attributes in violation of
+#   this check will log an error message and cause script to exit with a 1 status code.
+#
 _check_for_missing_data()
 {
   missing_data=
@@ -87,6 +179,11 @@ _check_for_missing_data()
   fi
 }
 
+# Description: 
+#   Orchestration logic that generates the component_metadata.yaml file.
+#
+#   NOTE: Multiple entries for the 'releases' attribute is not supported. Only the 0th index is operated against.
+#
 _handle_metadata_file()
 {
 
@@ -96,17 +193,21 @@ _handle_metadata_file()
 
   _check_for_missing_data
 
-  # NOTE: Does not handle multiple entries!!
   yq_env_arg="${metadata_name}" yq -i '.releases[0].name = strenv(yq_env_arg)' "${output_file}"
   yq_env_arg="${metadata_version}" yq -i '.releases[0].version = strenv(yq_env_arg)' "${output_file}"
   yq_env_arg="${metadata_repo_url}" yq -i '.releases[0].repoUrl = strenv(yq_env_arg)' "${output_file}"
 }
 
-_usage()
-{
-	printf "%s\n" "Usage: $(basename $0) -o <output file> [-n <name>] [-v <version>] [-r <repoUrl>] [-p] [-x] [-h]"
-}
-
+# Description: 
+#   Helper function that processes command line arguments provided to the script.
+#       - '-h' will cause script to exit with 0 (successful) status code
+#       - any unsupported options will cause script to exit with 1 (failure) status code
+#
+# Outputs:
+#   output_file
+#   metadata_repo_url
+#   metadata_name
+#   metadata_version
 _parse_opts()
 {
 	local OPTIND
@@ -115,11 +216,7 @@ _parse_opts()
 		case "${OPTION}" in
 			o )
 				output_file="${OPTARG}"
-
-        if ! [ -e "${output_file}" ]; then
-          touch "${output_file}"
-        fi
-				;;
+        ;;
 			n )
 				metadata_name="${OPTARG}"
 				;;
@@ -128,9 +225,6 @@ _parse_opts()
 				;;
 			r )
 				metadata_repo_url="${OPTARG}"
-				;;
-			e )
-				existing_fallback="t"
 				;;
 			h)
 				_usage
@@ -144,11 +238,12 @@ _parse_opts()
 	done
 }
 
-output_file=
+# inspired from https://stackoverflow.com/a/29835459
+current_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+output_file="${current_dir}/config/component_metadata.yaml"
 metadata_repo_url=
 metadata_version=
 metadata_name=
-existing_fallback=
 
 if ! yq --version &> /dev/null; then
   printf "%s" "yq not installed... aborting script."
@@ -157,9 +252,9 @@ fi
 
 _parse_opts "$@"
 
-if [ -z "${output_file}" ]; then
-  printf "%s" "-o <output file> argument is required"
-  exit 1
+
+if ! [ -e "${output_file}" ]; then
+  touch "${output_file}"
 fi
 
 _handle_metadata_file
