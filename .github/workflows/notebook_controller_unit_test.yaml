@@ -6,6 +6,7 @@ on:
       - main
       - v1.9-branch
     paths:
+      - .github/workflows/notebook_controller_unit_test.yaml
       - components/notebook-controller/**
   workflow_dispatch:
 
