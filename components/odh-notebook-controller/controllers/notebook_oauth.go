@@ -209,6 +209,26 @@ func NewNotebookOAuthSecret(notebook *nbv1.Notebook) *corev1.Secret {
 	}
 }
 
+// NewNotebookOAuthClientSecret defines the desired OAuth client secret object
+func NewNotebookOAuthClientSecret(notebook *nbv1.Notebook) *corev1.Secret {
+	// Generate the client secret for the OAuth proxy
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      notebook.Name + "-oauth-client",
+			Namespace: notebook.Namespace,
+			Labels: map[string]string{
+				"notebook-name": notebook.Name,
+			},
+			Annotations: map[string]string{
+				"secret-generator.opendatahub.io/name":               "secret",
+				"secret-generator.opendatahub.io/type":               "random",
+				"secret-generator.opendatahub.io/complexity":         "32",
+				"secret-generator.opendatahub.io/oauth-client-route": notebook.Name,
+			},
+		},
+	}
+}
+
 // ReconcileOAuthSecret will manage the OAuth secret reconciliation required by
 // the notebook OAuth proxy
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthSecret(notebook *nbv1.Notebook, ctx context.Context) error {
@@ -242,6 +262,36 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthSecret(notebook *nbv1.Notebo
 			}
 		} else {
 			log.Error(err, "Unable to fetch the OAuth Secret")
+			return err
+		}
+	}
+
+	// Generate the desired OAuth client secret
+	desiredClientSecret := NewNotebookOAuthClientSecret(notebook)
+	// Create the OAuth client secret if it does not already exist
+	foundClientSecret := &corev1.Secret{}
+	err = r.Get(ctx, types.NamespacedName{
+		Name:      desiredClientSecret.Name,
+		Namespace: notebook.Namespace,
+	}, foundClientSecret)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("Creating OAuth Client Secret")
+			// Add .metatada.ownerReferences to the OAuth client secret to be deleted by
+			// the Kubernetes garbage collector if the notebook is deleted
+			err = ctrl.SetControllerReference(notebook, desiredClientSecret, r.Scheme)
+			if err != nil {
+				log.Error(err, "Unable to add OwnerReference to the OAuth Client Secret")
+				return err
+			}
+			// Create the OAuth client secret in the Openshift cluster
+			err = r.Create(ctx, desiredClientSecret)
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				log.Error(err, "Unable to create the OAuth Client Secret")
+				return err
+			}
+		} else {
+			log.Error(err, "Unable to fetch the OAuth Client Secret")
 			return err
 		}
 	}
