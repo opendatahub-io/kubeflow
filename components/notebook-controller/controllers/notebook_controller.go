@@ -137,6 +137,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Reconcile StatefulSet
+	print("controllers/notebook_controller.go")
 	ss := generateStatefulSet(instance)
 	if err := ctrl.SetControllerReference(instance, ss, r.Scheme); err != nil {
 		return ctrl.Result{}, err
