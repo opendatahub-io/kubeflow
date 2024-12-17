@@ -253,6 +253,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	}
 
+	print("controllers/notebook_webhook")
 	// Check Imagestream Info both on create and update operations
 	if req.Operation == admissionv1.Create || req.Operation == admissionv1.Update {
 		// Check Imagestream Info
