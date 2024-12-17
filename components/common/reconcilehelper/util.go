@@ -16,6 +16,7 @@ import (
 
 // Deployment reconciles a k8s deployment object.
 func Deployment(ctx context.Context, r client.Client, deployment *appsv1.Deployment, log logr.Logger) error {
+	print("reconcilehelper/util.go")
 	foundDeployment := &appsv1.Deployment{}
 	justCreated := false
 	if err := r.Get(ctx, types.NamespacedName{Name: deployment.Name, Namespace: deployment.Namespace}, foundDeployment); err != nil {
