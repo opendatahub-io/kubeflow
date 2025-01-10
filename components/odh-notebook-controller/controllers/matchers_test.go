@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
 	"reflect"
 	"regexp"
@@ -210,7 +211,16 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 		pointer := reflect.ValueOf(accumulator).Elem()
 
 		// the root of the path is operation-less, skip path[0]
-		for i := 1; i < len(diffPath); i++ {
+		var i int
+		for i = 1; i < len(diffPath); i++ {
+			vx, vy := diffPath[i].Values()
+			// if either of the two values (expected, actual) is invalid, break off
+			if !vx.IsValid() || !vy.IsValid() {
+				// it may happen that more than one OnDiff will break off at the same place
+				// but that does not matter for correctness, it will just be a bit inefficient
+				break
+			}
+
 			switch step := diffPath[i].(type) {
 			case cmp.StructField:
 				current = current.Field(step.Index())
@@ -233,12 +243,14 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 				panic("unreachable")
 			}
 		}
-		vx, vy := diffPath.Last().Values()
-		current.Set(vx)
 
+		// after the for loop diffPath[i] either has invalid value or is index out of range, so i-1 does it
+		vx, vy := diffPath[i-1].Values()
 		if debug {
 			log.Printf("%#v:\n\t-: %+v\n\t+: %+v\n", diffPath, vx, vy)
 		}
+
+		current.Set(vx)
 
 		// Check whether our comparator function's result is influenced by this field's value
 		if !m.comparator(actual, *clone) {
@@ -251,6 +263,10 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 	// Compute the minimized diff
 	return cmp.Diff(actual, *accumulator)
 }
+
+const (
+	MatcherPanickedMessage = "while computing the diff, there was a crash"
+)
 
 func Test_Reflection_CanSet(t *testing.T) {
 	someRoute := routev1.Route{
@@ -297,4 +313,33 @@ func Test_BeMatchingK8sResource_DiffRoute(t *testing.T) {
 
 	assert.NotRegexp(t, regexp.MustCompile(`-[\pZ\pC]+Path:\s+"someRoutePath",`), msg)
 	assert.NotRegexp(t, regexp.MustCompile(`\+[\pZ\pC]+Path:\s+"someOtherRoutePath",`), msg)
+}
+
+// Structs contain different keys, so the comparison has to happen
+// on a map as a whole, because the second struct lacks the key from first.
+// This is something I forgot to handle originally.
+func Test_BeMatchingK8sResource_MismatchedStructs(t *testing.T) {
+	someRoute := routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "someRouteName",
+			Labels: map[string]string{
+				"foo": "bar",
+			},
+		},
+	}
+	someOtherRoute := routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "someOtherRouteName",
+			Labels: nil,
+		},
+	}
+	matcher := BeMatchingK8sResource(someOtherRoute, func(r1 routev1.Route, r2 routev1.Route) bool {
+		return r1.ObjectMeta.Name == r2.ObjectMeta.Name
+	})
+	res, err := matcher.Match(someRoute)
+	assert.NoError(t, err)
+	assert.False(t, res)
+
+	msg := matcher.FailureMessage(someRoute)
+	assert.NotContains(t, msg, MatcherPanickedMessage)
 }
