@@ -198,6 +198,17 @@ type deepCopyer[T any] interface {
 func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message string) {
 	debug := false
 
+	// https://go.dev/blog/defer-panic-and-recover
+	defer func() {
+		// in case things later go wrong with diff minimization
+		if r := recover(); r != nil {
+			// return the un-minimized diff so that we have at least something
+			message = cmp.Diff(actual, m.expected) + "\n" +
+				"while computing the diff, there was a crash\n\t" +
+				fmt.Sprint(r)
+		}
+	}()
+
 	// accumulator is a struct to which we apply all the diffs that influence comparison result
 	accumulator := PT(&actual).DeepCopy()
 
@@ -342,4 +353,42 @@ func Test_BeMatchingK8sResource_MismatchedStructs(t *testing.T) {
 
 	msg := matcher.FailureMessage(someRoute)
 	assert.NotContains(t, msg, MatcherPanickedMessage)
+}
+
+// Checks for a situation where comparator function panics
+// when we try to use it to generate minimal diff.
+func Test_BeMatchingK8sResource_CrashingMatcher(t *testing.T) {
+	someRoute := routev1.Route{
+		Spec: routev1.RouteSpec{
+			Host: "someRouteHost",
+			Path: "someRoutePath",
+		},
+	}
+	someOtherRoute := routev1.Route{
+		Spec: routev1.RouteSpec{
+			Host: "someOtherRouteHost",
+			Path: "someOtherRoutePath",
+		},
+	}
+	shouldPanic := false
+	matcher := BeMatchingK8sResource(someOtherRoute, func(r1 routev1.Route, r2 routev1.Route) bool {
+		if shouldPanic {
+			panic("je nanic")
+		}
+		return r1.Spec.Host == r2.Spec.Host
+	})
+	res, err := matcher.Match(someRoute)
+	assert.NoError(t, err)
+	assert.False(t, res)
+
+	shouldPanic = true
+	msg := matcher.FailureMessage(someRoute)
+	assert.Contains(t, msg, MatcherPanickedMessage)
+	assert.Contains(t, msg, "je nanic")
+
+	assert.Regexp(t, regexp.MustCompile(`-[\pZ\pC]+Host:\s+"someRouteHost",`), msg)
+	assert.Regexp(t, regexp.MustCompile(`\+[\pZ\pC]+Host:\s+"someOtherRouteHost",`), msg)
+
+	assert.Regexp(t, regexp.MustCompile(`-[\pZ\pC]+Path:\s+"someRoutePath",`), msg)
+	assert.Regexp(t, regexp.MustCompile(`\+[\pZ\pC]+Path:\s+"someOtherRoutePath",`), msg)
 }
