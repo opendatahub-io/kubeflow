@@ -115,6 +115,9 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
 			"--email-domain=*",
 			"--skip-provider-button",
+			`--client-id=` + notebook.Name + `-` + notebook.Namespace + `-oauth-client`,
+			"--client-secret-file=/etc/oauth/client/secret",
+			"--scope=user:info user:check-access",
 			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
 				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
 		},
@@ -162,6 +165,10 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "oauth-client",
+				MountPath: "/etc/oauth/client",
+			},
 			{
 				Name:      "oauth-config",
 				MountPath: "/etc/oauth/config",
@@ -215,6 +222,29 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 	}
 	if !oauthVolumeExists {
 		*notebookVolumes = append(*notebookVolumes, oauthVolume)
+	}
+
+	// Add the OAuth Client configuration volume:
+	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
+	clientVolumeExists := false
+	clientVolume := corev1.Volume{
+		Name: "oauth-client",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName:  notebook.Name + "-oauth-client",
+				DefaultMode: pointer.Int32(420),
+			},
+		},
+	}
+	for index, volume := range *notebookVolumes {
+		if volume.Name == "oauth-client" {
+			(*notebookVolumes)[index] = clientVolume
+			clientVolumeExists = true
+			break
+		}
+	}
+	if !clientVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, clientVolume)
 	}
 
 	// Add the TLS certificates volume:

@@ -19,17 +19,23 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math/big"
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -39,10 +45,22 @@ const (
 	// taken from https://catalog.redhat.com/software/containers/openshift4/ose-oauth-proxy/5cdb2133bed8bd5717d5ae64?image=66cefc14401df6ff4664ec43&architecture=amd64&container-tabs=overview
 	// and kept in sync with the manifests here and in ClusterServiceVersion metadata of opendatahub operator
 	OAuthProxyImage = "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4f8d66597feeb32bb18699326029f9a71a5aca4a57679d636b876377c2e95695"
+
+	// Strings used in secret generation
+	letterRunes = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+	// Complexity of generated secrets, this will be stored in a const for now, but in the future
+	// there is the possibility of creating a specific file to manage secrets, change the size of
+	// the complexity if required, etc. For now, a complexity of 16 will suffice.
+	SECRET_DEFAULT_COMPLEXITY = 16
 )
 
 type OAuthConfig struct {
 	ProxyImage string
+}
+
+type OAuthClientConfig struct {
+	Name string
 }
 
 // NewNotebookServiceAccount defines the desired service account object
@@ -209,39 +227,92 @@ func NewNotebookOAuthSecret(notebook *nbv1.Notebook) *corev1.Secret {
 	}
 }
 
+// The NewNotebookOAuthClientSecret will generate a random secret that will be used
+// by the OAuth proxy sidecar container to automatically accept the required permissions
+// for the user to access a notebook instead of showing up a page where the user needs to
+// aggree with content he might not fully understand
+// More info: https://issues.redhat.com/browse/RHOAIENG-11155
+func NewNotebookOAuthClientSecret(notebook *nbv1.Notebook) *corev1.Secret {
+	// Generate the client secret for the OAuth proxy
+	randomValue := make([]byte, SECRET_DEFAULT_COMPLEXITY)
+	for i := 0; i < SECRET_DEFAULT_COMPLEXITY; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letterRunes))))
+		if err != nil {
+			fmt.Printf("Error generating secret: %v\n", err)
+		}
+		randomValue[i] = letterRunes[num.Int64()]
+	}
+
+	// Create a Kubernetes secret to store the cookie secret
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      notebook.Name + "-oauth-client",
+			Namespace: notebook.Namespace,
+			Labels: map[string]string{
+				"notebook-name": notebook.Name,
+			},
+		},
+		StringData: map[string]string{
+			"secret": string(randomValue),
+		},
+	}
+}
+
 // ReconcileOAuthSecret will manage the OAuth secret reconciliation required by
 // the notebook OAuth proxy
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthSecret(notebook *nbv1.Notebook, ctx context.Context) error {
-	// Initialize logger format
-	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
-
 	// Generate the desired OAuth secret
-	desiredSecret := NewNotebookOAuthSecret(notebook)
+	desiredOAuthSecret := NewNotebookOAuthSecret(notebook)
+	_ = r.createSecret(notebook, ctx, desiredOAuthSecret)
 
-	// Create the OAuth secret if it does not already exist
-	foundSecret := &corev1.Secret{}
+	// Generate the desired OAuthClientSecret
+	desiredOAuthClientSecret := NewNotebookOAuthClientSecret(notebook)
+	_ = r.createSecret(notebook, ctx, desiredOAuthClientSecret)
+
+	return nil
+}
+
+func (r *OpenshiftNotebookReconciler) ReconcileOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := logf.FromContext(ctx)
+
+	err := r.createOAuthClient(notebook, ctx)
+	if err != nil {
+		log.Error(err, "Unable to handle OAuthClient creation / update")
+		return err
+	}
+
+	return nil
+}
+
+func (r *OpenshiftNotebookReconciler) createSecret(notebook *nbv1.Notebook, ctx context.Context, desiredSecret *corev1.Secret) error {
+	log := logf.FromContext(ctx)
+
+	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      desiredSecret.Name,
 		Namespace: notebook.Namespace,
-	}, foundSecret)
+	}, secret)
+
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Creating OAuth Secret")
-			// Add .metatada.ownerReferences to the OAuth secret to be deleted by
+			log.Info("Creating ", "secret", desiredSecret.Name)
+
+			// Add .metatada.ownerReferences to the OAuth client secret to be deleted by
 			// the Kubernetes garbage collector if the notebook is deleted
 			err = ctrl.SetControllerReference(notebook, desiredSecret, r.Scheme)
 			if err != nil {
-				log.Error(err, "Unable to add OwnerReference to the OAuth Secret")
+				log.Error(err, "Unable to add OwnerReference to secret ", desiredSecret.Name)
 				return err
 			}
-			// Create the OAuth secret in the Openshift cluster
+
+			// Create the OAuth client secret in the Openshift cluster
 			err = r.Create(ctx, desiredSecret)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
-				log.Error(err, "Unable to create the OAuth Secret")
+				log.Error(err, "Unable to create secret ", desiredSecret.Name)
 				return err
 			}
 		} else {
-			log.Error(err, "Unable to fetch the OAuth Secret")
+			log.Error(err, "Unable to fetch secret")
 			return err
 		}
 	}
@@ -263,4 +334,62 @@ func NewNotebookOAuthRoute(notebook *nbv1.Notebook) *routev1.Route {
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthRoute(
 	notebook *nbv1.Notebook, ctx context.Context) error {
 	return r.reconcileRoute(notebook, ctx, NewNotebookOAuthRoute)
+}
+
+func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := logf.FromContext(ctx)
+
+	//
+	oauthClientRoute := &routev1.Route{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      notebook.Name,
+		Namespace: notebook.Namespace,
+	}, oauthClientRoute)
+	if err != nil {
+		log.Error(err, "Unable to retrieve route", "route", notebook.Name)
+		return err
+	}
+
+	//
+	secret := &corev1.Secret{}
+	err = r.Get(ctx, types.NamespacedName{
+		Name:      notebook.Name + "-oauth-client",
+		Namespace: notebook.Namespace,
+	}, secret)
+	if err != nil {
+		log.Error(err, "Unable to retrieve secret", "secret", notebook.Name)
+		return err
+	}
+
+	stringData := string(secret.Data["secret"])
+
+	oauthClient := &oauthv1.OAuthClient{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "OAuthClient",
+			APIVersion: "oauth.openshift.io/v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: notebook.Name + "-" + notebook.Namespace + "-oauth-client",
+		},
+		Secret:       stringData,
+		RedirectURIs: []string{"https://" + oauthClientRoute.Spec.Host},
+		GrantMethod:  oauthv1.GrantHandlerAuto,
+	}
+
+	err = r.Client.Create(ctx, oauthClient)
+	if err != nil {
+		if apierrs.IsAlreadyExists(err) {
+			data, err := json.Marshal(oauthClient)
+			if err != nil {
+				return fmt.Errorf("failed to get DataScienceCluster custom resource data: %w", err)
+			}
+			if err = r.Client.Patch(ctx, oauthClient, client.RawPatch(types.ApplyPatchType, data),
+				client.ForceOwnership, client.FieldOwner("rhods-operator")); err != nil {
+				return fmt.Errorf("failed to patch existing OAuthClient CR: %w", err)
+			}
+			return nil
+		}
+	}
+
+	return nil
 }

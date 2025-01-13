@@ -226,6 +226,12 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			if err != nil {
 				return ctrl.Result{}, err
 			}
+
+			// Call the OAuthClient reconciler
+			err = r.ReconcileOAuthClient(notebook, ctx)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 		} else {
 			// Call the route reconciler (see notebook_route.go file)
 			err = r.ReconcileRoute(notebook, ctx)

@@ -631,6 +631,15 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								},
 							},
 							{
+								Name: "oauth-client",
+								VolumeSource: corev1.VolumeSource{
+									Secret: &corev1.SecretVolumeSource{
+										SecretName:  Name + "-oauth-client",
+										DefaultMode: pointer.Int32Ptr(420),
+									},
+								},
+							},
+							{
 								Name: "tls-certificates",
 								VolumeSource: corev1.VolumeSource{
 									Secret: &corev1.SecretVolumeSource{
@@ -1000,6 +1009,9 @@ func createOAuthContainer(name, namespace string) corev1.Container {
 			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
 			"--email-domain=*",
 			"--skip-provider-button",
+			`--client-id=` + name + `-` + namespace + `-oauth-client`,
+			"--client-secret-file=/etc/oauth/client/secret",
+			"--scope=user:info user:check-access",
 			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
 				`"resourceName":"` + name + `","namespace":"$(NAMESPACE)"}`,
 			"--logout-url=https://example.notebook-url/notebook/" + namespace + "/" + name,
@@ -1048,6 +1060,10 @@ func createOAuthContainer(name, namespace string) corev1.Container {
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "oauth-client",
+				MountPath: "/etc/oauth/client",
+			},
 			{
 				Name:      "oauth-config",
 				MountPath: "/etc/oauth/config",
