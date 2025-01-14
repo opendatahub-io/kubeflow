@@ -611,13 +611,6 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 											imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
 											// Update the Containers[i].Image value
 											notebook.Spec.Template.Spec.Containers[i].Image = imageHash
-											// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
-											for i, envVar := range container.Env {
-												if envVar.Name == "JUPYTER_IMAGE" {
-													container.Env[i].Value = imageSelection
-													break
-												}
-											}
 											imagestreamFound = true
 											break
 										}
