@@ -107,14 +107,17 @@ func (m *beMatchingK8sResource[T, PT]) Match(actual interface{}) (success bool, 
 }
 
 func (m *beMatchingK8sResource[T, PT]) FailureMessage(actual interface{}) (message string) {
-	//m.expected
-	diff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nto compare identical to\n\t%#v\nbut it differs in\n%s", actual, m.expected, diff)
+	fullDiff := cmp.Diff(actual, m.expected)
+	minimalDiff := m.computeMinimizedDiff(actual.(T))
+	return fmt.Sprintf("Expected\n\t%#v\nto compare identical to\n\t%#v\nbut it differs in\n%s\nMinimized diff is\n%s",
+		actual, m.expected, fullDiff, minimalDiff)
 }
 
 func (m *beMatchingK8sResource[T, PT]) NegatedFailureMessage(actual interface{}) (message string) {
-	diff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nto not compare identical to\n\t%#v\nit differs in\n%s", actual, m.expected, diff)
+	fullDiff := cmp.Diff(actual, m.expected)
+	minimalDiff := m.computeMinimizedDiff(actual.(T))
+	return fmt.Sprintf("Expected\n\t%#v\nto not compare identical to\n\t%#v\nit differs in\n%s\nMinimized diff is\n%s",
+		actual, m.expected, fullDiff, minimalDiff)
 }
 
 // diffReporter is the basis of a custom [cmp.Reporter] that records differences detected during comparison.
@@ -202,9 +205,8 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 	defer func() {
 		// in case things later go wrong with diff minimization
 		if r := recover(); r != nil {
-			// return the un-minimized diff so that we have at least something
-			message = cmp.Diff(actual, m.expected) + "\n" +
-				"while computing the diff, there was a crash\n\t" +
+			// we print the un-minimized diff always just before this, so no info is lost
+			message = "while computing the diff, there was a crash\n\t" +
 				fmt.Sprint(r)
 		}
 	}()
@@ -318,7 +320,8 @@ func Test_BeMatchingK8sResource_DiffRoute(t *testing.T) {
 	assert.Regexp(t, regexp.MustCompile(`^[\pZ\pC]+$`), ` 	 `)
 
 	// go-cmp diff output is not guaranteed to remain unchanged, so this may need revisiting
-	msg := matcher.FailureMessage(someRoute)
+	// the full `matcher.FailureMessage(someRoute)` contains both full and minimized diffs, assert on minimized only
+	msg := matcher.(*beMatchingK8sResource[routev1.Route, *routev1.Route]).computeMinimizedDiff(someRoute)
 	assert.Regexp(t, regexp.MustCompile(`-[\pZ\pC]+Host:\s+"someRouteHost",`), msg)
 	assert.Regexp(t, regexp.MustCompile(`\+[\pZ\pC]+Host:\s+"someOtherRouteHost",`), msg)
 
