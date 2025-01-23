@@ -186,7 +186,7 @@ type deepCopyer[T any] interface {
 //
 // The implementation works as follows:
 //
-// For every leaf node reported by [diffReportr], we construct a deep copy of the original actual struct with just that leaf value changed to its expected counterpart.
+// For every leaf node reported by [diffReporter], we construct a deep copy of the original actual struct with just that leaf value changed to its expected counterpart.
 // Then we run the comparator function between the deep copy and the real actual.
 // If the comparator reports the two are different, we apply this difference onto a yet another deep copy where we accumulate all such differences.
 // In This way we process all the differences.
