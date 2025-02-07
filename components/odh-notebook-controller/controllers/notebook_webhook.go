@@ -298,6 +298,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
+		// Mount ConfigMap pipeline-runtime-images as runtime-images
+		err = MountPipelineRuntimeImages(notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
 	}
 
 	// Check Imagestream Info both on create and update operations

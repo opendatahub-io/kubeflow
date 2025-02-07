@@ -87,6 +87,59 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		route := &routev1.Route{}
 
+		It("Should create and mount the runtime images ConfigMap in the Notebook's pod", func() {
+			const (
+				Name          = "test-notebook-runtime"
+				Namespace     = "default"
+				configMapName = "pipeline-runtime-images"
+				mountPath     = "/opt/app-root/pipeline-runtimes/"
+				volumeName    = "runtime-images"
+			)
+
+			ctx := context.Background()
+
+			By("Creating a ConfigMap before the Notebook")
+			runtimeImagesCM := createRuntimeImagesConfigMap(configMapName, Namespace, map[string]string{
+				"runtime-1.yaml": "content-1",
+				"runtime-2.yaml": "content-2",
+			})
+
+			Expect(cli.Create(ctx, runtimeImagesCM)).Should(Succeed())
+			defer func() {
+				if err := cli.Delete(ctx, runtimeImagesCM); err != nil {
+					GinkgoT().Logf("Failed to delete ConfigMap: %v", err)
+				}
+			}()
+
+			By("Creating a new Notebook with the ConfigMap mounted")
+			notebook := createNotebook(Name, Namespace)
+
+			notebook.Spec.Template.Spec.Volumes = append(notebook.Spec.Template.Spec.Volumes, corev1.Volume{
+				Name: volumeName,
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+						Optional:             pointer.Bool(true),
+					},
+				},
+			})
+
+			notebook.Spec.Template.Spec.Containers[0].VolumeMounts = append(
+				notebook.Spec.Template.Spec.Containers[0].VolumeMounts,
+				corev1.VolumeMount{
+					Name:      volumeName,
+					MountPath: mountPath,
+					ReadOnly:  true,
+				},
+			)
+
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("Checking that the ConfigMap is correctly mounted in the Notebook's pod")
+			checkConfigMapMount(ctx, Namespace, Name, configMapName, mountPath)
+		})
+
 		It("Should create a Route to expose the traffic externally", func() {
 			ctx := context.Background()
 
@@ -1131,4 +1184,55 @@ func checkCertConfigMap(ctx context.Context, namespace string, configMapName str
 		}
 	}
 	Expect(certificatesFound).Should(Equal(expNumberCerts), "Number of parsed certificates don't match expected one:\n"+certData)
+}
+
+func createRuntimeImagesConfigMap(name, namespace string, data map[string]string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"opendatahub.io/managed-by": "workbenches",
+			},
+		},
+		Data: data,
+	}
+}
+
+func checkConfigMapMount(ctx context.Context, namespace, notebookName, configMapName, mountPath string) {
+	notebook := &nbv1.Notebook{}
+	key := types.NamespacedName{Name: notebookName, Namespace: namespace}
+	Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+	// Debug: Print all VolumeMounts in the Notebook Spec
+	for _, container := range notebook.Spec.Template.Spec.Containers {
+		GinkgoT().Logf("Container: %s, VolumeMounts: %+v", container.Name, container.VolumeMounts)
+	}
+
+	// Debug: Print all Volumes in the Notebook Spec
+	GinkgoT().Logf("Notebook Volumes: %+v", notebook.Spec.Template.Spec.Volumes)
+
+	expectedVolumeMount := corev1.VolumeMount{
+		Name:      "runtime-images",
+		MountPath: mountPath,
+		ReadOnly:  true,
+	}
+
+	expectedVolume := corev1.Volume{
+		Name: "runtime-images",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+				Optional:             pointer.Bool(true),
+			},
+		},
+	}
+
+	// Check for Volume Mounts
+	Expect(notebook.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(expectedVolumeMount),
+		"Expected volume mount not found!")
+
+	// Check for Volumes
+	Expect(notebook.Spec.Template.Spec.Volumes).To(ContainElement(expectedVolume),
+		"Expected volume not found!")
 }
