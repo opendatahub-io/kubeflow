@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -646,7 +647,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								VolumeSource: corev1.VolumeSource{
 									Secret: &corev1.SecretVolumeSource{
 										SecretName:  Name + "-oauth-client",
-										DefaultMode: pointer.Int32Ptr(420),
+										DefaultMode: ptr.To[int32](420),
 									},
 								},
 							},
