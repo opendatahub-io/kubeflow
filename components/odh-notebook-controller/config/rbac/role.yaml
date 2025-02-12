@@ -55,21 +55,20 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - oauth.openshift.io
+  - networking.k8s.io
   resources:
-  - oauthclients
+  - networkpolicies
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
   - update
   - watch
 - apiGroups:
-  - networking.k8s.io
+  - oauth.openshift.io
   resources:
-  - networkpolicies
+  - oauthclients
   verbs:
   - create
   - get
