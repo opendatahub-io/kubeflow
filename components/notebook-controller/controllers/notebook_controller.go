@@ -501,7 +501,7 @@ func generateService(instance *v1beta1.Notebook) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{
 					// Make port name follow Istio pattern so it can be managed by istio rbac
-					Name:       "http-" + instance.Name,
+					Name:       "http-notebook",
 					Port:       DefaultServingPort,
 					TargetPort: intstr.FromInt(port),
 					Protocol:   "TCP",
