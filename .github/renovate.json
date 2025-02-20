@@ -1,0 +1,129 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "https://raw.githubusercontent.com/red-hat-data-services/kubeflow/refs/heads/main/.github/renovate.json",
+    "https://konflux.pages.redhat.com/docs/users/mintmaker/user.html",
+    "https://github.com/konflux-ci/mintmaker/blob/main/config/renovate/renovate.json"
+  ],
+  "extends": ["config:recommended"],
+  "branchPrefix": "renovate/",
+  "baseBranches": ["main"],
+  "ignoreTests": true,
+  "automergeType": "pr",
+  "automerge": true,
+  "enabledManagers": ["dockerfile", "tekton", "rpm"],
+  "packageRules": [
+    {
+      "matchManagers": ["dockerfile"],
+      "matchBaseBranches": ["main"],
+      "matchUpdateTypes": ["digest"],
+      "matchFileNames": ["*Dockerfile.konflux*"],
+      "enabled": true,
+      "ignoreTests": true,
+      "automergeType": "pr",
+      "automerge": true,
+      "groupName": "Dockerfile Digest Updates",
+      "branchPrefix": "renovate/docker-main/",
+      "semanticCommits": "enabled"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchBaseBranches": ["main"],
+      "enabled": false
+    },
+    {
+      "matchManagers": ["tekton"],
+      "matchBaseBranches": ["main"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": true,
+      "groupName": "Tekton Updates",
+      "branchPrefix": "renovate/tekton-main/",
+      "semanticCommits": "enabled",
+      "prFooter": "To execute skipped test pipelines write comment `/ok-to-test`",
+      "matchPackageNames": [
+        "/^quay.io/redhat-appstudio-tekton-catalog//",
+        "/^quay.io/konflux-ci/tekton-catalog//"
+      ]
+    },
+    {
+      "matchManagers": ["rpm"],
+      "matchBaseBranches": ["main"],
+      "groupName": "RPM Updates",
+      "commitMessageTopic": "RPM updates",
+      "enabled": true,
+      "schedule": ["at any time"],
+      "branchPrefix": "renovate/rpm/",
+      "semanticCommits": "enabled"
+    }
+  ],
+  "dockerfile": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "additionalBranchPrefix": "{{baseBranch}}/",
+    "branchPrefix": "konflux/mintmaker/",
+    "ignoreTests": true,
+    "automergeType": "pr",
+    "automerge": true,
+    "packageRules": [
+      {
+        "matchUpdateTypes": [
+          "major",
+          "minor",
+          "pin",
+          "pinDigest",
+          "patch",
+          "bump"
+        ],
+        "enabled": false
+      }
+    ],
+    "ignorePaths": [
+      "**/Dockerfile",
+      "!**/Dockerfile.konflux*"
+    ],
+    "pinDigests": true
+  },
+  "tekton": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "fileMatch": ["\\.yaml$", "\\.yml$"],
+    "includePaths": [".tekton/**"],
+    "packageRules": [
+      {
+        "matchUpdateTypes": [
+          "major",
+          "minor",
+          "pin",
+          "pinDigest",
+          "patch",
+          "bump"
+        ],
+        "enabled": false
+      },
+      {
+        "matchUpdateTypes": ["digest"],
+        "enabled": true,
+        "groupName": "Konflux references",
+        "branchPrefix": "konflux/references/",
+        "semanticCommits": "enabled",
+        "prFooter": "To execute skipped test pipelines write comment `/ok-to-test`",
+        "prBodyColumns": ["Package", "Change", "Notes"],
+        "prBodyDefinitions": {
+          "Notes": "{{#if (or (containsString updateType 'minor') (containsString updateType 'major'))}}:warning:[migration](https://github.com/redhat-appstudio/build-definitions/blob/main/task/{{{replace '^quay.io/(redhat-appstudio-tekton-catalog|konflux-ci/tekton-catalog)/task-' '' packageName}}}/{{{newVersion}}}/MIGRATION.md):warning:{{/if}}"
+        },
+        "prBodyTemplate": "{{{header}}}{{{table}}}{{{notes}}}{{{changelogs}}}{{{controls}}}{{{footer}}}",
+        "recreateWhen": "always",
+        "rebaseWhen": "behind-base-branch",
+        "matchPackageNames": [
+          "/^quay.io/redhat-appstudio-tekton-catalog//",
+          "/^quay.io/konflux-ci/tekton-catalog//"
+        ]
+      }
+    ]
+  },
+  "rpm": {
+    "enabled": true,
+    "schedule": ["at any time"]
+  },
+  "prHourlyLimit": 0
+}
