@@ -1,3 +1,5 @@
+// This file is ignored if `.github/renovate.json` is also present,
+// see https://docs.renovatebot.com/configuration-options/#configuration-options and https://json5.org.
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
@@ -76,10 +78,6 @@
         ],
         "enabled": false
       }
-    ],
-    "ignorePaths": [
-      "**/Dockerfile",
-      "!**/Dockerfile.konflux*"
     ],
     "pinDigests": true
   },
