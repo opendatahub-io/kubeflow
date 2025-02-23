@@ -7,7 +7,7 @@
 
 # Build arguments
 ARG SOURCE_CODE=.
-ARG GOLANG_VERSION=1.21
+ARG GOLANG_VERSION=1.22.9-2.1738756484
 
 # Use ubi8/go-toolset as base image
 FROM registry.access.redhat.com/ubi8/go-toolset:${GOLANG_VERSION} as builder
