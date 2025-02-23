@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/gorilla/mux v1.7.2
-	github.com/kubeflow/kubeflow/components/profile-controller v0.0.0-20191008230951-321c1d3313b6
+	github.com/kubeflow/kubeflow/components/profile-controller bdc9bb2cfa5b
 	github.com/prometheus/client_golang v1.11.1
 	github.com/sirupsen/logrus v1.6.0
 	istio.io/api v0.0.0-20201125194658-3cee6a1d3ab4
