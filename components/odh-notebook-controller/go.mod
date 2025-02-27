@@ -7,7 +7,7 @@ toolchain go1.21.9
 require (
 	github.com/go-logr/logr v1.4.1
 	github.com/google/go-cmp v0.6.0
-	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
+	github.com/kubeflow/kubeflow/components/notebook-controller bdc9bb2cfa5b
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.30.0
 	github.com/openshift/api v0.0.0-20190924102528-32369d4db2ad
