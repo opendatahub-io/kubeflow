@@ -136,16 +136,38 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
+	// check if Notebook Name length is greater than 52
+	// as controller-service include as hash (len 11) as label
+	// controller-service-hash that shouldn't exceed 63 chars.
+	isGenerateName := false
+	if len(instance.Name) > 52 {
+		log.Info("Notebook name is too long, it should be less than 52 chars")
+		isGenerateName = true
+	}
+
 	// Reconcile StatefulSet
-	ss := generateStatefulSet(instance)
+	ss := generateStatefulSet(instance, isGenerateName)
 	if err := ctrl.SetControllerReference(instance, ss, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
 	// Check if the StatefulSet already exists
 	foundStateful := &appsv1.StatefulSet{}
+	namespacedStatefulSets := &appsv1.StatefulSetList{}
+	err := r.List(ctx, namespacedStatefulSets, client.InNamespace(ss.Namespace))
+	if err != nil {
+		log.Error(err, "error listing StatefulSets")
+		return ctrl.Result{}, err
+	}
+
+	for _, sts := range namespacedStatefulSets.Items {
+		if metav1.IsControlledBy(&sts, instance) {
+			foundStateful = &sts
+			break
+		}
+	}
+
 	justCreated := false
-	err := r.Get(ctx, types.NamespacedName{Name: ss.Name, Namespace: ss.Namespace}, foundStateful)
-	if err != nil && apierrs.IsNotFound(err) {
+	if foundStateful.Name == "" && foundStateful.Namespace == "" {
 		log.Info("Creating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
 		r.Metrics.NotebookCreation.WithLabelValues(ss.Namespace).Inc()
 		err = r.Create(ctx, ss)
@@ -405,17 +427,25 @@ func setPrefixEnvVar(instance *v1beta1.Notebook, container *corev1.Container) {
 	})
 }
 
-func generateStatefulSet(instance *v1beta1.Notebook) *appsv1.StatefulSet {
+func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv1.StatefulSet {
 	replicas := int32(1)
 	if metav1.HasAnnotation(instance.ObjectMeta, "kubeflow-resource-stopped") {
 		replicas = 0
 	}
 
+	ssObjectMeta := metav1.ObjectMeta{
+		Name:      instance.Name,
+		Namespace: instance.Namespace,
+	}
+	if isGenerateName {
+		ssObjectMeta = metav1.ObjectMeta{
+			GenerateName: "nb-",
+			Namespace:    instance.Namespace,
+		}
+	}
+
 	ss := &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instance.Name,
-			Namespace: instance.Namespace,
-		},
+		ObjectMeta: ssObjectMeta,
 		Spec: appsv1.StatefulSetSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
