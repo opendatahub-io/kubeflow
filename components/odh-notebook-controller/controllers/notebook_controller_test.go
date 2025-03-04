@@ -35,7 +35,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -69,7 +69,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				To: routev1.RouteTargetReference{
 					Kind:   "Service",
 					Name:   Name,
-					Weight: pointer.Int32Ptr(100),
+					Weight: ptr.To[int32](100),
 				},
 				Port: &routev1.RoutePort{
 					TargetPort: intstr.FromString("http-" + Name),
@@ -143,8 +143,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Kind:               "Notebook",
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
-				Controller:         pointer.BoolPtr(true),
-				BlockOwnerDeletion: pointer.BoolPtr(true),
+				Controller:         ptr.To(true),
+				BlockOwnerDeletion: ptr.To(true),
 			}
 
 			By("By checking that the Notebook owns the Route object")
@@ -294,7 +294,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{Name: workbenchTrustedCACertBundle},
-						Optional:             pointer.Bool(true),
+						Optional:             ptr.To(true),
 						Items: []corev1.KeyToPath{
 							{
 								Key:  "ca-bundle.crt",
@@ -400,7 +400,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{Name: workbenchTrustedCACertBundle},
-						Optional:             pointer.Bool(true),
+						Optional:             ptr.To(true),
 						Items: []corev1.KeyToPath{
 							{
 								Key:  "ca-bundle.crt",
@@ -536,8 +536,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Kind:               "Notebook",
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
-				Controller:         pointer.BoolPtr(true),
-				BlockOwnerDeletion: pointer.BoolPtr(true),
+				Controller:         ptr.To(true),
+				BlockOwnerDeletion: ptr.To(true),
 			}
 
 			By("By checking that the Notebook owns the Notebook Network Policy object")
@@ -633,7 +633,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								VolumeSource: corev1.VolumeSource{
 									Secret: &corev1.SecretVolumeSource{
 										SecretName:  Name + "-oauth-config",
-										DefaultMode: pointer.Int32Ptr(420),
+										DefaultMode: ptr.To[int32](420),
 									},
 								},
 							},
@@ -642,7 +642,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								VolumeSource: corev1.VolumeSource{
 									Secret: &corev1.SecretVolumeSource{
 										SecretName:  Name + "-tls",
-										DefaultMode: pointer.Int32Ptr(420),
+										DefaultMode: ptr.To[int32](420),
 									},
 								},
 							},
@@ -796,7 +796,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				To: routev1.RouteTargetReference{
 					Kind:   "Service",
 					Name:   Name + "-tls",
-					Weight: pointer.Int32Ptr(100),
+					Weight: ptr.To[int32](100),
 				},
 				Port: &routev1.RoutePort{
 					TargetPort: intstr.FromString(OAuthServicePortName),
@@ -862,8 +862,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Kind:               "Notebook",
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
-				Controller:         pointer.BoolPtr(true),
-				BlockOwnerDeletion: pointer.BoolPtr(true),
+				Controller:         ptr.To(true),
+				BlockOwnerDeletion: ptr.To(true),
 			}
 
 			By("By checking that the Notebook owns the Service Account object")

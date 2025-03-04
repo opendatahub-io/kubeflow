@@ -26,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -44,7 +44,7 @@ func NewNotebookRoute(notebook *nbv1.Notebook) *routev1.Route {
 			To: routev1.RouteTargetReference{
 				Kind:   "Service",
 				Name:   notebook.Name,
-				Weight: pointer.Int32Ptr(100),
+				Weight: ptr.To[int32](100),
 			},
 			Port: &routev1.RoutePort{
 				TargetPort: intstr.FromString("http-" + notebook.Name),

@@ -36,7 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -190,7 +190,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-oauth-config",
-				DefaultMode: pointer.Int32Ptr(420),
+				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
@@ -213,7 +213,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-tls",
-				DefaultMode: pointer.Int32Ptr(420),
+				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
@@ -531,7 +531,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: configMapName,
 				},
-				Optional: pointer.Bool(true),
+				Optional: ptr.To(true),
 				Items: []corev1.KeyToPath{{
 					Key:  configMapMountKey,
 					Path: configMapMountValue,
