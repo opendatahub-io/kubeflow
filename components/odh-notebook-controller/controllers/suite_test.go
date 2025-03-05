@@ -187,6 +187,7 @@ var _ = BeforeSuite(func() {
 		Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 		Scheme:    mgr.GetScheme(),
 		Namespace: odhNotebookControllerTestNamespace,
+		Config:    mgr.GetConfig(),
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 

@@ -128,6 +128,7 @@ func main() {
 		Log:       ctrl.Log.WithName("controllers").WithName("Notebook"),
 		Namespace: namespace,
 		Scheme:    mgr.GetScheme(),
+		Config:    mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Notebook")
 		os.Exit(1)
