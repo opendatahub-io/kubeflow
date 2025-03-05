@@ -18,12 +18,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"k8s.io/utils/ptr"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"k8s.io/utils/ptr"
 
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -178,6 +179,7 @@ var _ = BeforeSuite(func() {
 		Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 		Scheme:    mgr.GetScheme(),
 		Namespace: odhNotebookControllerTestNamespace,
+		Config:    mgr.GetConfig(),
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
