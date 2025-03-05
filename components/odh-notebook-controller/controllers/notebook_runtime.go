@@ -17,9 +17,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const configMapName = "pipeline-runtime-images"
-const mountPath = "/opt/app-root/pipeline-runtimes/"
-const volumeName = "runtime-images"
+const (
+	configMapName = "pipeline-runtime-images"
+	mountPath     = "/opt/app-root/pipeline-runtimes/"
+	volumeName    = "runtime-images"
+)
 
 // checkConfigMapExists verifies if a ConfigMap exists in the namespace.
 func (r *OpenshiftNotebookReconciler) checkConfigMapExists(ctx context.Context, configMapName, namespace string) (bool, error) {
@@ -35,15 +37,10 @@ func (r *OpenshiftNotebookReconciler) checkConfigMapExists(ctx context.Context, 
 	return true, nil // ConfigMap exists
 }
 
-func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Context, notebookNamespace string) error {
+func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Context, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
 	log := r.Log.WithValues("namespace", notebookNamespace)
 
 	// Create a dynamic client
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		log.Error(err, "Error creating cluster config")
-		return err
-	}
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		log.Error(err, "Error creating dynamic client")
@@ -57,11 +54,10 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 		Resource: "imagestreams",
 	}
 
-	// Fetch ImageStreams from "redhat-ods-applications" namespace
-	imageStreamNamespace := "redhat-ods-applications"
-	imagestreams, err := dynamicClient.Resource(ims).Namespace(imageStreamNamespace).List(ctx, metav1.ListOptions{})
+	// Fetch ImageStreams from controllerNamespace namespace
+	imagestreams, err := dynamicClient.Resource(ims).Namespace(controllerNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		log.Error(err, "Failed to list ImageStreams", "Namespace", imageStreamNamespace)
+		log.Error(err, "Failed to list ImageStreams", "Namespace", controllerNamespace)
 		return err
 	}
 
@@ -192,7 +188,7 @@ func parseRuntimeImageMetadata(rawJSON string) string {
 }
 
 func (r *OpenshiftNotebookReconciler) EnsureNotebookConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.syncRuntimeImagesConfigMap(ctx, notebook.Namespace)
+	return r.syncRuntimeImagesConfigMap(ctx, notebook.Namespace, r.Namespace, r.Config)
 }
 
 func MountPipelineRuntimeImages(notebook *nbv1.Notebook, log logr.Logger) error {
