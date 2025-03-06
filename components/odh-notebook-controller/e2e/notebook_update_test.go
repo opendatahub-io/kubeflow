@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -74,7 +75,7 @@ func (tc *testContext) testNotebookUpdate(nbContext notebookContext) error {
 	}
 
 	// Wait for the update to be applied
-	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		note := &nbv1.Notebook{}
 		err = tc.customClient.Get(tc.ctx, notebookLookupKey, note)
 		if err != nil {
