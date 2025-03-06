@@ -19,10 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
 	"sort"
 	"strings"
+
+	configv1 "github.com/openshift/api/config/v1"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -268,6 +269,29 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	err := w.Decoder.Decode(req, notebook)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	// :TODO: Remove this function once testing is done. Temporary function
+	newPVCName := notebook.Name
+	if strings.HasPrefix(notebook.Name, "jupyter-") {
+		pvcName := strings.Split(notebook.Name, "-")
+		pvcName[0] = "jupyterhub"
+		newPVCName = strings.Join(pvcName, "-")
+	}
+	ssVolume := &notebook.Spec.Template.Spec.Volumes
+	for i, eachVolume := range *ssVolume {
+		if eachVolume.PersistentVolumeClaim != nil && eachVolume.PersistentVolumeClaim.ClaimName == newPVCName+"-pvc" {
+			notebook.Spec.Template.Spec.Volumes[i].Name = "nb-core-pvc"
+			break
+		}
+	}
+	// patch the volume mount name
+	ssVolumeMounts := &notebook.Spec.Template.Spec.Containers[0].VolumeMounts
+	for i, eachVolumenMount := range *ssVolumeMounts {
+		if eachVolumenMount.Name == newPVCName+"-pvc" {
+			notebook.Spec.Template.Spec.Containers[0].VolumeMounts[i].Name = "nb-core-pvc"
+			break
+		}
 	}
 
 	// Inject the reconciliation lock only on new notebook creation
