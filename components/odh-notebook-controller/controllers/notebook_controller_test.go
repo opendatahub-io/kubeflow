@@ -698,6 +698,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Only do changes that your webhook or controller DOES restore:
 			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
 			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
+			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
 
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
