@@ -598,6 +598,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					"notebooks.opendatahub.io/inject-oauth":     "true",
 					"notebooks.opendatahub.io/foo":              "bar",
 					"notebooks.opendatahub.io/oauth-logout-url": "https://example.notebook-url/notebook/" + Namespace + "/" + Name,
+					"kubeflow-resource-stopped":                 "odh-notebook-controller-lock",
 				},
 			},
 			Spec: nbv1.NotebookSpec{
