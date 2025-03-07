@@ -677,8 +677,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should remove the reconciliation lock annotation", func() {
-			By("By waiting before checking the reconciliation lock annotation removal")
-			time.Sleep(2 * time.Second)
 
 			By("By checking that the annotation lock annotation is not present")
 			delete(expectedNotebook.Annotations, culler.STOP_ANNOTATION)
