@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +61,7 @@ type OpenshiftNotebookReconciler struct {
 	Namespace string
 	Scheme    *runtime.Scheme
 	Log       logr.Logger
+	Config    *rest.Config
 }
 
 // ClusterRole permissions
@@ -73,6 +75,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
@@ -186,6 +189,12 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Call the Network Policies reconciler
 	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Create/Watch and Update the pipeline-runtime-image ConfigMap on Notebook's Namspace
+	err = r.EnsureNotebookConfigMap(notebook, ctx)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

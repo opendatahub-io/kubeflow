@@ -27,6 +27,13 @@ rules:
   - list
   - watch
 - apiGroups:
+  - image.openshift.io
+  resources:
+  - imagestreams
+  verbs:
+  - get
+  - list
+- apiGroups:
   - kubeflow.org
   resources:
   - notebooks
