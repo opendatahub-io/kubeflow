@@ -313,3 +313,15 @@ jobs:
           kubectl describe pods
           kubectl logs minimal-notebook-0
           kubectl describe routes
+
+      - name: Print logs (again, at the end)
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n kubeflow -l app=notebook-controller
+          kubectl logs -n kubeflow -l app=notebook-controller
+
+      - name: Print ODH logs (again, at the end)
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n opendatahub -l app=odh-notebook-controller
+          kubectl logs -n opendatahub -l app=odh-notebook-controller
