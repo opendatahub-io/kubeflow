@@ -32,6 +32,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Route Url are defined with combination of Route.name and Route.namespace
+// The max sub-domain length is 63 characters, to keep the bound is place
+// we are using the generateName for the Route object. The const used for this
+// would be max 48 chars for route.name and 15 chars for route.namespace
+const (
+	// RouteNameMaxLen is the max length of the route name
+	RouteNameMaxLen = 48
+	// RouteNamespaceMaxLen is the max length of the route namespace
+	RouteNamespaceMaxLen = 15
+)
+
 // NewNotebookRoute defines the desired route object
 func NewNotebookRoute(notebook *nbv1.Notebook, isgenerateName bool) *routev1.Route {
 
@@ -97,7 +108,7 @@ func (r *OpenshiftNotebookReconciler) reconcileRoute(notebook *nbv1.Notebook,
 	var isGenerateName bool = false
 	// If the route name + namespace is greater than 63 characters, the route name would be created by generateName
 	// ex: notebook-name 48 + namespace(rhods-notebooks) 15 = 63
-	if len(notebook.Name) > 48 && len(notebook.Namespace) >= 15 {
+	if len(notebook.Name) > RouteNameMaxLen && len(notebook.Namespace) >= RouteNamespaceMaxLen {
 		log.Info("Route name is too long, using generateName")
 		isGenerateName = true
 		// Note: Also update service account redirect reference once route is created.
