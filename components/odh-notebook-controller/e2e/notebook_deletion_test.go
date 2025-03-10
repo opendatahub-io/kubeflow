@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -59,7 +60,7 @@ func (tc *testContext) testNotebookDeletion(nbMeta *metav1.ObjectMeta) error {
 
 func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) error {
 	// Verify Notebook StatefulSet resource is deleted
-	err := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		_, err = tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx, nbMeta.Name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -78,7 +79,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	// Verify Notebook Network Policies are deleted
 	nbNetworkPolicyList := netv1.NetworkPolicyList{}
 	opts := filterServiceMeshManagedPolicies(nbMeta)
-	err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
 		if nperr != nil {
 			if errors.IsNotFound(nperr) {
@@ -101,7 +102,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		// Verify Notebook Route is deleted
 		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
 		nbRoute := &routev1.Route{}
-		err = wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
+		err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 			err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
 			if err != nil {
 				if errors.IsNotFound(err) {
