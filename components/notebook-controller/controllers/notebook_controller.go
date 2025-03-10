@@ -55,6 +55,9 @@ const WorkbenchLabel = "opendatahub.io/workbenches"
 
 const PrefixEnvVar = "NB_PREFIX"
 
+// Statefulset name should be less than 52https://github.com/kubernetes/kubernetes/issues/64023
+const MaxStatefulsetNameLength = 52
+
 // The default fsGroup of PodSecurityContext.
 // https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#podsecuritycontext-v1-core
 const DefaultFSGroup = int64(100)
@@ -140,7 +143,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// as controller-service include as hash (len 11) as label
 	// controller-service-hash that shouldn't exceed 63 chars.
 	isGenerateName := false
-	if len(instance.Name) > 52 {
+	if len(instance.Name) > MaxStatefulsetNameLength {
 		log.Info("Notebook name is too long, it should be less than 52 chars")
 		isGenerateName = true
 	}
