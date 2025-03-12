@@ -642,8 +642,8 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 				if container.Name == notebook.Name {
 					containerFound = true
 
-					// Check if the container.Image value has an internal registry, if so  will pickup this without extra checks.
-					// This value constructed on the initialization of the Notebook CR.
+					// Check if the container.Image value has an internal registry, if so, will pick up this without extra checks.
+					// This value is constructed on the initialization of the Notebook CR (usually by odh-dashboard).
 					if strings.Contains(container.Image, "image-registry.openshift-image-registry.svc:5000") {
 						log.Info("Internal registry found. Will pick up the default value from image field.")
 						return nil
@@ -691,8 +691,7 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 									tagMap := t.(map[string]interface{})
 									tagName := tagMap["tag"].(string)
 									if tagName == imageSelected[1] {
-										items := tagMap["items"].([]interface{})
-										if len(items) > 0 {
+										if items, ok := tagMap["items"].([]interface{}); ok && items != nil && len(items) > 0 {
 											// Sort items by creationTimestamp to get the most recent one
 											sort.Slice(items, func(i, j int) bool {
 												iTime := items[i].(map[string]interface{})["created"].(string)
