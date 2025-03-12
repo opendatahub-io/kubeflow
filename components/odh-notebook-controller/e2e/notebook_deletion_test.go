@@ -61,7 +61,7 @@ func (tc *testContext) testNotebookDeletion(nbMeta *metav1.ObjectMeta) error {
 func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) error {
 	// Verify Notebook StatefulSet resource is deleted
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		_, err = tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx, nbMeta.Name, metav1.GetOptions{})
+		_, err = tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx, nbMeta.Name, metav1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return true, nil
@@ -80,7 +80,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	nbNetworkPolicyList := netv1.NetworkPolicyList{}
 	opts := filterServiceMeshManagedPolicies(nbMeta)
 	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		nperr := tc.customClient.List(tc.ctx, &nbNetworkPolicyList, opts...)
+		nperr := tc.customClient.List(ctx, &nbNetworkPolicyList, opts...)
 		if nperr != nil {
 			if errors.IsNotFound(nperr) {
 				return true, nil
@@ -103,7 +103,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
 		nbRoute := &routev1.Route{}
 		err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-			err = tc.customClient.Get(tc.ctx, nbRouteLookupKey, nbRoute)
+			err = tc.customClient.Get(ctx, nbRouteLookupKey, nbRoute)
 			if err != nil {
 				if errors.IsNotFound(err) {
 					return true, nil
