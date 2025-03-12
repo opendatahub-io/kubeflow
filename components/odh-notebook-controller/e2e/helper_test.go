@@ -25,7 +25,7 @@ import (
 func (tc *testContext) waitForControllerDeployment(name string, replicas int32) error {
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 
-		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx, name, metav1.GetOptions{})
+		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(ctx, name, metav1.GetOptions{})
 
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -60,7 +60,7 @@ func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Rou
 		opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
 	}
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		routeErr := tc.customClient.List(tc.ctx, &nbRouteList, opts...)
+		routeErr := tc.customClient.List(ctx, &nbRouteList, opts...)
 		if routeErr != nil {
 			log.Printf("error retrieving Notebook route %v", err)
 			return false, nil
@@ -79,7 +79,7 @@ func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Rou
 func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
 	nbNetworkPolicy := &netv1.NetworkPolicy{}
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(tc.ctx, name, metav1.GetOptions{})
+		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if npErr != nil {
 			log.Printf("error retrieving Notebook Network policy %v: %v", name, err)
 			return false, nil
@@ -135,7 +135,7 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
 	// Verify StatefulSet is running expected number of replicas
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx,
+		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
 			nbMeta.Name, metav1.GetOptions{})
 
 		if err1 != nil {
