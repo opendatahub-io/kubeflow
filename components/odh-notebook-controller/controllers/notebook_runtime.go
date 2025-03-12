@@ -23,18 +23,17 @@ const (
 	volumeName    = "runtime-images"
 )
 
-// checkConfigMapExists verifies if a ConfigMap exists in the namespace.
-func (r *OpenshiftNotebookReconciler) checkConfigMapExists(ctx context.Context, configMapName, namespace string) (bool, error) {
+// getRuntimeConfigMap verifies if a ConfigMap exists in the namespace.
+func (r *OpenshiftNotebookReconciler) getRuntimeConfigMap(ctx context.Context, configMapName, namespace string) (*corev1.ConfigMap, bool, error) {
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, configMap)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			return false, nil // ConfigMap not found
+			return nil, false, nil
 		}
-		return false, err // Some other error occurred
+		return nil, false, err
 	}
-	//r.Log.Info("ConfigMap found", "ConfigMap.Name", configMapName, "Namespace", namespace)
-	return true, nil // ConfigMap exists
+	return configMap, true, nil
 }
 
 func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Context, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
@@ -112,19 +111,14 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 		Data: data,
 	}
 
-	configMapExists, err := r.checkConfigMapExists(ctx, configMapName, notebookNamespace)
+	// Check if the ConfigMap exists
+	existingConfigMap, configMapExists, err := r.getRuntimeConfigMap(ctx, configMapName, notebookNamespace)
 	if err != nil {
-		log.Error(err, "Error checking if ConfigMap exists", "ConfigMap.Name", configMapName)
+		log.Error(err, "Error getting ConfigMap", "ConfigMap.Name", configMapName)
 		return err
 	}
 
 	if configMapExists {
-		existingConfigMap := &corev1.ConfigMap{}
-		if err := r.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: notebookNamespace}, existingConfigMap); err != nil {
-			log.Error(err, "Failed to get existing ConfigMap", "ConfigMap.Name", configMapName)
-			return err
-		}
-
 		if !jsonEqual(existingConfigMap.Data, data) {
 			existingConfigMap.Data = data
 			if err := r.Update(ctx, existingConfigMap); err != nil {
