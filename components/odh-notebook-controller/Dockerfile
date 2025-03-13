@@ -10,6 +10,7 @@ ARG SOURCE_CODE=.
 ARG GOLANG_VERSION=1.22
 
 # Use ubi8/go-toolset as base image
+# image sets GOTOOLCHAIN=local so it won't end up downloading if go.mod requests different version
 FROM registry.access.redhat.com/ubi8/go-toolset:${GOLANG_VERSION} as builder
 ARG TARGETOS
 ARG TARGETARCH
