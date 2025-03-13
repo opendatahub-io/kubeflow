@@ -717,7 +717,8 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 						}
 					}
 					if !imagestreamFound {
-						log.Error(nil, "Imagestream not found in main controller namespace", "imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
+						log.Error(nil, "ImageStream not found in main controller namespace, or the ImageStream is present but does not contain a dockerImageReference for the specified tag",
+							"imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
 					}
 				}
 			}
