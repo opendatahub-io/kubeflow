@@ -68,7 +68,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 						log.Printf("Pod %s is not running. Current phase: %s", pod.Name, pod.Status.Phase)
 						for _, containerStatus := range pod.Status.ContainerStatuses {
 							if !containerStatus.Ready {
-								log.Printf("Container %s in pod %s is not ready", containerStatus.Name, pod.Name)
+								log.Printf("Container %s in pod %s is not ready: %+v", containerStatus.Name, pod.Name, containerStatus.State)
 								if containerStatus.State.Waiting != nil {
 									log.Printf("Container %s is waiting. Reason: %s, Message: %s",
 										containerStatus.Name, containerStatus.State.Waiting.Reason, containerStatus.State.Waiting.Message)
