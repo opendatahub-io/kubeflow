@@ -38,6 +38,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 		for _, condition := range controllerDeployment.Status.Conditions {
 			if condition.Type == appsv1.DeploymentAvailable {
 				if condition.Status == v1.ConditionTrue && controllerDeployment.Status.ReadyReplicas == replicas {
+					log.Printf("Da deployment is done")
 					return true, nil
 				}
 			}
