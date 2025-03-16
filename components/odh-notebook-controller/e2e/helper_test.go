@@ -43,7 +43,48 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 			}
 		}
 
-		log.Printf("Error in %s deployment", name)
+		readyReplicas := controllerDeployment.Status.ReadyReplicas
+		availableReplicas := controllerDeployment.Status.AvailableReplicas
+		updatedReplicas := controllerDeployment.Status.UpdatedReplicas
+
+		log.Printf("Error in %s deployment: Ready: %d, Available: %d, Updated: %d, Desired: %d",
+			name, readyReplicas, availableReplicas, updatedReplicas, replicas)
+
+		if readyReplicas != replicas {
+			log.Printf("Not all replicas are ready for %s deployment", name)
+			for _, condition := range controllerDeployment.Status.Conditions {
+				log.Printf("\tDeployment's conditions: Type: %s, Status: %s, Reason: %s, Message: %s",
+					condition.Type, condition.Status, condition.Reason, condition.Message)
+			}
+
+			// Get the pods associated with this deployment
+			labelSelector := metav1.FormatLabelSelector(controllerDeployment.Spec.Selector)
+			podList, err := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+			if err != nil {
+				log.Printf("Error getting pods for deployment %s: %v", name, err)
+			} else {
+				for _, pod := range podList.Items {
+					if pod.Status.Phase != v1.PodRunning {
+						log.Printf("Pod %s is not running. Current phase: %s", pod.Name, pod.Status.Phase)
+						for _, containerStatus := range pod.Status.ContainerStatuses {
+							if !containerStatus.Ready {
+								log.Printf("Container %s in pod %s is not ready", containerStatus.Name, pod.Name)
+								if containerStatus.State.Waiting != nil {
+									log.Printf("Container %s is waiting. Reason: %s, Message: %s",
+										containerStatus.Name, containerStatus.State.Waiting.Reason, containerStatus.State.Waiting.Message)
+								}
+								if containerStatus.State.Terminated != nil {
+									log.Printf("Container %s is terminated. Reason: %s, Message: %s, Exit Code: %d",
+										containerStatus.Name, containerStatus.State.Terminated.Reason,
+										containerStatus.State.Terminated.Message, containerStatus.State.Terminated.ExitCode)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		return false, nil
 
 	})
