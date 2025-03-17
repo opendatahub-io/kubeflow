@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -38,6 +39,7 @@ func (r *OpenshiftNotebookReconciler) getRuntimeConfigMap(ctx context.Context, c
 }
 
 func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Context, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
+
 	log := r.Log.WithValues("namespace", notebookNamespace)
 
 	// Create a dynamic client
@@ -83,7 +85,6 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 				if err != nil || !found {
 					annotations = map[string]interface{}{}
 				}
-
 				metadataRaw, ok := annotations["opendatahub.io/runtime-image-metadata"].(string)
 				if !ok || metadataRaw == "" {
 					metadataRaw = "[]"
@@ -102,7 +103,31 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 		}
 	}
 
-	// Create or update the ConfigMap in the Notebook's namespace
+	// Check if the ConfigMap already exists
+	existingConfigMap, configMapExists, err := r.getRuntimeConfigMap(ctx, configMapName, notebookNamespace)
+	if err != nil {
+		log.Error(err, "Error getting ConfigMap", "ConfigMap.Name", configMapName)
+		return err
+	}
+
+	// If data is empty and ConfigMap does not exist, skip creating anything
+	if len(data) == 0 && !configMapExists {
+		log.Info("No runtime images found. Skipping creation of empty ConfigMap.")
+		return nil
+	}
+
+	// If data is empty and ConfigMap does exist, decide what behavior we want:
+	if len(data) == 0 && configMapExists {
+		log.Info("Data is empty but the ConfigMap already exists. Leaving it as is.")
+		// OR optionally delete it:
+		// if err := r.Delete(ctx, existingConfigMap); err != nil {
+		//	log.Error(err, "Failed to delete existing empty ConfigMap")
+		//	return err
+		//}
+		return nil
+	}
+
+	// Create a new ConfigMap struct with the data
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      configMapName,
@@ -112,13 +137,7 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 		Data: data,
 	}
 
-	// Check if the ConfigMap exists
-	existingConfigMap, configMapExists, err := r.getRuntimeConfigMap(ctx, configMapName, notebookNamespace)
-	if err != nil {
-		log.Error(err, "Error getting ConfigMap", "ConfigMap.Name", configMapName)
-		return err
-	}
-
+	// If the ConfigMap exists and data has changed, update it
 	if configMapExists {
 		if !jsonEqual(existingConfigMap.Data, data) {
 			existingConfigMap.Data = data
@@ -127,14 +146,18 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 				return err
 			}
 			log.Info("Updated existing ConfigMap with new runtime images", "ConfigMap.Name", configMapName)
+		} else {
+			log.Info("ConfigMap already up-to-date", "ConfigMap.Name", configMapName)
 		}
-	} else {
-		if err := r.Create(ctx, configMap); err != nil {
-			log.Error(err, "Failed to create ConfigMap", "ConfigMap.Name", configMapName)
-			return err
-		}
-		log.Info("Created new ConfigMap for runtime images", "ConfigMap.Name", configMapName)
+		return nil
 	}
+
+	// Otherwise, create the ConfigMap
+	if err := r.Create(ctx, configMap); err != nil {
+		log.Error(err, "Failed to create ConfigMap", "ConfigMap.Name", configMapName)
+		return err
+	}
+	log.Info("Created new ConfigMap for runtime images", "ConfigMap.Name", configMapName)
 
 	return nil
 }
@@ -186,7 +209,25 @@ func (r *OpenshiftNotebookReconciler) EnsureNotebookConfigMap(notebook *nbv1.Not
 	return r.syncRuntimeImagesConfigMap(ctx, notebook.Namespace, r.Namespace, r.Config)
 }
 
-func MountPipelineRuntimeImages(notebook *nbv1.Notebook, log logr.Logger) error {
+func MountPipelineRuntimeImages(notebook *nbv1.Notebook, log logr.Logger, client client.Client, ctx context.Context) error {
+
+	// Retrieve the ConfigMap
+	configMap := &corev1.ConfigMap{}
+	err := client.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: notebook.Namespace}, configMap)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("ConfigMap does not exist", "ConfigMap", configMapName)
+			return nil
+		}
+		log.Error(err, "Error retrieving ConfigMap", "ConfigMap", configMapName)
+		return err
+	}
+
+	// Check if the ConfigMap is empty
+	if len(configMap.Data) == 0 {
+		log.Info("ConfigMap is empty, skipping volume mount", "ConfigMap", configMapName)
+		return nil
+	}
 
 	// Define the volume
 	configVolume := corev1.Volume{

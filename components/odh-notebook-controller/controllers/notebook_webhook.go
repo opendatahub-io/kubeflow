@@ -300,12 +300,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
-		// Mount ConfigMap pipeline-runtime-images as runtime-images
-		err = MountPipelineRuntimeImages(notebook, log)
-		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
-		}
-
 	}
 
 	// Check Imagestream Info both on create and update operations
@@ -318,6 +312,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 		// Mount ca bundle on notebook creation and update
 		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		// Mount ConfigMap pipeline-runtime-images as runtime-images
+		err = MountPipelineRuntimeImages(notebook, log, w.Client, ctx)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
