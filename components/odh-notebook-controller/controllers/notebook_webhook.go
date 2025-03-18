@@ -19,10 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
 	"sort"
 	"strings"
+
+	configv1 "github.com/openshift/api/config/v1"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -290,6 +291,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 		// Mount ca bundle on notebook creation and update
 		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		// Mount ConfigMap pipeline-runtime-images as runtime-images
+		err = MountPipelineRuntimeImages(notebook, log, w.Client, ctx)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
