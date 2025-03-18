@@ -117,7 +117,7 @@ func NewTestContext() (*testContext, error) {
 		kubeClient:              kc,
 		customClient:            custClient,
 		testNamespace:           notebookTestNamespace,
-		resourceCreationTimeout: time.Minute * 1,
+		resourceCreationTimeout: time.Minute * 3, // 1*time.Minute is not enough to start seeing errors
 		resourceRetryInterval:   time.Second * 10,
 		ctx:                     context.TODO(),
 		testNotebooks:           testNotebooksContextList,
