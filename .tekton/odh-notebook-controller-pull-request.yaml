@@ -214,6 +214,9 @@ spec:
         value: $(params.dockerfile)
       - name: CONTEXT
         value: $(params.path-context)
+      # KFLUXSPRT-2401: rename the secret so it's not found, otherwise it breaks ubi8:minimal builds
+      - name: ENTITLEMENT_SECRET
+        value: no-such-thing-for-ya
       - name: HERMETIC
         value: $(params.hermetic)
       - name: PREFETCH_INPUT
