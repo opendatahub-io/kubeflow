@@ -1,24 +1,10 @@
-/*
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package controllers
 
 import (
 	"context"
 	"fmt"
 
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +20,6 @@ var _ = Describe("When Creating a notebook should mount the configMap", func() {
 	When("Creating a Notebook", func() {
 
 		const (
-			Name      = "test-notebook-with-runtime-images"
 			Namespace = "default"
 		)
 
@@ -46,68 +31,110 @@ var _ = Describe("When Creating a notebook should mount the configMap", func() {
 		})
 
 		testCases := []struct {
-			name      string
-			ConfigMap *unstructured.Unstructured
-			// currently we expect that Notebook CR is always created,
-			// and when unable to resolve imagestream, image: is left alone
-			expectedData map[string]string
+			name              string
+			notebook          *nbv1.Notebook
+			notebookName      string
+			ConfigMap         *unstructured.Unstructured
+			expectedMountName string
+			expectedMountPath string
 		}{
 			{
-				name: "ConfigMap with data",
+				name:         "ConfigMap with data",
+				notebookName: "test-notebook-runtime-1",
 				ConfigMap: &unstructured.Unstructured{
 					Object: map[string]any{
 						"kind":       "ConfigMap",
 						"apiVersion": "v1",
 						"metadata": map[string]any{
 							"name":      "pipeline-runtime-images",
-							"namespace": "redhat-ods-applications",
+							"namespace": Namespace,
 						},
 						"data": map[string]string{
-							"datascience-with-python-3.11-ubi9.json": `{"display_name":"Datascience with Python 3.11 (UBI9)","metadata":{"display_name":"Datascience with Python 3.11 (UBI9)","image_name":"quay.io/opendatahub/workbench-images@sha256:304d3b2ea846832f27312ef6776064a1bf3797c645b6fea0b292a7ef6416458e","pull_policy":"IfNotPresent","tags":["datascience"]},"schema_name":"runtime-image"}`,
+							"datascience.json": `{"image_name":"quay.io/opendatahub/test"}`,
 						},
 					},
 				},
-				expectedData: map[string]string{
-					"datascience-with-python-3.11-ubi9.json": `{"display_name":"Datascience with Python 3.11 (UBI9)","metadata":{"display_name":"Datascience with Python 3.11 (UBI9)","image_name":"quay.io/opendatahub/workbench-images@sha256:304d3b2ea846832f27312ef6776064a1bf3797c645b6fea0b292a7ef6416458e","pull_policy":"IfNotPresent","tags":["datascience"]},"schema_name":"runtime-image"}`,
-				},
+				expectedMountName: "runtime-images",
+				expectedMountPath: "/opt/app-root/pipeline-runtimes/",
 			},
 			{
-				name: "ConfigMap without data",
+				name:         "ConfigMap without data",
+				notebookName: "test-notebook-runtime-2",
 				ConfigMap: &unstructured.Unstructured{
 					Object: map[string]any{
 						"kind":       "ConfigMap",
 						"apiVersion": "v1",
 						"metadata": map[string]any{
 							"name":      "pipeline-runtime-images",
-							"namespace": "redhat-ods-applications",
+							"namespace": Namespace,
 						},
 						"data": map[string]string{},
 					},
 				},
-				expectedData: map[string]string{},
+				expectedMountName: "",
+				expectedMountPath: "",
 			},
 		}
 
 		for _, testCase := range testCases {
-			testCase := testCase // create a copy to get correct capture in the `It` closure, https://go.dev/blog/loopvar-preview
-			It(fmt.Sprintf("Should create a Notebook resource successfully: %s", testCase.name), func() {
+			testCase := testCase
+			It(fmt.Sprintf("Should mount ConfigMap correctly: %s", testCase.name), func() {
+				notebook := createNotebook(testCase.notebookName, Namespace)
 
-				notebook := createNotebook(Name, Namespace)
+				// cleanup first
+				_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
+				_ = cli.Delete(ctx, testCase.ConfigMap, &client.DeleteOptions{})
 
-				By("Creating a Notebook resource successfully")
-				Expect(cli.Create(ctx, notebook)).Should(Succeed())
-				By("Creating a Configmap successfully")
-				Expect(cli.Create(ctx, testCase.ConfigMap, &client.CreateOptions{})).To(Succeed())
+				// wait until deleted
+				Eventually(func() bool {
+					err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, &nbv1.Notebook{})
+					return apierrs.IsNotFound(err)
+				}).Should(BeTrue())
 
-				// By("Checking that the webhook modified the notebook CR with the expected image")
-				// Expect(notebook.Spec.Template.Spec.Containers[0].Image).To(Equal(testCase.expectedData))
+				By("Creating the ConfigMap")
+				Expect(cli.Create(ctx, testCase.ConfigMap)).To(Succeed())
+
+				By("Creating the Notebook")
+				Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+				By("Fetching the created Notebook as typed object")
+				typedNotebook := &nbv1.Notebook{}
+				Eventually(func(g Gomega) {
+					err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, typedNotebook)
+					g.Expect(err).ToNot(HaveOccurred())
+				}).Should(Succeed())
+
+				// Check volumeMounts
+				c := typedNotebook.Spec.Template.Spec.Containers[0]
+				foundMount := false
+				for _, vm := range c.VolumeMounts {
+					if vm.Name == testCase.expectedMountName && vm.MountPath == testCase.expectedMountPath {
+						foundMount = true
+					}
+				}
+				if testCase.expectedMountName != "" {
+					Expect(foundMount).To(BeTrue(), "expected VolumeMount not found")
+				} else {
+					Expect(foundMount).To(BeFalse(), "unexpected VolumeMount found")
+				}
+
+				// Check volumes
+				foundVolume := false
+				for _, v := range typedNotebook.Spec.Template.Spec.Volumes {
+					if v.Name == testCase.expectedMountName && v.ConfigMap != nil && v.ConfigMap.Name == "pipeline-runtime-images" {
+						foundVolume = true
+					}
+				}
+				if testCase.expectedMountName != "" {
+					Expect(foundVolume).To(BeTrue(), "expected ConfigMap volume not found")
+				} else {
+					Expect(foundVolume).To(BeFalse(), "unexpected ConfigMap volume found")
+				}
 
 				By("Deleting the created resources")
 				Expect(cli.Delete(ctx, notebook, &client.DeleteOptions{})).To(Succeed())
 				Expect(cli.Delete(ctx, testCase.ConfigMap, &client.DeleteOptions{})).To(Succeed())
 			})
 		}
-
 	})
-
 })
