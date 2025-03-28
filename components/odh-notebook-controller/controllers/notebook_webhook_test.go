@@ -113,7 +113,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 				},
 				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
 				unexpectedEvents: []string{
-					"imagestream-not-found",
+					IMAGE_STREAM_NOT_FOUND_EVENT,
 				},
 			},
 			{
@@ -165,7 +165,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 				// there is no update to the Notebook
 				expectedImage: ":some-tag",
 				expectedEvents: []string{
-					"imagestream-not-found",
+					IMAGE_STREAM_NOT_FOUND_EVENT,
 				},
 			},
 		}
