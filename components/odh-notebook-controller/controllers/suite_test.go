@@ -154,6 +154,8 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
+	//utilruntime.Must(imagev1.AddToScheme(scheme))
+
 	// +kubebuilder:scaffold:scheme
 
 	// Initialize Kubernetes client
@@ -238,6 +240,148 @@ var _ = BeforeSuite(func() {
 		}
 		Expect(cli.Create(ctx, ns)).To(Succeed())
 	}
+
+	// // // ---- Global initialization for runtime ImageStreams begins here ----
+	// // {
+	// // 	ctx := context.Background()
+
+	// // 	// Define the datascience ImageStream.
+	// // 	dsImage := &imagev1.ImageStream{
+	// // 		ObjectMeta: metav1.ObjectMeta{
+	// // 			Name:      "runtime-datascience",
+	// // 			Namespace: odhNotebookControllerTestNamespace,
+	// // 			Labels: map[string]string{
+	// // 				"opendatahub.io/runtime-image": "true",
+	// // 			},
+	// // 			Annotations: map[string]string{
+	// // 				"opendatahub.io/runtime-image-url":  "https://github.com/opendatahub-io/notebooks/tree/main/runtimes",
+	// // 				"opendatahub.io/runtime-image-name": "Datascience with Python 3.11 (UBI9)",
+	// // 				"opendatahub.io/runtime-image-desc": "Datascience runtime image for Elyra...",
+	// // 			},
+	// // 		},
+	// // 		Spec: imagev1.ImageStreamSpec{
+	// // 			LookupPolicy: imagev1.ImageLookupPolicy{Local: true},
+	// // 			Tags: []imagev1.TagReference{
+	// // 				{
+	// // 					Name: "datascience",
+	// // 					Annotations: map[string]string{
+	// // 						"opendatahub.io/runtime-image-metadata": `[{
+	// // 							"display_name": "Datascience with Python 3.11 (UBI9)",
+	// // 							"metadata": {
+	// // 								"tags": ["datascience"],
+	// // 								"display_name": "Datascience with Python 3.11 (UBI9)",
+	// // 								"image_name": "quay.io/opendatahub/workbench-images@sha256:304d3b2ea846832f27312ef6776064a1bf3797c645b6fea0b292a7ef6416458e",
+	// // 								"pull_policy": "IfNotPresent"
+	// // 							},
+	// // 							"schema_name": "runtime-image"
+	// // 						}]`,
+	// // 					},
+	// // 					From: &v1.ObjectReference{
+	// // 						Kind: "DockerImage",
+	// // 						Name: "quay.io/opendatahub/workbench-images@sha256:304d3b2ea846832f27312ef6776064a1bf3797c645b6fea0b292a7ef6416458e",
+	// // 					},
+	// // 				},
+	// // 			},
+	// // 		},
+	// // 	}
+
+	// // 	// Define the minimal ImageStream.
+	// // 	minimalImage := &imagev1.ImageStream{
+	// // 		ObjectMeta: metav1.ObjectMeta{
+	// // 			Name:      "runtime-minimal",
+	// // 			Namespace: odhNotebookControllerTestNamespace,
+	// // 			Labels: map[string]string{
+	// // 				"opendatahub.io/runtime-image": "true",
+	// // 			},
+	// // 			Annotations: map[string]string{
+	// // 				"opendatahub.io/runtime-image-url":  "https://github.com/opendatahub-io/notebooks/tree/main/runtimes",
+	// // 				"opendatahub.io/runtime-image-name": "Python 3.11 (UBI9)",
+	// // 				"opendatahub.io/runtime-image-desc": "Minimal runtime image for Elyra...",
+	// // 			},
+	// // 		},
+	// // 		Spec: imagev1.ImageStreamSpec{
+	// // 			LookupPolicy: imagev1.ImageLookupPolicy{Local: true},
+	// // 			Tags: []imagev1.TagReference{
+	// // 				{
+	// // 					Name: "minimal",
+	// // 					Annotations: map[string]string{
+	// // 						"opendatahub.io/runtime-image-metadata": `[{
+	// // 							"display_name": "Python 3.11 (UBI9)",
+	// // 							"metadata": {
+	// // 								"tags": ["minimal"],
+	// // 								"display_name": "Python 3.11 (UBI9)",
+	// // 								"image_name": "quay.io/opendatahub/workbench-images@sha256:a2b1bf59f25fd0694394ad927e5eba93e32df9c2c11d8b54412564a9fc736ab8",
+	// // 								"pull_policy": "IfNotPresent"
+	// // 							},
+	// // 							"schema_name": "runtime-image"
+	// // 						}]`,
+	// // 					},
+	// // 					From: &v1.ObjectReference{
+	// // 						Kind: "DockerImage",
+	// // 						Name: "quay.io/opendatahub/workbench-images@sha256:a2b1bf59f25fd0694394ad927e5eba93e32df9c2c11d8b54412564a9fc736ab8",
+	// // 					},
+	// // 				},
+	// // 			},
+	// // 		},
+	// // 	}
+
+	// // 	// Create the ImageStreams.
+	// // 	err := cli.Create(ctx, dsImage)
+	// // 	if err != nil && !apierrors.IsAlreadyExists(err) {
+	// // 		panic("failed to create ds ImageStream: " + err.Error())
+	// // 	}
+	// // 	err = cli.Create(ctx, minimalImage)
+	// // 	if err != nil && !apierrors.IsAlreadyExists(err) {
+	// // 		panic("failed to create minimal ImageStream: " + err.Error())
+	// // 	}
+
+	// // 	// Wait until the objects are available in a list.
+	// // 	Eventually(func() ([]imagev1.ImageStream, error) {
+	// // 		list := &imagev1.ImageStreamList{}
+	// // 		err := cli.List(ctx, list, client.InNamespace(odhNotebookControllerTestNamespace))
+	// // 		return list.Items, err
+	// // 	}, 10*time.Second, 500*time.Millisecond).Should(ContainElement(HaveField("Name", Equal("runtime-datascience"))))
+	// // 	Eventually(func() ([]imagev1.ImageStream, error) {
+	// // 		list := &imagev1.ImageStreamList{}
+	// // 		err := cli.List(ctx, list, client.InNamespace(odhNotebookControllerTestNamespace))
+	// // 		return list.Items, err
+	// // 	}, 10*time.Second, 500*time.Millisecond).Should(ContainElement(HaveField("Name", Equal("runtime-minimal"))))
+
+	// // 	// Re-fetch the objects to update them.
+	// // 	fetchedDS := &imagev1.ImageStream{}
+	// // 	Expect(cli.Get(ctx, types.NamespacedName{Name: dsImage.Name, Namespace: odhNotebookControllerTestNamespace}, fetchedDS)).Should(Succeed())
+	// // 	fetchedMinimal := &imagev1.ImageStream{}
+	// // 	Expect(cli.Get(ctx, types.NamespacedName{Name: minimalImage.Name, Namespace: odhNotebookControllerTestNamespace}, fetchedMinimal)).Should(Succeed())
+
+	// // 	// Simulate a successful image import by updating the Status.Tags.
+	// // 	fetchedDS.Status.Tags = []imagev1.NamedTagEventList{
+	// // 		{
+	// // 			Tag: "datascience",
+	// // 			Items: []imagev1.TagEvent{
+	// // 				{
+	// // 					DockerImageReference: "quay.io/opendatahub/workbench-images@sha256:304d3b2ea846832f27312ef6776064a1bf3797c645b6fea0b292a7ef6416458e",
+	// // 				},
+	// // 			},
+	// // 		},
+	// // 	}
+	// // 	// Use cli.Update instead of cli.Status().Update if the CRD does not support status subresource.
+	// // 	Expect(cli.Update(ctx, fetchedDS)).Should(Succeed())
+
+	// // 	fetchedMinimal.Status.Tags = []imagev1.NamedTagEventList{
+	// // 		{
+	// // 			Tag: "minimal",
+	// // 			Items: []imagev1.TagEvent{
+	// // 				{
+	// // 					DockerImageReference: "quay.io/opendatahub/workbench-images@sha256:a2b1bf59f25fd0694394ad927e5eba93e32df9c2c11d8b54412564a9fc736ab8",
+	// // 				},
+	// // 			},
+	// // 		},
+	// // 	}
+	// // 	Expect(cli.Update(ctx, fetchedMinimal)).Should(Succeed())
+
+	// // 	fmt.Fprintf(GinkgoWriter, "DEBUG: Initialized ImageStreams in namespace '%s'\n", odhNotebookControllerTestNamespace)
+	// // }
+	// // // ---- Global initialization for runtime ImageStreams ends here ----
 
 }, 60)
 
