@@ -203,7 +203,7 @@ func (r *OpenshiftNotebookReconciler) EnsureNotebookConfigMap(notebook *nbv1.Not
 	return r.syncRuntimeImagesConfigMap(ctx, notebook.Namespace, r.Namespace, r.Config)
 }
 
-func MountPipelineRuntimeImages(notebook *nbv1.Notebook, log logr.Logger, client client.Client, ctx context.Context) error {
+func MountPipelineRuntimeImages(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
 	// Retrieve the ConfigMap
 	configMap := &corev1.ConfigMap{}

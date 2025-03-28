@@ -33,7 +33,6 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
-	configv1 "github.com/openshift/api/config/v1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -317,7 +316,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Mount ConfigMap pipeline-runtime-images as runtime-images
-		err = MountPipelineRuntimeImages(notebook, log, w.Client, ctx)
+		err = MountPipelineRuntimeImages(ctx, w.Client, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
