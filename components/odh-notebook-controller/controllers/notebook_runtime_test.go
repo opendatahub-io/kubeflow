@@ -86,10 +86,11 @@ var _ = Describe("When Creating a notebook should mount the configMap", func() {
 				_ = cli.Delete(ctx, testCase.ConfigMap, &client.DeleteOptions{})
 
 				// wait until deleted
-				Eventually(func() bool {
+				By("Waiting for the Notebook to be deleted")
+				Eventually(func(g Gomega) {
 					err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, &nbv1.Notebook{})
-					return apierrs.IsNotFound(err)
-				}).Should(BeTrue())
+					g.Expect(apierrs.IsNotFound(err)).To(BeTrue(), fmt.Sprintf("expected Notebook %q to be deleted", testCase.notebookName))
+				}).WithOffset(1).Should(Succeed())
 
 				By("Creating the ConfigMap")
 				Expect(cli.Create(ctx, testCase.ConfigMap)).To(Succeed())
