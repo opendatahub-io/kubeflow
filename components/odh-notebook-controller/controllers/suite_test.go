@@ -154,6 +154,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
+
 	// +kubebuilder:scaffold:scheme
 
 	// Initialize Kubernetes client
@@ -187,6 +188,7 @@ var _ = BeforeSuite(func() {
 		Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
 		Scheme:    mgr.GetScheme(),
 		Namespace: odhNotebookControllerTestNamespace,
+		Config:    mgr.GetConfig(),
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
