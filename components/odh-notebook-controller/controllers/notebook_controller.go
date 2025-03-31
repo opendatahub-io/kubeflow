@@ -193,7 +193,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// Create/Watch and Update the pipeline-runtime-image ConfigMap on Notebook's Namspace
+	// Create/Watch and Update the pipeline-runtime-image ConfigMap on Notebook's Namespace
 	err = r.EnsureNotebookConfigMap(notebook, ctx)
 	if err != nil {
 		return ctrl.Result{}, err
