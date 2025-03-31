@@ -68,6 +68,10 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 	return otel.GetTracerProvider().Tracer("opendatahub.io/kubeflow/components/odh-notebook-controller/controllers/notebook_webhook.go")
 })
 
+const (
+	IMAGE_STREAM_NOT_FOUND_EVENT = "imagestream-not-found"
+)
+
 // InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
 // controller finishes the reconciliation. Otherwise, a race condition may happen
@@ -742,7 +746,7 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 						}
 					}
 					if !imagestreamFound {
-						span.AddEvent("imagestream-not-found")
+						span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
 						log.Error(nil, "ImageStream not found in main controller namespace, or the ImageStream is present but does not contain a dockerImageReference for the specified tag",
 							"imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
 					}
