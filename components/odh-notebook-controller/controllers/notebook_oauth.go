@@ -275,7 +275,21 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthSecret(notebook *nbv1.Notebo
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
 	log := logf.FromContext(ctx)
 
-	err := r.createOAuthClient(notebook, ctx)
+	route := &routev1.Route{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      notebook.Name,
+		Namespace: notebook.Namespace,
+	}, route)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("Route not found, cannot create OAuthClient yet", "route", notebook.Name)
+			return nil
+		}
+		log.Error(err, "Failed to get Route for OAuthClient")
+		return err
+	}
+
+	err = r.createOAuthClient(notebook, ctx)
 	if err != nil {
 		log.Error(err, "Unable to handle OAuthClient creation / update")
 		return err
