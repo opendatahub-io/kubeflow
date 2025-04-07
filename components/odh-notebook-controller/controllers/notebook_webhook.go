@@ -232,7 +232,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-oauth-client",
-				DefaultMode: pointer.Int32(420),
+				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
