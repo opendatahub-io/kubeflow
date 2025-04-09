@@ -44,7 +44,7 @@
 ##                  - version attribute of 'releases' element at index 0
 ##                  - defaults to a value derived from contents of ./releasing/version/VERSION
 ##                      - 1st line of VERSION is read, and any leading 'v' character is removed from content
-##                        - ex: v1.9.0 -> 1.9.0
+##                        - ex: v1.10.0 -> 1.10.0
 ##              - [optional] -r <repoUrl>
 ##                  - repoUrl attribute of 'releases' element at index 0
 ##                  - defaults to a value derived from the 'repo' attribute of ./components/notebook-controller/PROJECT

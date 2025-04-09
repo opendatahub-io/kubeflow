@@ -15,15 +15,15 @@ env:
   CREATE_NEW_RELEASE: ${{ inputs.release-type == 'Release' }}
   REPO_OWNER: opendatahub-io
   REPO_NAME: kubeflow
-  BRANCH_NAME: v1.9-branch
+  BRANCH_NAME: v1.10-branch
 
 jobs:
-  # 1. Sync changes to opendatahub:v1.9-branch from opendatahub:main
+  # 1. Sync changes to opendatahub:v1.10-branch from opendatahub:main
   sync-main-to-release-branch:
     uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
     with:
       source: "main"
-      target: "v1.9-branch"
+      target: "v1.10-branch"
 
   # 2. Poll for images to be available on quay.io the readiness of the images usually takes ~10 mins
   wait-images-are-ready-on-quay:
@@ -46,8 +46,8 @@ jobs:
 
           # Images to check
           IMAGES=(
-            "quay.io/opendatahub/kubeflow-notebook-controller:1.9-${GIT_HASH}"
-            "quay.io/opendatahub/odh-notebook-controller:1.9-${GIT_HASH}"
+            "quay.io/opendatahub/kubeflow-notebook-controller:1.10-${GIT_HASH}"
+            "quay.io/opendatahub/odh-notebook-controller:1.10-${GIT_HASH}"
           )
 
           # Sleep for 5 minutes before starting polling
@@ -84,7 +84,7 @@ jobs:
     if: ${{ needs.wait-images-are-ready-on-quay.outputs.images_ready == 'true' }}
     uses: opendatahub-io/kubeflow/.github/workflows/notebook-controller-images-updater.yaml@main
     with:
-      branch-name: "v1.9-branch"
+      branch-name: "v1.10-branch"
       organization: "opendatahub-io"
       generate-pr: "true"
     secrets:
@@ -146,4 +146,4 @@ jobs:
     if: ${{ needs.check-pr-merged.outputs.pr_merged == 'true' && inputs.release-type == 'Release' }}
     uses: opendatahub-io/kubeflow/.github/workflows/create-release.yaml@main
     with:
-      target_branch: "v1.9-branch"
+      target_branch: "v1.10-branch"

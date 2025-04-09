@@ -5,7 +5,7 @@ name: Code static analysis
   pull_request:
     branches:
       - main
-      - v1.9-branch
+      - v1.10-branch
   workflow_dispatch:
 
 permissions:

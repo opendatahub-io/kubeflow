@@ -26,8 +26,8 @@ set -euo pipefail
 #   recent commit will be used.
 #       git branch -r returns branches in the form of <remote>/<branch>
 #            examples: 
-#               origin/v1.9-branch  : match
-#               origin/main         : no match    
+#               origin/v1.10-branch  : match
+#               origin/main          : no match    
 #     
 # Arguments: 
 #   $1 : Release branch to use if provided.
@@ -72,7 +72,7 @@ _get_latest_release_tag()
 #   This determination is critical in being able to properly auto-increment the release name. See comments on _get_target_release_json() for further details.
 #
 # Arguments: 
-#   $1 : Branch prefix that is being used to create the new release.  kubeflow names branches like 'v1.9-branch'.  The branch prefix would then be expected to be 'v1.9'
+#   $1 : Branch prefix that is being used to create the new release.  kubeflow names branches like 'v1.10-branch'.  The branch prefix would then be expected to be 'v1.10'
 #   $2 : Tag name corresponding to the most recent published release
 #
 # Returns:
@@ -103,13 +103,13 @@ _same_branch_as_prior_release()
 #   If a release name is provided in the arguments, it is used as-is without any further computation.  However, if a release name is not provided, this function will
 #   analyze the state of the release branch as well as the most recent published release tag, to determine the appropriate auto-incrementing strategy. Consider the 
 #   following scenarios:
-#       _get_target_release_json "v1.9-branch" ""
+#       _get_target_release_json "v1.10-branch" ""
 #           In this case, the most recent published release is retrieved, and, based on _same_branch_as_prior_release():
-#               - if the most recent published release is associated with the release branch, the {release} segment of the name is incremented by 1 (ex: v1.9.0-5 to v1.9.0-6)
-#               - if the most recent published release is not associated with the release branch, release name is "reset" based on the branch (ex: v1.9.0-1)
+#               - if the most recent published release is associated with the release branch, the {release} segment of the name is incremented by 1 (ex: v1.10.0-5 to v1.10.0-6)
+#               - if the most recent published release is not associated with the release branch, release name is "reset" based on the branch (ex: v1.10.0-1)
 #
-#       _get_target_release_json "v1.9-branch" "v1.9.0-5"
-#            In this case, the release name is simply the provided 'v1.9.0-5' argument.  If this release already exists, the script will subsequently error.
+#       _get_target_release_json "v1.10-branch" "v1.10.0-5"
+#            In this case, the release name is simply the provided 'v1.10.0-5' argument.  If this release already exists, the script will subsequently error.
 #
 #   Generally speaking, it should not be necessary to provide the $2 argument unless under extraordinary circumstances.
 #
