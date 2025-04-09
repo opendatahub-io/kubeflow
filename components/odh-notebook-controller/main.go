@@ -40,6 +40,7 @@ import (
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//+kubebuilder:scaffold:imports
@@ -56,6 +57,7 @@ func init() {
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(configv1.AddToScheme(scheme))
+	utilruntime.Must(oauthv1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }
