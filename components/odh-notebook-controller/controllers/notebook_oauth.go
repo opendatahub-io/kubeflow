@@ -397,8 +397,7 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 			if err != nil {
 				return fmt.Errorf("failed to create OAuth Client: %w", err)
 			}
-			if err = r.Patch(ctx, oauthClient, client.RawPatch(types.ApplyPatchType, data),
-				client.ForceOwnership, client.FieldOwner("rhods-operator")); err != nil {
+			if err = r.Patch(ctx, oauthClient, client.RawPatch(types.ApplyPatchType, data)); err != nil {
 				return fmt.Errorf("failed to patch existing OAuthClient CR: %w", err)
 			}
 			return nil
