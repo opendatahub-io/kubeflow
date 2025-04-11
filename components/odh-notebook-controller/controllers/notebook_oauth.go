@@ -353,7 +353,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthRoute(
 func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
 	log := logf.FromContext(ctx)
 
-	//
+	// Get the route that will be used in the OAuthClient
 	oauthClientRoute := &routev1.Route{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      notebook.Name,
@@ -364,7 +364,7 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 		return err
 	}
 
-	//
+	// Get the secret that will be used in the OAuthClient
 	secret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{
 		Name:      notebook.Name + "-oauth-client",
