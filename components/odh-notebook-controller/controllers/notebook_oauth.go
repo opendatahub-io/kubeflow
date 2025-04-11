@@ -384,6 +384,9 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: notebook.Name + "-" + notebook.Namespace + "-oauth-client",
+			Labels: map[string]string{
+				"notebook-owner": notebook.Name,
+			},
 		},
 		Secret:       stringData,
 		RedirectURIs: []string{"https://" + oauthClientRoute.Spec.Host},
