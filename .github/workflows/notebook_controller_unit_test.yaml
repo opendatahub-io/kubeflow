@@ -3,6 +3,7 @@ on:
   push:
   pull_request:
     paths:
+      - components/common/**
       - components/notebook-controller/**
   workflow_dispatch:
 
