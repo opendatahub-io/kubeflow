@@ -335,8 +335,8 @@ func (r *OpenshiftNotebookReconciler) createSecret(notebook *nbv1.Notebook, ctx 
 }
 
 // NewNotebookOAuthRoute defines the desired OAuth route object
-func NewNotebookOAuthRoute(notebook *nbv1.Notebook) *routev1.Route {
-	route := NewNotebookRoute(notebook)
+func NewNotebookOAuthRoute(notebook *nbv1.Notebook, isGenerateName bool) *routev1.Route {
+	route := NewNotebookRoute(notebook, isGenerateName)
 	route.Spec.To.Name = notebook.Name + "-tls"
 	route.Spec.Port.TargetPort = intstr.FromString(OAuthServicePortName)
 	route.Spec.TLS.Termination = routev1.TLSTerminationReencrypt
