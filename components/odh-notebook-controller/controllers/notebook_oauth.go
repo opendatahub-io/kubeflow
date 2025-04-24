@@ -275,18 +275,32 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthSecret(notebook *nbv1.Notebo
 func (r *OpenshiftNotebookReconciler) ReconcileOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
 	log := logf.FromContext(ctx)
 
+	// Create the route if it does not already exist
 	route := &routev1.Route{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      notebook.Name,
-		Namespace: notebook.Namespace,
-	}, route)
+	routeList := &routev1.RouteList{}
+
+	// List the routes in the notebook namespace with the notebook name label
+	opts := []client.ListOption{
+		client.InNamespace(notebook.Namespace),
+		client.MatchingLabels{"notebook-name": notebook.Name},
+	}
+
+	err := r.List(ctx, routeList, opts...)
 	if err != nil {
-		if apierrs.IsNotFound(err) {
-			log.Info("Route not found, cannot create OAuthClient yet", "route", notebook.Name)
-			return nil
+		log.Error(err, "Unable to list the Route")
+	}
+
+	// Get the route from the list
+	for _, nRoute := range routeList.Items {
+		if metav1.IsControlledBy(&nRoute, notebook) {
+			route = &nRoute
+			break
 		}
-		log.Error(err, "Failed to get Route for OAuthClient")
-		return err
+	}
+
+	if route.Name == "" && route.Namespace != notebook.Namespace {
+		log.Info("Route not found, cannot create OAuthClient yet", "route", notebook.Name)
+		return nil
 	}
 
 	err = r.createOAuthClient(notebook, ctx)
