@@ -103,7 +103,7 @@ func (r *OpenshiftNotebookReconciler) reconcileRoute(notebook *nbv1.Notebook,
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	var isGenerateName bool = false
+	var isGenerateName = false
 	// If the route name + namespace is greater than 63 characters, the route name would be created by generateName
 	// ex: notebook-name 48 + namespace(rhods-notebooks) 15 = 63
 	if len(notebook.Name)+len(notebook.Namespace) > RouteSubDomainMaxLen {
@@ -233,7 +233,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileRoute(
 
 // InsertSecondRedirectReference inserts the second redirect reference into the ServiceAccount
 func InsertSecondRedirectReference(sa *corev1.ServiceAccount, routeName string) *corev1.ServiceAccount {
-	sa.ObjectMeta.Annotations["serviceaccounts.openshift.io/oauth-redirectreference.second"] = "" +
+	sa.Annotations["serviceaccounts.openshift.io/oauth-redirectreference.second"] = "" +
 		`{"kind":"OAuthRedirectReference","apiVersion":"v1",` +
 		`"reference":{"kind":"Route","name":"` + routeName + `"}}`
 	return sa
