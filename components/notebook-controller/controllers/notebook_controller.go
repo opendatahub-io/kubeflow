@@ -144,7 +144,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// controller-service-hash that shouldn't exceed 63 chars.
 	isGenerateName := false
 	if len(instance.Name) > MaxStatefulsetNameLength {
-		log.Info("Notebook name is too long, it should be less than 52 chars")
+		log.Info("Notebook name is too long, it can be {MaxStatefulsetNameLength} chars long at most")
 		isGenerateName = true
 	}
 
