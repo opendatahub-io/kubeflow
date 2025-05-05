@@ -27,6 +27,14 @@ rules:
   - list
   - watch
 - apiGroups:
+  - datasciencepipelinesapplications.opendatahub.io
+  resources:
+  - datasciencepipelinesapplications
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - image.openshift.io
   resources:
   - imagestreams
