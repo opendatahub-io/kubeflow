@@ -77,6 +77,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get
+// +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
@@ -255,6 +256,15 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		log.Info("Removing reconciliation lock")
 		err = r.RemoveReconciliationLock(notebook, ctx)
 		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Call the Elyra pipeline secret reconciler
+	if strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_MANAGED_PIPELINE_SECRET"))) == "true" {
+		err = r.ReconcileElyraRuntimeConfigSecret(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Unable to Reconcile Elyra runtime config secret")
 			return ctrl.Result{}, err
 		}
 	}

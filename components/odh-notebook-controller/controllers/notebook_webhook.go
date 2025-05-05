@@ -354,6 +354,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
+
+		// Mount Secret ds-pipeline-config
+		err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
 	}
 
 	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
