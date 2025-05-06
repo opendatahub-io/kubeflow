@@ -57,3 +57,5 @@ spec:
           env:
             - name: SET_PIPELINE_RBAC
               value: "false"
+            - name: SET_PIPELINE_SECRET
+              value: "true"

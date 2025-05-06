@@ -210,6 +210,15 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	// Call the Elyra pipeline secret reconciler
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+		err = r.ReconcileElyraRuntimeConfigSecret(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Unable to Reconcile Elyra runtime config secret")
+			return ctrl.Result{}, err
+		}
+	}
+
 	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
 		// Create the objects required by the OAuth proxy sidecar (see notebook_oauth.go file)
 		if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
@@ -256,15 +265,6 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		log.Info("Removing reconciliation lock")
 		err = r.RemoveReconciliationLock(notebook, ctx)
 		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Call the Elyra pipeline secret reconciler
-	if strings.ToLower(strings.TrimSpace(os.Getenv("ENABLE_MANAGED_PIPELINE_SECRET"))) == "true" {
-		err = r.ReconcileElyraRuntimeConfigSecret(notebook, ctx)
-		if err != nil {
-			log.Error(err, "Unable to Reconcile Elyra runtime config secret")
 			return ctrl.Result{}, err
 		}
 	}

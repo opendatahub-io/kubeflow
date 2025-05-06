@@ -86,8 +86,7 @@ func (r *OpenshiftNotebookReconciler) checkRoleExists(ctx context.Context, roleR
 }
 
 // reconcileRoleBinding manages creation, update, and deletion of RoleBindings and ClusterRoleBindings
-func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(
-	notebook *nbv1.Notebook, ctx context.Context, rolebindingName, roleRefKind, roleRefName string) error {
+func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(notebook *nbv1.Notebook, ctx context.Context, rolebindingName, roleRefKind, roleRefName string) error {
 
 	log := r.Log.WithValues("notebook", types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace})
 
@@ -141,8 +140,7 @@ func (r *OpenshiftNotebookReconciler) reconcileRoleBinding(
 }
 
 // ReconcileRoleBindings will manage multiple RoleBinding and ClusterRoleBinding reconciliations
-func (r *OpenshiftNotebookReconciler) ReconcileRoleBindings(
-	notebook *nbv1.Notebook, ctx context.Context) error {
+func (r *OpenshiftNotebookReconciler) ReconcileRoleBindings(notebook *nbv1.Notebook, ctx context.Context) error {
 
 	roleBindingName := "elyra-pipelines-" + notebook.Name
 	// Reconcile a RoleBinding for pipelines for the notebook service account

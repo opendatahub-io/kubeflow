@@ -17,9 +17,12 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,9 +33,9 @@ import (
 )
 
 const (
-	elyraRuntimeConfigSecretName = "ds-pipeline-config"
-	elyraRuntimeConfigMountPath  = "TODO"
-	elyraRuntimeConfigVolumeName = "TODO"
+	elyraRuntimeConfigSecretName = "ds-pipeline-config-new"
+	elyraRuntimeConfigMountPath  = "/opt/app-root/runtimes"
+	elyraRuntimeConfigVolumeName = "elyra-dsp-details"
 )
 
 func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
@@ -51,7 +54,7 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 
 	// Check if the ConfigMap is empty
 	if len(secret.Data) == 0 {
-		log.Warn("Secret is empty, skipping volume mount", "Secret", elyraRuntimeConfigSecretName)
+		log.Info("Secret is empty, skipping volume mount", "Secret", elyraRuntimeConfigSecretName)
 		return nil
 	}
 
@@ -104,13 +107,61 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 }
 
 // NewElyraRuntimeConfigSecret defines the desired ElyraRuntimeConfig secret object
-func NewElyraRuntimeConfigSecret(notebook *nbv1.Notebook) *corev1.Secret {
+func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
 
 	// TODO: query for DSPA
 
 	// TODO: query for secret referenced by DSPA
 
-	// TODO: extract hostname from notebook annotation (if it exists) and append URL experiments segment
+	// Query the dashboards' route
+	dashboardRoute := &routev1.Route{}
+	err := client.Get(ctx, types.NamespacedName{Name: "rhods-dashboard", Namespace: controllerNamespace}, dashboardRoute)
+	if err != nil {
+		log.Error(err, "Failed to get rhods-dashboard Route")
+		return nil
+	}
+	publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardRoute.Spec.Host, notebook.Namespace)
+
+	// Check if DSPA Route exists in this namespace
+	dspaRoute := &routev1.Route{}
+	err = client.Get(ctx, types.NamespacedName{
+		Name:      "ds-pipeline-dspa",
+		Namespace: notebook.Namespace,
+	}, dspaRoute)
+
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			// Expected: this namespace may not use DSPA, skip
+			return nil
+		}
+		log.Error(err, "Error while fetching DSPA route")
+		return nil
+	}
+	// If found, construct API endpoint
+	APIEndpoint := fmt.Sprintf("https://%s", dspaRoute.Spec.Host)
+
+	// Construct the data to marshal
+	dspData := map[string]interface{}{
+		"display_name": "Data Science Pipeline",
+		"schema_name":  "kfp",
+		"metadata": map[string]interface{}{
+			"tags":                []string{}, // or "[]", for string
+			"display_name":        "Data Science Pipeline",
+			"engine":              "Argo",
+			"runtime_type":        "KUBEFLOW_PIPELINES",
+			"auth_type":           "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
+			"cos_auth_type":       "KUBERNETES_SECRET",
+			"public_api_endpoint": publicAPIEndpoint,
+			"api_endpoint":        APIEndpoint,
+		},
+	}
+
+	// Marshal the map to JSON
+	dspJSON, err := json.Marshal(dspData)
+	if err != nil {
+		log.Error(err, "Failed to marshal DSPA config to JSON")
+		return nil
+	}
 
 	// Create a Kubernetes secret to store the Elyra runtime config data
 	return &corev1.Secret{
@@ -120,8 +171,7 @@ func NewElyraRuntimeConfigSecret(notebook *nbv1.Notebook) *corev1.Secret {
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
-			"username": []byte("admin"),
-			"password": []byte("s3cr3t"),
+			"odh_dsp.json": dspJSON,
 		},
 	}
 }
@@ -133,11 +183,18 @@ func (r *OpenshiftNotebookReconciler) ReconcileElyraRuntimeConfigSecret(notebook
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
+	// TODO: These secret should be created only if identify DSPA object
+
 	// Generate the desired Elyra runtime config secret
-	desiredSecret := NewElyraRuntimeConfigSecret(notebook)
+	desiredSecret := r.NewElyraRuntimeConfigSecret(ctx, r.Client, notebook, r.Namespace, log)
+
+	// Skip secret reconciliation if DSPA route was not found for now then should check for the dspa cr itself
+	if desiredSecret == nil {
+		log.Info("Skipping Elyra runtime config secret creation as no DSPA is configured in this namespace")
+		return nil
+	}
 
 	// Create the Elyra runtime config secret if it does not already exist
-	// TODO: rework this bit to create/update
 	foundSecret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      desiredSecret.GetName(),
@@ -146,14 +203,13 @@ func (r *OpenshiftNotebookReconciler) ReconcileElyraRuntimeConfigSecret(notebook
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			log.Info("Creating Elyra runtime config secret")
-			// Add .metatada.ownerReferences to the Elyra runtime config secret to be deleted by
-			// the Kubernetes garbage collector if the notebook is deleted
+			// Add metadata.ownerReferences so the secret is deleted when the notebook is deleted
 			err = ctrl.SetControllerReference(notebook, desiredSecret, r.Scheme)
 			if err != nil {
 				log.Error(err, "Unable to add OwnerReference to the Elyra runtime config secret")
 				return err
 			}
-			// Create the Elyra runtime config secret in the Openshift cluster
+			// Create the Elyra runtime config secret in the OpenShift cluster
 			err = r.Create(ctx, desiredSecret)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
 				log.Error(err, "Unable to create the Elyra runtime config secret")
