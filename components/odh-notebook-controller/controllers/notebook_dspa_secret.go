@@ -51,7 +51,7 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 
 	// Check if the ConfigMap is empty
 	if len(secret.Data) == 0 {
-		log.Warn("Secret is empty, skipping volume mount", "Secret", elyraRuntimeConfigSecretName)
+		log.Info("Secret is empty, skipping volume mount", "Secret", elyraRuntimeConfigSecretName)
 		return nil
 	}
 
