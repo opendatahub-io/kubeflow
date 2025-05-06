@@ -92,7 +92,7 @@ run-culling: generate fmt vet manifests
 ##@ Build
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	cd .. && ${CONTAINER_ENGINE} build . -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
+	cd .. && ${CONTAINER_ENGINE} build . --platform="${ARCH}" -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
