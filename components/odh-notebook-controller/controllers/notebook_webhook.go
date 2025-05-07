@@ -730,17 +730,27 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 					}
 
 					imagestreamFound := false
-					// List imagestreams in the specified namespace
+					// Check for controller namespace before the notebook namespace
+					// to avoid user overriding the image selection in the case of
+					// images having the same name in both namespaces.
+
+					// List imagestreams in the controller namespace
 					imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
-					if err != nil {
-						if k8serr.IsForbidden(err) {
-							log.Info("Permission denied to list imagestreams", "namespace", namespace, "error", err)
-							// fast exit on permission denied
-							return err
-						}
-						log.Info("Cannot list imagestreams", "namespace", namespace, "error", err)
-						continue
+					if err != nil && k8serr.IsForbidden(err) {
+						log.Info("Permission denied to list imagestreams", "namespace", namespace, "error", err)
+						// fast exit on permission denied
+						return err
 					}
+
+					// List imagestreams in the specified notebook namespace
+					inNamespaceImagestreams, err := dynamicClient.Resource(ims).Namespace(notebook.namespace).List(ctx, metav1.ListOptions{})
+					if err != nil && k8serr.IsForbidden(err) {
+						log.Info("Permission denied to list imagestreams", "namespace", notebook.namespace, "error", err)
+						// Permission denied, pass on to controller namespace
+					}
+
+					// Merge the imagestreams from both namespaces
+					imagestreams.Items = append(imagestreams.Items, inNamespaceImagestreams.Items...)
 
 					// Iterate through the imagestreams to find matches
 					for _, item := range imagestreams.Items {
