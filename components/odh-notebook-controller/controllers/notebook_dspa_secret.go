@@ -26,14 +26,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	elyraRuntimeConfigSecretName = "ds-pipeline-config-new"
+	elyraRuntimeConfigSecretName = "ds-pipeline-config-by-nbc"
 	elyraRuntimeConfigMountPath  = "/opt/app-root/runtimes"
 	elyraRuntimeConfigVolumeName = "elyra-dsp-details"
 )
@@ -107,15 +110,40 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 }
 
 // NewElyraRuntimeConfigSecret defines the desired ElyraRuntimeConfig secret object
-func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
+func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, dynamicConfig *rest.Config, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
+	// Create a dynamic client
+	dynamicClient, err := dynamic.NewForConfig(dynamicConfig)
+	if err != nil {
+		log.Error(err, "Failed to create dynamic client")
+		return nil
+	}
 
-	// TODO: query for DSPA
+	// Define the DSPA GroupVersionResource
+	dspaGVR := schema.GroupVersionResource{
+		Group:    "datasciencepipelinesapplications.opendatahub.io",
+		Version:  "v1",
+		Resource: "datasciencepipelinesapplications", // plural form
+	}
 
-	// TODO: query for secret referenced by DSPA
+	// Fetch DSPA CR from the same namespace as the notebook
+	dspaName := "dspa" // Replace with the actual name of your DSPA CR if needed
+	dspaObj, err := dynamicClient.Resource(dspaGVR).Namespace(notebook.Namespace).Get(ctx, dspaName, metav1.GetOptions{})
+	if err != nil {
+		log.Error(err, "Failed to get DSPA CR")
+		return nil
+	}
+
+	// Extract the access key from DSPA
+	spec := dspaObj.Object["spec"].(map[string]interface{})
+	objectStorage := spec["objectStorage"].(map[string]interface{})
+	externalStorage := objectStorage["externalStorage"].(map[string]interface{})
+	host := externalStorage["host"].(string) // Here we fetch the 'host'	// externalStorage := objectStorage["externalStorage"].(map[string]interface{})
+	// s3CredentialsSecret := externalStorage["s3CredentialsSecret"].(map[string]interface{})
+	// accessKey := s3CredentialsSecret["accessKey"].(string)
 
 	// Query the dashboards' route
 	dashboardRoute := &routev1.Route{}
-	err := client.Get(ctx, types.NamespacedName{Name: "rhods-dashboard", Namespace: controllerNamespace}, dashboardRoute)
+	err = client.Get(ctx, types.NamespacedName{Name: "rhods-dashboard", Namespace: controllerNamespace}, dashboardRoute)
 	if err != nil {
 		log.Error(err, "Failed to get rhods-dashboard Route")
 		return nil
@@ -153,6 +181,7 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 			"cos_auth_type":       "KUBERNETES_SECRET",
 			"public_api_endpoint": publicAPIEndpoint,
 			"api_endpoint":        APIEndpoint,
+			"cos_endpoint":        host,
 		},
 	}
 
@@ -186,7 +215,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileElyraRuntimeConfigSecret(notebook
 	// TODO: These secret should be created only if identify DSPA object
 
 	// Generate the desired Elyra runtime config secret
-	desiredSecret := r.NewElyraRuntimeConfigSecret(ctx, r.Client, notebook, r.Namespace, log)
+	desiredSecret := r.NewElyraRuntimeConfigSecret(ctx, r.Config, r.Client, notebook, r.Namespace, log)
 
 	// Skip secret reconciliation if DSPA route was not found for now then should check for the dspa cr itself
 	if desiredSecret == nil {
