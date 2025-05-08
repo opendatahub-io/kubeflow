@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -309,6 +310,131 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
+		})
+
+	})
+
+	// New test case for notebook creation with long name
+	When("Creating a long named Notebook", func() {
+
+		// With the work done https://issues.redhat.com/browse/RHOAIENG-4148,
+		// 48 characters is the maximum length for a notebook name.
+		// This would the extent of the test.
+		// TODO: Update the test to use the maximum length when the work is done.
+		const (
+			Name      = "test-notebook-with-a-very-long-name-thats-48char"
+			Namespace = "default"
+		)
+
+		notebook := createNotebook(Name, Namespace)
+
+		expectedRoute := routev1.Route{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "nb-",
+				Namespace:    Namespace,
+				Labels: map[string]string{
+					"notebook-name": Name,
+				},
+			},
+			Spec: routev1.RouteSpec{
+				To: routev1.RouteTargetReference{
+					Kind:   "Service",
+					Name:   Name,
+					Weight: ptr.To[int32](100),
+				},
+				Port: &routev1.RoutePort{
+					TargetPort: intstr.FromString("http-" + Name),
+				},
+				TLS: &routev1.TLSConfig{
+					Termination:                   routev1.TLSTerminationEdge,
+					InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
+				},
+				WildcardPolicy: routev1.WildcardPolicyNone,
+			},
+			Status: routev1.RouteStatus{
+				Ingress: []routev1.RouteIngress{},
+			},
+		}
+
+		route := &routev1.Route{}
+
+		It("Should create a Route to expose the traffic externally", func() {
+			ctx := context.Background()
+
+			By("By creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has created the Route")
+			Eventually(func() error {
+				route, err := getRouteFromList(route, notebook, Name, Namespace)
+				if route == nil {
+					return err
+				}
+				return nil
+			}, duration, interval).Should(Succeed())
+			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+		})
+
+		It("Should reconcile the Route when modified", func() {
+			By("By simulating a manual Route modification")
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
+			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has restored the Route spec")
+			Eventually(func() (string, error) {
+				route, err := getRouteFromList(route, notebook, Name, Namespace)
+				if route == nil {
+					return "", err
+				}
+				return route.Spec.To.Name, nil
+			}, duration, interval).Should(Equal(Name))
+			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+		})
+
+		It("Should recreate the Route when deleted", func() {
+			By("By deleting the notebook route")
+			Expect(cli.Delete(ctx, route)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the controller has recreated the Route")
+			Eventually(func() error {
+				route, err := getRouteFromList(route, notebook, Name, Namespace)
+				if route == nil {
+					return err
+				}
+				return nil
+			}, duration, interval).Should(Succeed())
+			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+		})
+
+		It("Should delete the Openshift Route", func() {
+			// Testenv cluster does not implement Kubernetes GC:
+			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
+			// To test that the deletion lifecycle works, test the ownership
+			// instead of asserting on existence.
+			expectedOwnerReference := metav1.OwnerReference{
+				APIVersion:         "kubeflow.org/v1",
+				Kind:               "Notebook",
+				Name:               Name,
+				UID:                notebook.GetObjectMeta().GetUID(),
+				Controller:         ptr.To(true),
+				BlockOwnerDeletion: ptr.To(true),
+			}
+
+			By("By checking that the Notebook owns the Route object")
+			Expect(route.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+
+			By("By deleting the recently created Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the Notebook is deleted")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, notebook)
+			}, duration, interval).Should(HaveOccurred())
 		})
 
 	})
@@ -965,6 +1091,28 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 				}}}},
 		},
 	}
+}
+
+func getRouteFromList(route *routev1.Route, notebook *nbv1.Notebook, name, namespace string) (*routev1.Route, error) {
+	routeList := &routev1.RouteList{}
+	opts := []client.ListOption{
+		client.InNamespace(namespace),
+		client.MatchingLabels{"notebook-name": name},
+	}
+
+	err := cli.List(ctx, routeList, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the route from the list
+	for _, nRoute := range routeList.Items {
+		if metav1.IsControlledBy(&nRoute, notebook) {
+			*route = nRoute
+			return route, nil
+		}
+	}
+	return nil, errors.New("Route not found")
 }
 
 func createOAuthServiceAccount(name, namespace string) corev1.ServiceAccount {
