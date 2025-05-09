@@ -119,19 +119,36 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	}
 
 	// Define the DSPA GroupVersionResource
-	dspaGVR := schema.GroupVersionResource{
+	dspa := schema.GroupVersionResource{
 		Group:    "datasciencepipelinesapplications.opendatahub.io",
 		Version:  "v1",
 		Resource: "datasciencepipelinesapplications", // plural form
 	}
 
+	// Define the dasboard GroupVersionResource
+	dashboard := schema.GroupVersionResource{
+		Group:    "components.platform.opendatahub.io",
+		Version:  "v1alpha1",
+		Resource: "dashboards", // plural form
+	}
+
 	// Fetch DSPA CR from the same namespace as the notebook
 	dspaName := "dspa" // Replace with the actual name of your DSPA CR if needed
-	dspaObj, err := dynamicClient.Resource(dspaGVR).Namespace(notebook.Namespace).Get(ctx, dspaName, metav1.GetOptions{})
+	dspaObj, err := dynamicClient.Resource(dspa).Namespace(notebook.Namespace).Get(ctx, dspaName, metav1.GetOptions{})
 	if err != nil {
 		log.Error(err, "Failed to get DSPA CR")
 		return nil
 	}
+
+	dashboardObj, err := dynamicClient.Resource(dashboard).Get(ctx, "default-dashboard", metav1.GetOptions{})
+	if err != nil {
+		log.Error(err, "Failed to get Dashboard CR")
+		return nil
+	}
+
+	status := dashboardObj.Object["status"].(map[string]interface{})
+	dashboardURL := status["url"].(string)
+	log.Info("Found dashboard URL", "url", dashboardURL)
 
 	// Extract the access key from DSPA
 	spec := dspaObj.Object["spec"].(map[string]interface{})

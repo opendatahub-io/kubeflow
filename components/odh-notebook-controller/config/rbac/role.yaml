@@ -35,6 +35,14 @@ rules:
   - list
   - watch
 - apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dashboards
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - image.openshift.io
   resources:
   - imagestreams
