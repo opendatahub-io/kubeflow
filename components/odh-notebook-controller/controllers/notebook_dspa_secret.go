@@ -22,7 +22,6 @@ import (
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,40 +35,39 @@ import (
 )
 
 const (
-	elyraRuntimeConfigSecretName = "ds-pipeline-config-by-nbc"
-	elyraRuntimeConfigMountPath  = "/opt/app-root/runtimes"
-	elyraRuntimeConfigVolumeName = "elyra-dsp-details"
+	elyraRuntimeSecretName = "ds-pipeline-config-by-nbc"
+	elyraRuntimeMountPath  = "/opt/app-root/runtimes"
+	elyraRuntimeVolumeName = "elyra-dsp-details-by-nbc"
 )
 
 func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
 	// Retrieve the Secret
 	secret := &corev1.Secret{}
-	err := client.Get(ctx, types.NamespacedName{Name: elyraRuntimeConfigSecretName, Namespace: notebook.Namespace}, secret)
+	err := client.Get(ctx, types.NamespacedName{Name: elyraRuntimeSecretName, Namespace: notebook.Namespace}, secret)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Secret does not exist", "Secret", elyraRuntimeConfigSecretName)
+			log.Info("Secret does not exist", "Secret", elyraRuntimeSecretName)
 			return nil
 		}
-		log.Error(err, "Error retrieving Secret", "Secret", elyraRuntimeConfigSecretName)
+		log.Error(err, "Error retrieving Secret", "Secret", elyraRuntimeSecretName)
 		return err
 	}
 
 	// Check if the ConfigMap is empty
 	if len(secret.Data) == 0 {
-		log.Info("Secret is empty, skipping volume mount", "Secret", elyraRuntimeConfigSecretName)
+		log.Info("Secret is empty, skipping volume mount", "Secret", elyraRuntimeSecretName)
 		return nil
 	}
 
 	// Define the volume
-	configVolume := corev1.Volume{
-		Name: elyraRuntimeConfigVolumeName,
+	// Define the volume
+	secretVolume := corev1.Volume{
+		Name: elyraRuntimeVolumeName,
 		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: elyraRuntimeConfigSecretName,
-				},
-				Optional: ptr.To(true),
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: elyraRuntimeSecretName,
+				Optional:   ptr.To(true),
 			},
 		},
 	}
@@ -78,30 +76,30 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 	volumes := &notebook.Spec.Template.Spec.Volumes
 	volumeExists := false
 	for _, v := range *volumes {
-		if v.Name == elyraRuntimeConfigVolumeName {
+		if v.Name == elyraRuntimeVolumeName {
 			volumeExists = true
 			break
 		}
 	}
 	if !volumeExists {
-		*volumes = append(*volumes, configVolume)
+		*volumes = append(*volumes, secretVolume)
 	}
 
-	log.Info("Injecting Elyra runtime config volume into notebook", "notebook", notebook.Name, "namespace", notebook.Namespace)
+	log.Info("Injecting Elyra runtime volume into notebook", "notebook", notebook.Name, "namespace", notebook.Namespace)
 
 	// Append the volume mount to all containers
 	for i, container := range notebook.Spec.Template.Spec.Containers {
 		mountExists := false
 		for _, vm := range container.VolumeMounts {
-			if vm.Name == elyraRuntimeConfigVolumeName {
+			if vm.Name == elyraRuntimeVolumeName {
 				mountExists = true
 				break
 			}
 		}
 		if !mountExists {
 			notebook.Spec.Template.Spec.Containers[i].VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      elyraRuntimeConfigVolumeName,
-				MountPath: elyraRuntimeConfigMountPath,
+				Name:      elyraRuntimeVolumeName,
+				MountPath: elyraRuntimeMountPath,
 			})
 		}
 	}
@@ -111,7 +109,8 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 
 // NewElyraRuntimeConfigSecret defines the desired ElyraRuntimeConfig secret object
 func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, dynamicConfig *rest.Config, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
-	// Create a dynamic client
+
+	// Create a dynamic client to be able to fetch dspa and dasboard CRs
 	dynamicClient, err := dynamic.NewForConfig(dynamicConfig)
 	if err != nil {
 		log.Error(err, "Failed to create dynamic client")
@@ -122,70 +121,80 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	dspa := schema.GroupVersionResource{
 		Group:    "datasciencepipelinesapplications.opendatahub.io",
 		Version:  "v1",
-		Resource: "datasciencepipelinesapplications", // plural form
+		Resource: "datasciencepipelinesapplications",
 	}
 
 	// Define the dasboard GroupVersionResource
 	dashboard := schema.GroupVersionResource{
 		Group:    "components.platform.opendatahub.io",
 		Version:  "v1alpha1",
-		Resource: "dashboards", // plural form
+		Resource: "dashboards",
 	}
 
-	// Fetch DSPA CR from the same namespace as the notebook
-	dspaName := "dspa" // Replace with the actual name of your DSPA CR if needed
-	dspaObj, err := dynamicClient.Resource(dspa).Namespace(notebook.Namespace).Get(ctx, dspaName, metav1.GetOptions{})
+	// Initialize  dynamicClient resources for DSPA and Dashboard
+	dspaObj, err := dynamicClient.Resource(dspa).Namespace(notebook.Namespace).Get(ctx, "dspa", metav1.GetOptions{})
 	if err != nil {
 		log.Error(err, "Failed to get DSPA CR")
 		return nil
 	}
-
 	dashboardObj, err := dynamicClient.Resource(dashboard).Get(ctx, "default-dashboard", metav1.GetOptions{})
 	if err != nil {
 		log.Error(err, "Failed to get Dashboard CR")
 		return nil
 	}
 
-	status := dashboardObj.Object["status"].(map[string]interface{})
-	dashboardURL := status["url"].(string)
-	log.Info("Found dashboard URL", "url", dashboardURL)
-
-	// Extract the access key from DSPA
-	spec := dspaObj.Object["spec"].(map[string]interface{})
-	objectStorage := spec["objectStorage"].(map[string]interface{})
-	externalStorage := objectStorage["externalStorage"].(map[string]interface{})
-	host := externalStorage["host"].(string) // Here we fetch the 'host'	// externalStorage := objectStorage["externalStorage"].(map[string]interface{})
-	// s3CredentialsSecret := externalStorage["s3CredentialsSecret"].(map[string]interface{})
-	// accessKey := s3CredentialsSecret["accessKey"].(string)
-
-	// Query the dashboards' route
-	dashboardRoute := &routev1.Route{}
-	err = client.Get(ctx, types.NamespacedName{Name: "rhods-dashboard", Namespace: controllerNamespace}, dashboardRoute)
-	if err != nil {
-		log.Error(err, "Failed to get rhods-dashboard Route")
+	// Fetch all needful options from both CRs
+	// Extract dashboard url
+	status, ok := dashboardObj.Object["status"].(map[string]interface{})
+	if !ok {
+		log.Info("Missing or invalid 'status' in Dashboard object")
 		return nil
 	}
-	publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardRoute.Spec.Host, notebook.Namespace)
-
-	// Check if DSPA Route exists in this namespace
-	dspaRoute := &routev1.Route{}
-	err = client.Get(ctx, types.NamespacedName{
-		Name:      "ds-pipeline-dspa",
-		Namespace: notebook.Namespace,
-	}, dspaRoute)
-
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			// Expected: this namespace may not use DSPA, skip
-			return nil
-		}
-		log.Error(err, "Error while fetching DSPA route")
+	dashboardURL, ok := status["url"].(string)
+	if !ok || dashboardURL == "" {
+		log.Info("Missing or invalid 'url' in Dashboard status")
 		return nil
 	}
-	// If found, construct API endpoint
-	APIEndpoint := fmt.Sprintf("https://%s", dspaRoute.Spec.Host)
+	publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
 
-	// Construct the data to marshal
+	// Extract info from DSPA
+	spec, _ := dspaObj.Object["spec"].(map[string]interface{})
+	externalStorage, _ := spec["objectStorage"].(map[string]interface{})["externalStorage"].(map[string]interface{})
+	// Extract host/cosEndpoint
+	host := externalStorage["host"].(string)
+	cosEndpoint := fmt.Sprintf("https://%s", host)
+	// Extract bucket/cosBucket
+	cosBucket := externalStorage["bucket"].(string)
+	// Extract s3Credentials
+	s3CredentialsSecret := externalStorage["s3CredentialsSecret"].(map[string]interface{})
+	cosSecret := s3CredentialsSecret["secretName"].(string)
+	// These keys come from dspa but the values come from the secret
+	username := s3CredentialsSecret["accessKey"].(string)
+	password := s3CredentialsSecret["secretKey"].(string)
+	// Query to the secret
+	dashboardSecret := &corev1.Secret{}
+	err = client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dashboardSecret)
+	if err != nil {
+		log.Error(err, "Failed to get secret", "secretName", cosSecret)
+		return nil
+	}
+	// Extract cosUsername and cosPassword from the secret's data (base64-decoded)
+	cosUsername := string(dashboardSecret.Data[username]) // Convert from byte array to string
+	cosPassword := string(dashboardSecret.Data[password])
+
+	// Extract externalUrl/APIEndpoint
+	status, ok = dspaObj.Object["status"].(map[string]interface{})
+	if !ok {
+		log.Info("Missing or invalid 'status' in DSPA object")
+		return nil
+	}
+	APIEndpoint, _ := status["components"].(map[string]interface{})["apiServer"].(map[string]interface{})["externalUrl"].(string)
+	if APIEndpoint == "" {
+		log.Info("DSPA 'externalUrl' not found in expected path")
+		return nil
+	}
+
+	// Construct the data
 	dspData := map[string]interface{}{
 		"display_name": "Data Science Pipeline",
 		"schema_name":  "kfp",
@@ -198,7 +207,11 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 			"cos_auth_type":       "KUBERNETES_SECRET",
 			"public_api_endpoint": publicAPIEndpoint,
 			"api_endpoint":        APIEndpoint,
-			"cos_endpoint":        host,
+			"cos_endpoint":        cosEndpoint,
+			"cos_bucket":          cosBucket,
+			"cos_username":        cosUsername,
+			"cos_password":        cosPassword,
+			"cos_secret":          cosSecret,
 		},
 	}
 
@@ -212,8 +225,9 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	// Create a Kubernetes secret to store the Elyra runtime config data
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      elyraRuntimeConfigSecretName,
+			Name:      elyraRuntimeSecretName,
 			Namespace: notebook.Namespace,
+			Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
