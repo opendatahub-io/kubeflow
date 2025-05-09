@@ -34,11 +34,200 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// TODO: Fix the name from ds-pipeline-config-by-nbcxxx to ds-pipeline-config once everything is in place
 const (
 	elyraRuntimeSecretName = "ds-pipeline-config-by-nbc"
-	elyraRuntimeMountPath  = "/opt/app-root/runtimes"
+	//TODO: Remove the last / once everything is ready
+	elyraRuntimeMountPath  = "/opt/app-root/runtimes/"
 	elyraRuntimeVolumeName = "elyra-dsp-details-by-nbc"
 )
+
+func extractElyraRuntimeConfigInfo(ctx context.Context, dynamicClient dynamic.Interface, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+	// Define GVRs
+	dspa := schema.GroupVersionResource{
+		Group:    "datasciencepipelinesapplications.opendatahub.io",
+		Version:  "v1",
+		Resource: "datasciencepipelinesapplications",
+	}
+	dashboard := schema.GroupVersionResource{
+		Group:    "components.platform.opendatahub.io",
+		Version:  "v1alpha1",
+		Resource: "dashboards",
+	}
+
+	// Fetch DSPA CR
+	dspaObj, err := dynamicClient.Resource(dspa).Namespace(notebook.Namespace).Get(ctx, "dspa", metav1.GetOptions{})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("DSPA CR not found; skipping Elyra config generation")
+			return nil, nil
+		}
+		log.Error(err, "Failed to get DSPA CR")
+		return nil, fmt.Errorf("error retrieving DSPA CR: %w", err)
+	}
+
+	// Fetch Dashboard CR
+	dashboardObj, err := dynamicClient.Resource(dashboard).Get(ctx, "default-dashboard", metav1.GetOptions{})
+	if err != nil {
+		log.Error(err, "Failed to get Dashboard CR")
+		return nil, fmt.Errorf("error retrieving Dashboard CR: %w", err)
+	}
+
+	// Extract dashboard URL
+	status, ok := dashboardObj.Object["status"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid Dashboard CR: missing 'status'")
+	}
+	dashboardURL, ok := status["url"].(string)
+	if !ok || dashboardURL == "" {
+		return nil, fmt.Errorf("invalid Dashboard CR: missing or empty 'url'")
+	}
+	publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
+
+	// Extract info from DSPA spec
+	spec, ok := dspaObj.Object["spec"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'spec'")
+	}
+	objectStorage, ok := spec["objectStorage"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'objectStorage'")
+	}
+	externalStorage, ok := objectStorage["externalStorage"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'externalStorage'")
+	}
+
+	// Extract host
+	host, ok := externalStorage["host"].(string)
+	if !ok || host == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'host'")
+	}
+	cosEndpoint := fmt.Sprintf("https://%s", host)
+
+	// Extract bucket
+	cosBucket, ok := externalStorage["bucket"].(string)
+	if !ok || cosBucket == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'bucket'")
+	}
+
+	// Extract S3 credentials
+	s3CredentialsSecret, ok := externalStorage["s3CredentialsSecret"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 's3CredentialsSecret'")
+	}
+	cosSecret, ok := s3CredentialsSecret["secretName"].(string)
+	usernameKey, ok1 := s3CredentialsSecret["accessKey"].(string)
+	passwordKey, ok2 := s3CredentialsSecret["secretKey"].(string)
+	if !ok || !ok1 || !ok2 {
+		return nil, fmt.Errorf("invalid DSPA CR: incomplete 's3CredentialsSecret'")
+	}
+
+	// Fetch secret for credentials
+	dashboardSecret := &corev1.Secret{}
+	err = client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dashboardSecret)
+	if err != nil {
+		log.Error(err, "Failed to get secret", "secretName", cosSecret)
+		return nil, fmt.Errorf("failed to get secret '%s': %w", cosSecret, err)
+	}
+
+	// Extract values from the secret
+	usernameVal, ok := dashboardSecret.Data[usernameKey]
+	if !ok {
+		return nil, fmt.Errorf("missing key '%s' in secret '%s'", usernameKey, cosSecret)
+	}
+	passwordVal, ok := dashboardSecret.Data[passwordKey]
+	if !ok {
+		return nil, fmt.Errorf("missing key '%s' in secret '%s'", passwordKey, cosSecret)
+	}
+
+	cosUsername := string(usernameVal)
+	cosPassword := string(passwordVal)
+
+	// Extract API Endpoint from DSPA status
+	status, ok = dspaObj.Object["status"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'status'")
+	}
+	components, ok := status["components"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'components' in status")
+	}
+	apiServer, ok := components["apiServer"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid DSPA CR: missing 'apiServer' in components")
+	}
+	apiEndpoint, ok := apiServer["externalUrl"].(string)
+	if !ok || apiEndpoint == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'externalUrl' for apiServer")
+	}
+
+	// Construct and return the DSPA config
+	return map[string]interface{}{
+		"display_name": "Data Science Pipeline",
+		"schema_name":  "kfp",
+		"metadata": map[string]interface{}{
+			"tags":                []string{},
+			"display_name":        "Data Science Pipeline",
+			"engine":              "Argo",
+			"runtime_type":        "KUBEFLOW_PIPELINES",
+			"auth_type":           "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
+			"cos_auth_type":       "KUBERNETES_SECRET",
+			"public_api_endpoint": publicAPIEndpoint,
+			"api_endpoint":        apiEndpoint,
+			"cos_endpoint":        cosEndpoint,
+			"cos_bucket":          cosBucket,
+			"cos_username":        cosUsername,
+			"cos_password":        cosPassword,
+			"cos_secret":          cosSecret,
+			//TODO: Remove this once everything is in place
+			"debug": "true",
+		},
+	}, nil
+}
+
+// NewElyraRuntimeConfigSecret defines the desired ElyraRuntimeConfig secret object
+func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, dynamicConfig *rest.Config, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
+
+	// Create a dynamic client to be able to fetch dspa and dasboard CRs
+	dynamicClient, err := dynamic.NewForConfig(dynamicConfig)
+	if err != nil {
+		log.Error(err, "Failed to create dynamic client")
+		return nil
+	}
+
+	dspData, err := extractElyraRuntimeConfigInfo(ctx, dynamicClient, client, notebook, log)
+	if err != nil {
+		// In case there is some issue on info fetching return error Info on the logs
+		log.Error(err, "Failed to extract Elyra runtime config info")
+		return nil
+	}
+	if dspData == nil {
+		// In case No DSPA present in namespace skipping Elyra secret creation as DSPA is not present
+		//log.Info("No DSPA present in namespace; skipping Elyra secret creation")
+		return nil
+	}
+
+	// Marshal the map to JSON
+	dspJSON, err := json.Marshal(dspData)
+	if err != nil {
+		log.Error(err, "Failed to marshal DSPA config to JSON")
+		return nil
+	}
+
+	// Create a Kubernetes secret to store the Elyra runtime config data
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      elyraRuntimeSecretName,
+			Namespace: notebook.Namespace,
+			Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"odh_dsp.json": dspJSON,
+		},
+	}
+}
 
 func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
@@ -60,7 +249,6 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 		return nil
 	}
 
-	// Define the volume
 	// Define the volume
 	secretVolume := corev1.Volume{
 		Name: elyraRuntimeVolumeName,
@@ -105,135 +293,6 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 	}
 
 	return nil
-}
-
-// NewElyraRuntimeConfigSecret defines the desired ElyraRuntimeConfig secret object
-func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, dynamicConfig *rest.Config, client client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) *corev1.Secret {
-
-	// Create a dynamic client to be able to fetch dspa and dasboard CRs
-	dynamicClient, err := dynamic.NewForConfig(dynamicConfig)
-	if err != nil {
-		log.Error(err, "Failed to create dynamic client")
-		return nil
-	}
-
-	// Define the DSPA GroupVersionResource
-	dspa := schema.GroupVersionResource{
-		Group:    "datasciencepipelinesapplications.opendatahub.io",
-		Version:  "v1",
-		Resource: "datasciencepipelinesapplications",
-	}
-
-	// Define the dasboard GroupVersionResource
-	dashboard := schema.GroupVersionResource{
-		Group:    "components.platform.opendatahub.io",
-		Version:  "v1alpha1",
-		Resource: "dashboards",
-	}
-
-	// Initialize  dynamicClient resources for DSPA and Dashboard
-	dspaObj, err := dynamicClient.Resource(dspa).Namespace(notebook.Namespace).Get(ctx, "dspa", metav1.GetOptions{})
-	if err != nil {
-		log.Error(err, "Failed to get DSPA CR")
-		return nil
-	}
-	dashboardObj, err := dynamicClient.Resource(dashboard).Get(ctx, "default-dashboard", metav1.GetOptions{})
-	if err != nil {
-		log.Error(err, "Failed to get Dashboard CR")
-		return nil
-	}
-
-	// Fetch all needful options from both CRs
-	// Extract dashboard url
-	status, ok := dashboardObj.Object["status"].(map[string]interface{})
-	if !ok {
-		log.Info("Missing or invalid 'status' in Dashboard object")
-		return nil
-	}
-	dashboardURL, ok := status["url"].(string)
-	if !ok || dashboardURL == "" {
-		log.Info("Missing or invalid 'url' in Dashboard status")
-		return nil
-	}
-	publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
-
-	// Extract info from DSPA
-	spec, _ := dspaObj.Object["spec"].(map[string]interface{})
-	externalStorage, _ := spec["objectStorage"].(map[string]interface{})["externalStorage"].(map[string]interface{})
-	// Extract host/cosEndpoint
-	host := externalStorage["host"].(string)
-	cosEndpoint := fmt.Sprintf("https://%s", host)
-	// Extract bucket/cosBucket
-	cosBucket := externalStorage["bucket"].(string)
-	// Extract s3Credentials
-	s3CredentialsSecret := externalStorage["s3CredentialsSecret"].(map[string]interface{})
-	cosSecret := s3CredentialsSecret["secretName"].(string)
-	// These keys come from dspa but the values come from the secret
-	username := s3CredentialsSecret["accessKey"].(string)
-	password := s3CredentialsSecret["secretKey"].(string)
-	// Query to the secret
-	dashboardSecret := &corev1.Secret{}
-	err = client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dashboardSecret)
-	if err != nil {
-		log.Error(err, "Failed to get secret", "secretName", cosSecret)
-		return nil
-	}
-	// Extract cosUsername and cosPassword from the secret's data (base64-decoded)
-	cosUsername := string(dashboardSecret.Data[username]) // Convert from byte array to string
-	cosPassword := string(dashboardSecret.Data[password])
-
-	// Extract externalUrl/APIEndpoint
-	status, ok = dspaObj.Object["status"].(map[string]interface{})
-	if !ok {
-		log.Info("Missing or invalid 'status' in DSPA object")
-		return nil
-	}
-	APIEndpoint, _ := status["components"].(map[string]interface{})["apiServer"].(map[string]interface{})["externalUrl"].(string)
-	if APIEndpoint == "" {
-		log.Info("DSPA 'externalUrl' not found in expected path")
-		return nil
-	}
-
-	// Construct the data
-	dspData := map[string]interface{}{
-		"display_name": "Data Science Pipeline",
-		"schema_name":  "kfp",
-		"metadata": map[string]interface{}{
-			"tags":                []string{}, // or "[]", for string
-			"display_name":        "Data Science Pipeline",
-			"engine":              "Argo",
-			"runtime_type":        "KUBEFLOW_PIPELINES",
-			"auth_type":           "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
-			"cos_auth_type":       "KUBERNETES_SECRET",
-			"public_api_endpoint": publicAPIEndpoint,
-			"api_endpoint":        APIEndpoint,
-			"cos_endpoint":        cosEndpoint,
-			"cos_bucket":          cosBucket,
-			"cos_username":        cosUsername,
-			"cos_password":        cosPassword,
-			"cos_secret":          cosSecret,
-		},
-	}
-
-	// Marshal the map to JSON
-	dspJSON, err := json.Marshal(dspData)
-	if err != nil {
-		log.Error(err, "Failed to marshal DSPA config to JSON")
-		return nil
-	}
-
-	// Create a Kubernetes secret to store the Elyra runtime config data
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      elyraRuntimeSecretName,
-			Namespace: notebook.Namespace,
-			Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"odh_dsp.json": dspJSON,
-		},
-	}
 }
 
 // ReconcileElyraRuntimeConfigSecret will manage the secret reconciliation
