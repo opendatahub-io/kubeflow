@@ -116,7 +116,11 @@ run: manifests generate fmt vet certificates ktunnel ## Run a controller from yo
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
+<<<<<<< HEAD
 	cd ../ && ${CONTAINER_ENGINE} build . --platform="${ARCH}" -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
+=======
+	cd ../ && ${CONTAINER_ENGINE} build . -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
+>>>>>>> 22912531 (change makefile)
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
