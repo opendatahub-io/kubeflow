@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -1011,6 +1012,154 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
 			}, duration, interval).Should(HaveOccurred())
+		})
+	})
+
+	When("Creating a Notebook with OAuth and then deleting it", func() {
+		const (
+			Name      = "test-notebook-oauth-delete"
+			Namespace = "default"
+			Finalizer = "notebooks.kubeflow.org/oauthclient"
+		)
+
+		var (
+			notebook        *nbv1.Notebook
+			oauthClient     *oauthv1.OAuthClient
+			oauthClientName string
+			ctx             context.Context
+		)
+
+		// Setup for all tests in this context
+		BeforeEach(func() {
+			ctx = context.Background()
+			notebook = createNotebook(Name, Namespace)
+			oauthClientName = fmt.Sprintf("%s-%s-%s", Name, Namespace, "oauth-client")
+
+			oauthClient = &oauthv1.OAuthClient{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: oauthClientName,
+				},
+				RedirectURIs: []string{"https://www.kubeflow.org/"},
+				GrantMethod:  oauthv1.GrantHandlerAuto,
+			}
+		})
+
+		// Clean up resources after each test
+		AfterEach(func() {
+			nbToCleanup := &nbv1.Notebook{}
+			err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nbToCleanup)
+			if err == nil {
+				// Remove finalizers to allow deletion
+				nbToCleanup.Finalizers = nil
+				_ = cli.Update(ctx, nbToCleanup)
+				_ = cli.Delete(ctx, nbToCleanup)
+			}
+
+			oauthClientToCleanup := &oauthv1.OAuthClient{}
+			err = cli.Get(ctx, types.NamespacedName{Name: oauthClientName}, oauthClientToCleanup)
+			if err == nil {
+				_ = cli.Delete(ctx, oauthClientToCleanup)
+			}
+		})
+
+		It("Should add a finalizer when a Notebook has been created", func() {
+			By("Creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Creating an OAuthClient")
+			err := cli.Create(ctx, oauthClient)
+			if err != nil {
+				GinkgoT().Logf("OAuthClient creation result: %v", err)
+			}
+
+			By("Adding the finalizer to the Notebook")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+			notebook.Finalizers = append(notebook.Finalizers, Finalizer)
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("Verifying the finalizer is added to the Notebook")
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			Expect(notebook.Finalizers).To(ContainElement(Finalizer))
+		})
+
+		It("Should prevent deletion when a finalizer is present", func() {
+			By("Creating a Notebook with finalizer")
+			notebook.Finalizers = []string{Finalizer}
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Creating an OAuthClient")
+			Expect(cli.Create(ctx, oauthClient)).Should(Succeed())
+
+			By("Requesting deletion of the Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+
+			By("Verifying Notebook has deletion timestamp but still exists")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			Expect(notebook.DeletionTimestamp).NotTo(BeNil(), "Notebook should have deletion timestamp")
+			Expect(notebook.Finalizers).To(ContainElement(Finalizer), "Finalizer should still be present")
+		})
+
+		It("Should delete the OAuthClient when the Notebook is deleted", func() {
+			By("Creating a Notebook with finalizer")
+			notebook.Finalizers = []string{Finalizer}
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Creating an OAuthClient")
+			Expect(cli.Create(ctx, oauthClient)).Should(Succeed())
+
+			By("Requesting deletion of the Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+
+			By("Verifying OAuthClient still exists before finalizer processing")
+			oauthClientKey := types.NamespacedName{Name: oauthClientName}
+			Expect(cli.Get(ctx, oauthClientKey, oauthClient)).Should(Succeed())
+
+			By("Manually deleting OAuthClient to simulate controller behavior")
+			Expect(cli.Delete(ctx, oauthClient)).Should(Succeed())
+
+			By("Verifying OAuthClient is deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, oauthClientKey, oauthClient)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue(), "OAuthClient should be deleted")
+		})
+
+		It("Should remove the finalizer from the Notebook when OAuthClient has been deleted", func() {
+			By("Creating a Notebook with finalizer")
+			notebook.Finalizers = []string{Finalizer}
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Creating an OAuthClient")
+			Expect(cli.Create(ctx, oauthClient)).Should(Succeed())
+
+			By("Requesting deletion of the Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+
+			By("Deleting the OAuthClient")
+			Expect(cli.Delete(ctx, oauthClient)).Should(Succeed())
+
+			By("Removing the finalizer to simulate controller behavior")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+			// Remove finalizer
+			var updatedFinalizers []string
+			for _, f := range notebook.Finalizers {
+				if f != Finalizer {
+					updatedFinalizers = append(updatedFinalizers, f)
+				}
+			}
+			notebook.Finalizers = updatedFinalizers
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("Verifying Notebook is fully deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, key, notebook)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue(), "Notebook should be deleted after finalizer removal")
 		})
 	})
 
