@@ -41,6 +41,7 @@ rules:
   - get
   - list
   - patch
+  - update
   - watch
 - apiGroups:
   - kubeflow.org
@@ -71,6 +72,7 @@ rules:
   - oauthclients
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
