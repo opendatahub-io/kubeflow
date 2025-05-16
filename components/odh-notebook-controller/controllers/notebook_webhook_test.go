@@ -18,12 +18,13 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	imagev1 "github.com/openshift/api/image/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/onsi/ginkgo"
@@ -49,7 +50,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 
 		testCases := []struct {
 			name        string
-			imageStream *unstructured.Unstructured
+			imageStream *imagev1.ImageStream
 			notebook    *nbv1.Notebook
 			// currently we expect that Notebook CR is always created,
 			// and when unable to resolve imagestream, image: is left alone
@@ -60,39 +61,36 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 		}{
 			{
 				name: "ImageStream with all that is needful",
-				imageStream: &unstructured.Unstructured{
-					Object: map[string]any{
-						"kind":       "ImageStream",
-						"apiVersion": "image.openshift.io/v1",
-						"metadata": map[string]any{
-							"name":      "some-image",
-							"namespace": "redhat-ods-applications",
+				imageStream: &imagev1.ImageStream{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "ImageStream",
+						APIVersion: "image.openshift.io/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "some-image",
+						Namespace: "redhat-ods-applications",
+					},
+					Spec: imagev1.ImageStreamSpec{
+						LookupPolicy: imagev1.ImageLookupPolicy{
+							Local: true,
 						},
-						"spec": map[string]any{
-							"lookupPolicy": map[string]any{
-								"local": true,
-							},
-						},
-						"status": map[string]any{
-							"tags": []any{
-								map[string]any{
-									"tag": "some-tag",
-									"items": []map[string]any{
-										{
-											"created":              "2024-10-03T08:10:22Z",
-											"dockerImageReference": "quay.io/modh/odh-generic-data-science-notebook@sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
-											"image":                "sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
-											"generation":           1,
-										},
-									},
-									"conditions": []any{
-										map[string]any{
-											"type":               "ImportSuccess",
-											"status":             "False",
-											"lastTransitionTime": "2025-03-11T08:50:51Z",
-											"reason":             "NotFound",
-										}}}},
-						},
+					},
+					Status: imagev1.ImageStreamStatus{
+						Tags: []imagev1.NamedTagEventList{{
+							Tag: "some-tag",
+							Items: []imagev1.TagEvent{{
+								Created:              toMetav1Time("2024-10-03T08:10:22Z"),
+								DockerImageReference: "quay.io/modh/odh-generic-data-science-notebook@sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
+								Image:                "sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1",
+								Generation:           2,
+							}},
+							Conditions: []imagev1.TagEventCondition{{
+								Type:               "ImportSuccess",
+								Status:             "False",
+								LastTransitionTime: toMetav1Time("2025-03-11T08:50:51Z"),
+								Reason:             "NotFound",
+							}},
+						}},
 					},
 				},
 				notebook: &nbv1.Notebook{
@@ -118,32 +116,31 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			},
 			{
 				name: "ImageStream with a tag without items (RHOAIENG-13916)",
-				imageStream: &unstructured.Unstructured{
-					Object: map[string]any{
-						"kind":       "ImageStream",
-						"apiVersion": "image.openshift.io/v1",
-						"metadata": map[string]any{
-							"name":      "some-image",
-							"namespace": "redhat-ods-applications",
+				imageStream: &imagev1.ImageStream{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "ImageStream",
+						APIVersion: "image.openshift.io/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "some-image",
+						Namespace: "redhat-ods-applications",
+					},
+					Spec: imagev1.ImageStreamSpec{
+						LookupPolicy: imagev1.ImageLookupPolicy{
+							Local: true,
 						},
-						"spec": map[string]any{
-							"lookupPolicy": map[string]any{
-								"local": true,
-							},
-						},
-						"status": map[string]any{
-							"tags": []any{
-								map[string]any{
-									"tag":   "some-tag",
-									"items": nil,
-									"conditions": []any{
-										map[string]any{
-											"type":               "ImportSuccess",
-											"status":             "False",
-											"lastTransitionTime": "2025-03-11T08:50:51Z",
-											"reason":             "NotFound",
-										}}}},
-						},
+					},
+					Status: imagev1.ImageStreamStatus{
+						Tags: []imagev1.NamedTagEventList{{
+							Tag:   "some-tag",
+							Items: nil,
+							Conditions: []imagev1.TagEventCondition{{
+								Type:               "ImportSuccess",
+								Status:             "False",
+								LastTransitionTime: toMetav1Time("2025-03-11T08:50:51Z"),
+								Reason:             "",
+							}},
+						}},
 					},
 				},
 				notebook: &nbv1.Notebook{
@@ -165,6 +162,62 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 				// there is no update to the Notebook
 				expectedImage: ":some-tag",
 				expectedEvents: []string{
+					IMAGE_STREAM_TAG_NOT_FOUND_EVENT,
+				},
+			},
+			{
+				name: "ImageStream in the same namespace as the Notebook",
+				imageStream: &imagev1.ImageStream{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "ImageStream",
+						APIVersion: "image.openshift.io/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "some-image",
+						Namespace: Namespace,
+					},
+					Spec: imagev1.ImageStreamSpec{
+						LookupPolicy: imagev1.ImageLookupPolicy{
+							Local: true,
+						},
+					},
+					Status: imagev1.ImageStreamStatus{
+						Tags: []imagev1.NamedTagEventList{{
+							Tag: "some-tag",
+							Items: []imagev1.TagEvent{{
+								Created:              toMetav1Time("2025-05-14T02:36:21Z"),
+								DockerImageReference: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+								Image:                "sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+								Generation:           2,
+							}},
+							Conditions: []imagev1.TagEventCondition{{
+								Type:               "ImportSuccess",
+								Status:             "False",
+								LastTransitionTime: toMetav1Time("2025-05-14T02:36:21Z"),
+								Reason:             "NotFound",
+							}},
+						}},
+					},
+				},
+				notebook: &nbv1.Notebook{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      Name,
+						Namespace: Namespace,
+						Annotations: map[string]string{
+							"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
+						},
+					},
+					Spec: nbv1.NotebookSpec{
+						Template: nbv1.NotebookTemplateSpec{
+							Spec: corev1.PodSpec{Containers: []corev1.Container{{
+								Name:  Name,
+								Image: ":some-tag",
+							}}}},
+					},
+				},
+				// valid new image is picked from user namespace.
+				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+				unexpectedEvents: []string{
 					IMAGE_STREAM_NOT_FOUND_EVENT,
 				},
 			},
@@ -209,3 +262,11 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 		}
 	})
 })
+
+func toMetav1Time(timeString string) metav1.Time {
+	parsedTime, err := time.Parse(time.RFC3339, timeString)
+	if err != nil {
+		return metav1.Time{}
+	}
+	return metav1.NewTime(parsedTime)
+}

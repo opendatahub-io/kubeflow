@@ -939,7 +939,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should not create OAuth secret", func() {
-			secrets := &corev1.SecretList{}
+			secrets := &corev1.SecretList{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "SecretList",
+					APIVersion: "v1",
+				},
+			}
 			Eventually(func() error {
 				return cli.List(context.Background(), secrets, client.InNamespace(namespace))
 			}, duration, interval).Should(Succeed())

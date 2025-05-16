@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	configv1 "github.com/openshift/api/config/v1"
+	imagev1 "github.com/openshift/api/image/v1"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -36,12 +37,11 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	k8serr "k8s.io/apimachinery/pkg/api/errors"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,7 +70,8 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 })
 
 const (
-	IMAGE_STREAM_NOT_FOUND_EVENT = "imagestream-not-found"
+	IMAGE_STREAM_NOT_FOUND_EVENT     = "imagestream-not-found"
+	IMAGE_STREAM_TAG_NOT_FOUND_EVENT = "imagestream-tag-not-found"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -338,7 +339,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	// Check Imagestream Info both on create and update operations
 	if req.Operation == admissionv1.Create || req.Operation == admissionv1.Update {
 		// Check Imagestream Info
-		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log, w.Namespace)
+		err = SetContainerImageFromRegistry(ctx, w.Client, notebook, log, w.Namespace)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -688,15 +689,8 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 // If an internal registry is detected, it uses the default values specified in the Notebook Custom Resource (CR).
 // Otherwise, it checks the last-image-selection annotation to find the image stream and fetches the image from status.dockerImageReference,
 // assigning it to the container.image value.
-func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger, namespace string) error {
+func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger, controllerNamespace string) error {
 	span := trace.SpanFromContext(ctx)
-
-	// Create a dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Error creating dynamic client")
-		return err
-	}
 
 	annotations := notebook.GetAnnotations()
 	if annotations != nil {
@@ -704,7 +698,7 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 
 			containerFound := false
 			// Iterate over containers to find the one matching the notebook name
-			for i, container := range notebook.Spec.Template.Spec.Containers {
+			for _, container := range notebook.Spec.Template.Spec.Containers {
 				if container.Name == notebook.Name {
 					containerFound = true
 
@@ -722,70 +716,72 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 						return fmt.Errorf("invalid image selection format")
 					}
 
-					// Specify the GroupVersionResource for imagestreams
-					ims := schema.GroupVersionResource{
-						Group:    "image.openshift.io",
-						Version:  "v1",
-						Resource: "imagestreams",
-					}
-
 					imagestreamFound := false
-					// List imagestreams in the specified namespace
-					imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
-					if err != nil {
-						if k8serr.IsForbidden(err) {
-							log.Info("Permission denied to list imagestreams", "namespace", namespace, "error", err)
-							// fast exit on permission denied
-							return err
+					imageTagFound := false
+					imagestreamName := imageSelected[0]
+					imgSelection := &imagev1.ImageStream{}
+
+					// Search for the ImageStream in the controller namespace first
+					// As default, the ImageStream is created in the controller namespace
+					// if not found, search in the notebook namespace
+					// Note: This is in this order, so users should not overwrite the ImageStream
+					err := cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: controllerNamespace}, imgSelection)
+					if err != nil && apierrs.IsNotFound(err) {
+						log.Info("Unable to find the ImageStream in controller namespace, try finding in notebook namespace", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
+						// Check if the ImageStream is present in the notebook namespace
+						err = cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: notebook.Namespace}, imgSelection)
+						if err != nil {
+							log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
+						} else {
+							// ImageStream found in the notebook namespace
+							imagestreamFound = true
+							log.Info("ImageStream found in notebook namespace", "imagestream", imagestreamName, "namespace", notebook.Namespace)
 						}
-						log.Info("Cannot list imagestreams", "namespace", namespace, "error", err)
-						continue
+					} else {
+						// ImageStream found in the controller namespace
+						imagestreamFound = true
+						log.Info("ImageStream found in controller namespace", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
 					}
 
-					// Iterate through the imagestreams to find matches
-					for _, item := range imagestreams.Items {
-						metadata := item.Object["metadata"].(map[string]interface{})
-						name := metadata["name"].(string)
-
-						// Match with the ImageStream name
-						if name == imageSelected[0] {
-							status := item.Object["status"].(map[string]interface{})
-
-							// Match to the corresponding tag of the image
-							if tags, ok := status["tags"].([]interface{}); ok && tags != nil {
-								for _, t := range tags {
-									tagMap := t.(map[string]interface{})
-									tagName := tagMap["tag"].(string)
-									if tagName == imageSelected[1] {
-										if items, ok := tagMap["items"].([]interface{}); ok && items != nil && len(items) > 0 {
-											// Sort items by creationTimestamp to get the most recent one
-											sort.Slice(items, func(i, j int) bool {
-												iTime := items[i].(map[string]interface{})["created"].(string)
-												jTime := items[j].(map[string]interface{})["created"].(string)
-												return iTime > jTime // Lexicographical comparison of RFC3339 timestamps
-											})
-											imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
-											// Update the Containers[i].Image value
-											notebook.Spec.Template.Spec.Containers[i].Image = imageHash
-											// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
-											for i, envVar := range container.Env {
-												if envVar.Name == "JUPYTER_IMAGE" {
-													container.Env[i].Value = imageSelection
-													break
-												}
-											}
-											imagestreamFound = true
+					if imagestreamFound {
+						// Check if the ImageStream has a status and tags
+						if imgSelection.Status.Tags == nil {
+							log.Error(nil, "ImageStream has no status or tags", "name", imagestreamName, "namespace", controllerNamespace)
+							span.AddEvent(IMAGE_STREAM_TAG_NOT_FOUND_EVENT)
+							return fmt.Errorf("ImageStream has no status or tags")
+						}
+						// Iterate through the tags to find the one matching the imageSelected
+						for _, tag := range imgSelection.Status.Tags {
+							// Check if the tag name matches the imageSelected
+							if tag.Tag == imageSelected[1] {
+								// Check if the items are present
+								if len(tag.Items) > 0 {
+									// Sort items by creationTimestamp to get the most recent one
+									sort.Slice(tag.Items, func(i, j int) bool {
+										iTime := tag.Items[i].Created
+										jTime := tag.Items[j].Created
+										return iTime.Time.After(jTime.Time) //nolint:QF1008 // Reason: We are comparing metav1.Time // Lexicographical comparison of RFC3339 timestamps
+									})
+									// Get the most recent item
+									imageHash := tag.Items[0].DockerImageReference
+									// Update the container image
+									notebook.Spec.Template.Spec.Containers[0].Image = imageHash
+									// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
+									for i, envVar := range container.Env {
+										if envVar.Name == "JUPYTER_IMAGE" {
+											container.Env[i].Value = imageSelection
 											break
 										}
 									}
+									imageTagFound = true
+									break
 								}
 							}
 						}
-					}
-					if !imagestreamFound {
-						span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
-						log.Error(nil, "ImageStream not found in main controller namespace, or the ImageStream is present but does not contain a dockerImageReference for the specified tag",
-							"imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
+						if !imageTagFound {
+							log.Error(nil, "ImageStream is present but does not contain a dockerImageReference for the specified tag")
+							span.AddEvent(IMAGE_STREAM_TAG_NOT_FOUND_EVENT)
+						}
 					}
 				}
 			}

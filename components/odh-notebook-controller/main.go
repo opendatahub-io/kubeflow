@@ -40,6 +40,7 @@ import (
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
+	imagev1 "github.com/openshift/api/image/v1"
 	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -58,16 +59,20 @@ func init() {
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(oauthv1.AddToScheme(scheme))
+	utilruntime.Must(imagev1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }
 
 func getControllerNamespace() (string, error) {
 	// Try to get the namespace from the service account secret
+	// or from the K8S_NAMESPACE environment variable in local
 	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := string(data); len(ns) > 0 {
 			return ns, nil
 		}
+	} else if ns := os.Getenv("K8S_NAMESPACE"); len(ns) > 0 {
+		return ns, nil
 	}
 
 	return "", fmt.Errorf("unable to determine the namespace")
