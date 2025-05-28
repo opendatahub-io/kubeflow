@@ -19,12 +19,30 @@ rules:
   - update
   - watch
 - apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dashboards
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - config.openshift.io
   resources:
   - proxies
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - datasciencepipelinesapplications.opendatahub.io
+  resources:
+  - datasciencepipelinesapplications
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - image.openshift.io
@@ -111,22 +129,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - components.platform.opendatahub.io
-  resources:
-  - dashboards
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - datasciencepipelinesapplications.opendatahub.io
-  resources:
-  - datasciencepipelinesapplications
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-  
