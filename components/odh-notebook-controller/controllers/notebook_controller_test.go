@@ -28,12 +28,16 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -1076,6 +1080,269 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(Succeed())
 
 			Expect(secrets.Items).To(BeEmpty())
+		})
+
+	})
+
+	When("Checking ds-pipeline-config secret lifecycle", func() {
+		const (
+			notebookName          = "dspa-notebook"
+			dsSecretName          = "ds-pipeline-config"
+			Namespace             = "dspa-test-namespace"
+			accessKeyKey          = "accesskey"
+			secretKeyKey          = "secretkey"
+			secretName            = "cos-secret"
+			dashboardInstanceName = "default-dashboard"
+		)
+
+		testNamespaces = append(testNamespaces, Namespace)
+
+		var (
+			dspaObj      *dspav1.DataSciencePipelinesApplication
+			s3CredSecret *corev1.Secret
+			dashboard    *unstructured.Unstructured
+		)
+		BeforeEach(func() {
+			//Pass env to be visible within test suite
+			_ = os.Setenv("SET_PIPELINE_SECRET", "true")
+			fmt.Printf("SET_PIPELINE_SECRET is: %s\n", os.Getenv("SET_PIPELINE_SECRET"))
+			if os.Getenv("SET_PIPELINE_SECRET") != "true" {
+				Skip("Skipping elyra secret creation reconciliation tests as SET_PIPELINE_SECRET is not set to 'true'")
+			}
+
+		})
+
+		It("should create a ds-pipeline-config secret if a DSPA is present", func() {
+
+			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Dashboard CR, and Dashboard Secret.
+			// These components require the 'ds-pipeline-config' secret to be generated beforehand.
+			By("Creating a DSPA object")
+			dspaObj = &dspav1.DataSciencePipelinesApplication{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dspa",
+					Namespace: Namespace,
+				},
+				Spec: dspav1.DSPASpec{
+					ObjectStorage: &dspav1.ObjectStorage{
+						ExternalStorage: &dspav1.ExternalStorage{
+							Host:   "minio.default.svc.cluster.local",
+							Bucket: "pipelines",
+							S3CredentialSecret: &dspav1.S3CredentialSecret{
+								SecretName: secretName,
+								AccessKey:  accessKeyKey,
+								SecretKey:  secretKeyKey,
+							},
+						},
+					},
+				},
+				Status: dspav1.DSPAStatus{
+					Components: dspav1.ComponentStatus{
+						APIServer: dspav1.ComponentDetailStatus{
+							ExternalUrl: "https://pipeline-api.example.com",
+						},
+					},
+				},
+			}
+			Expect(cli.Create(ctx, dspaObj)).To(Succeed())
+
+			By("Creating a COS3 credentials Secret")
+			s3CredSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secretName,
+					Namespace: Namespace,
+				},
+				Data: map[string][]byte{
+					accessKeyKey: []byte("testaccesskey"),
+					secretKeyKey: []byte("testsecretkey"),
+				},
+			}
+			Expect(cli.Create(ctx, s3CredSecret)).To(Succeed())
+
+			By("Creating a Dashboard CR")
+			dashboard = &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "components.platform.opendatahub.io/v1alpha1",
+					"kind":       "Dashboard",
+					"metadata": map[string]interface{}{
+						"name":      dashboardInstanceName,
+						"namespace": Namespace,
+					},
+				},
+			}
+			dashboard.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "components.platform.opendatahub.io",
+				Version: "v1alpha1",
+				Kind:    "Dashboard",
+			})
+			Expect(cli.Create(ctx, dashboard)).To(Succeed())
+
+			By("Patching the Dashboard status.url and Ready condition to simulate readiness")
+			// Fetch the Dashboard to get a valid resourceVersion
+			Expect(cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)).To(Succeed())
+			// Create a patch with updated status.url and conditions
+			dashboardPatch := dashboard.DeepCopy()
+			err := unstructured.SetNestedField(dashboardPatch.Object, "https://dashboard.example.com", "status", "url")
+			Expect(err).ToNot(HaveOccurred())
+			readyCondition := map[string]interface{}{
+				"type":   "Ready",
+				"status": "True",
+				"reason": "ComponentsAvailable",
+			}
+			err = unstructured.SetNestedSlice(dashboardPatch.Object, []interface{}{readyCondition}, "status", "conditions")
+			Expect(err).ToNot(HaveOccurred())
+			patch := client.MergeFrom(dashboard)
+			Expect(cli.Status().Patch(ctx, dashboardPatch, patch)).To(Succeed())
+
+			By("Waiting the Dashboard object is present and Ready")
+			time.Sleep(10 * time.Millisecond)
+
+			By("Creating Notebook")
+			notebook := createNotebook(notebookName, Namespace)
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+			By("Waiting for ds-pipeline-config Secret to be created")
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
+
+			// This is needed until RHOAIENG-24545 bug get fix, related with the maybeRestartRunningNotebook func
+			By("Stopping the Notebook to allow volume injection")
+			stopPatch := notebook.DeepCopy()
+			if stopPatch.Annotations == nil {
+				stopPatch.Annotations = map[string]string{}
+			}
+			stopPatch.Annotations["kubeflow-resource-stopped"] = "true"
+			Expect(cli.Patch(ctx, stopPatch, client.MergeFrom(notebook))).To(Succeed())
+
+			By("Waiting for controller to reconcile after notebook is stopped")
+			Eventually(func(g Gomega) {
+				var refreshed nbv1.Notebook
+				g.Expect(cli.Get(ctx, types.NamespacedName{
+					Name:      notebookName,
+					Namespace: Namespace,
+				}, &refreshed)).To(Succeed())
+
+				found := false
+				for _, container := range refreshed.Spec.Template.Spec.Containers {
+					for _, vm := range container.VolumeMounts {
+						if vm.Name == "elyra-dsp-details" && vm.MountPath == "/opt/app-root/runtimes" {
+							found = true
+							break
+						}
+					}
+				}
+				g.Expect(found).To(BeTrue(), "Expected volumeMount 'elyra-dsp-details' after notebook was stopped")
+			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
+
+			By("Check notebook status")
+			notebook = &nbv1.Notebook{}
+			err = cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Validating the presence of volumeMount 'elyra-dsp-details'")
+			foundVolumeMount := false
+			for _, container := range notebook.Spec.Template.Spec.Containers {
+				for _, vm := range container.VolumeMounts {
+					if vm.Name == "elyra-dsp-details" && vm.MountPath == "/opt/app-root/runtimes" {
+						foundVolumeMount = true
+						break
+					}
+				}
+			}
+			Expect(foundVolumeMount).To(BeTrue(), "Expected volumeMount 'elyra-dsp-details' to be present in notebook container")
+
+			By("Validating the content of the ds-pipeline-config Secret")
+			var fetchedSecret corev1.Secret
+			err = cli.Get(ctx, types.NamespacedName{
+				Name:      dsSecretName,
+				Namespace: Namespace,
+			}, &fetchedSecret)
+			Expect(err).NotTo(HaveOccurred(), "Expected ds-pipeline-config Secret to exist")
+			Expect(fetchedSecret.Data).To(HaveKey("odh_dsp.json"))
+			Expect(fetchedSecret.Data["odh_dsp.json"]).ToNot(BeEmpty())
+			Expect(fetchedSecret.OwnerReferences).ToNot(BeEmpty(), "ds-pipeline-config Secret should have ownerReference")
+
+			By("Modifying DSPA Bucket field to trigger update")
+			Expect(cli.Get(ctx, client.ObjectKeyFromObject(dspaObj), dspaObj)).To(Succeed())
+			dspaObj.Spec.ExternalStorage.Bucket = "changed-bucket"
+			Expect(cli.Update(ctx, dspaObj)).To(Succeed())
+
+			By("Checking if ds-pipeline-config Secret is updated")
+			Eventually(func(g Gomega) {
+				var updatedSecret corev1.Secret
+				g.Expect(cli.Get(ctx, types.NamespacedName{
+					Name:      dsSecretName,
+					Namespace: Namespace,
+				}, &updatedSecret)).To(Succeed())
+				g.Expect(updatedSecret.ResourceVersion).ToNot(Equal(fetchedSecret), "Secret resource version should change on DSPA update")
+			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
+
+			By("Deleting the DSPA and Notebook")
+			Expect(cli.Delete(ctx, notebook)).To(Succeed())
+			Expect(cli.Delete(ctx, dspaObj)).To(Succeed())
+
+			By("Ensuring the DSPA and secret is fully deleted")
+			Eventually(func() error {
+				var deletedDspa dspav1.DataSciencePipelinesApplication
+				return cli.Get(ctx, types.NamespacedName{
+					Name:      "dspa",
+					Namespace: Namespace,
+				}, &deletedDspa)
+			}, time.Second*10, time.Millisecond*250).ShouldNot(Succeed())
+			err = cli.Delete(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      dsSecretName,
+					Namespace: Namespace,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Ensuring ds-pipeline-config Secret is garbage collected")
+			Eventually(func() error {
+				var fetched corev1.Secret
+				return cli.Get(ctx, types.NamespacedName{
+					Name:      dsSecretName,
+					Namespace: Namespace,
+				}, &fetched)
+			}, time.Second*10, time.Millisecond*250).ShouldNot(Succeed())
+
+		})
+
+		AfterEach(func() {
+			By("Cleaning up all created resources")
+
+			// Delete DSPA
+			if dspaObj != nil {
+				_ = cli.Delete(ctx, dspaObj)
+				Eventually(func() error {
+					return cli.Get(ctx, client.ObjectKeyFromObject(dspaObj), dspaObj)
+				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
+			}
+			// Simulate garbage collection of owned resources
+			// (only needed in tests due to lack of real GC)
+			eventuallyDeleted := &corev1.Secret{}
+			Eventually(func() bool {
+				err := cli.Get(ctx, types.NamespacedName{
+					Name:      dsSecretName,
+					Namespace: Namespace,
+				}, eventuallyDeleted)
+				return apierrors.IsNotFound(err)
+			}, time.Second*5, time.Millisecond*500).Should(BeTrue())
+
+			// Delete Dashboard
+			if dashboard != nil {
+				_ = cli.Delete(ctx, dashboard)
+				Eventually(func() error {
+					return cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)
+				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
+			}
+
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: Namespace,
+				},
+			}
+			_ = cli.Delete(ctx, ns)
 		})
 
 	})

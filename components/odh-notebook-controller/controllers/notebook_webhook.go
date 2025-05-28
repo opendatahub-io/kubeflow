@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -356,11 +357,16 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
-		// Mount Secret ds-pipeline-config
-		err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
-		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
+		// // Mount Secret ds-pipeline-config
+		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+			// Mount Secret ds-pipeline-config
+			err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
+			if err != nil {
+				log.Error(err, "Unable to mount Elyra runtime config volume")
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
 		}
+
 	}
 
 	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
@@ -389,6 +395,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	updatePendingAnnotation := "notebooks.opendatahub.io/update-pending"
+	// Initialize annotations to avoid panic error when map nil
+	if mutatedNotebook.Annotations == nil {
+		mutatedNotebook.Annotations = make(map[string]string)
+	}
 	if needsRestart != NoPendingUpdates {
 		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {

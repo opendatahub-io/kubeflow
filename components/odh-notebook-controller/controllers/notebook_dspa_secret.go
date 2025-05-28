@@ -40,51 +40,60 @@ const (
 	elyraRuntimeSecretName = "ds-pipeline-config"
 	elyraRuntimeMountPath  = "/opt/app-root/runtimes"
 	elyraRuntimeVolumeName = "elyra-dsp-details"
-
-	dashboardInstanceName = "default-dashboard"
-	dspaInstanceName      = "dspa"
+	dashboardInstanceName  = "default-dashboard"
+	dspaInstanceName       = "dspa"
+	managedByKey           = "opendatahub.io/managed-by"
+	managedByValue         = "workbenches"
 )
 
-// extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and dashboard CRs used for pipeline execution.
-func extractElyraRuntimeConfigInfo(ctx context.Context, dynamicClient dynamic.Interface, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
-
-	// Define GVRs
-	dashboard := schema.GroupVersionResource{
+func getDashboardInstance(ctx context.Context, dynamicClient dynamic.Interface, log logr.Logger) (map[string]interface{}, error) {
+	dashboardGVR := schema.GroupVersionResource{
 		Group:    "components.platform.opendatahub.io",
 		Version:  "v1alpha1",
 		Resource: "dashboards",
 	}
 
-	publicAPIEndpoint := ""
-	// Fetch Dashboard CR
-	dashboardInstance, err := dynamicClient.Resource(dashboard).Get(ctx, dashboardInstanceName, metav1.GetOptions{})
-	if err != nil {
-		log.Error(err, "Failed to get Dashboard CR")
-	} else {
-		// Extract dashboard URL
-		status, ok := dashboardInstance.Object["status"].(map[string]interface{})
-		if !ok {
-			log.Error(err, "invalid Dashboard CR: missing 'status'")
-		} else {
-			dashboardURL, ok := status["url"].(string)
-			if !ok || dashboardURL == "" {
-				log.Error(err, "invalid Dashboard CR: missing or empty 'url'")
-			} else {
-				publicAPIEndpoint = fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
-			}
-		}
-	}
-
-	// Get the DSPA
-	dspaInstance := &dspav1.DataSciencePipelinesApplication{}
-	err = client.Get(ctx, types.NamespacedName{Name: dspaInstanceName, Namespace: notebook.Namespace}, dspaInstance)
+	obj, err := dynamicClient.Resource(dashboardGVR).Get(ctx, dashboardInstanceName, metav1.GetOptions{})
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			// DSPA CR not found; skipping Elyra config generation
+			// Skipping as Dashboard CR not found (optional cr)
 			return nil, nil
 		}
-		log.Error(err, "Failed to get DSPA CR")
-		return nil, fmt.Errorf("error retrieving DSPA CR: %w", err)
+		log.Error(err, "Failed to retrieve Dashboard CR", "name", dashboardInstanceName)
+		return nil, err
+	}
+
+	return obj.Object, nil
+}
+
+func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace string, log logr.Logger) (*dspav1.DataSciencePipelinesApplication, error) {
+	dspa := &dspav1.DataSciencePipelinesApplication{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: dspaInstanceName, Namespace: namespace}, dspa)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			// Skipping as DSPA CR not found (optional cr)
+			return nil, nil
+		}
+		log.Error(err, "Failed to retrieve DSPA CR", "name", dspaInstanceName, "namespace", namespace)
+		return nil, err
+	}
+
+	return dspa, nil
+}
+
+// extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and dashboard CRs used for pipeline execution.
+func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+
+	publicAPIEndpoint := ""
+	// Extract dashboard URL from status
+	if status, ok := dashboardInstance["status"].(map[string]interface{}); ok {
+		if dashboardURL, ok := status["url"].(string); ok && dashboardURL != "" {
+			publicAPIEndpoint = fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
+		} else {
+			log.Info("Dashboard CR missing 'url' in status; skipping public API endpoint configuration")
+		}
+	} else {
+		log.Info("Dashboard CR missing 'status'; skipping public API endpoint configuration")
 	}
 
 	// Extract API Endpoint from DSPA status
@@ -95,34 +104,31 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dynamicClient dynamic.In
 	objectStorage := spec.ObjectStorage
 	externalStorage := objectStorage.ExternalStorage
 
-	// Extract host
+	// Validate required fields
 	host := externalStorage.Host
 	if host == "" {
 		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'host'")
 	}
 	cosEndpoint := fmt.Sprintf("https://%s", host)
 
-	// Extract bucket
 	cosBucket := externalStorage.Bucket
 	if cosBucket == "" {
 		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'bucket'")
 	}
 
-	// Extract S3 credentials
 	s3CredentialsSecret := externalStorage.S3CredentialSecret
 	cosSecret := s3CredentialsSecret.SecretName
 	usernameKey := s3CredentialsSecret.AccessKey
 	passwordKey := s3CredentialsSecret.SecretKey
 
-	// Fetch secret for credentials
+	// Fetch secret containing credentials
 	dspaCOSSecret := &corev1.Secret{}
-	err = client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
+	err := client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
 	if err != nil {
 		log.Error(err, "Failed to get secret", "secretName", cosSecret)
 		return nil, fmt.Errorf("failed to get secret '%s': %w", cosSecret, err)
 	}
 
-	// Extract values from the secret
 	usernameVal, ok := dspaCOSSecret.Data[usernameKey]
 	if !ok {
 		return nil, fmt.Errorf("missing key '%s' in secret '%s'", usernameKey, cosSecret)
@@ -132,10 +138,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dynamicClient dynamic.In
 		return nil, fmt.Errorf("missing key '%s' in secret '%s'", passwordKey, cosSecret)
 	}
 
-	cosUsername := string(usernameVal)
-	cosPassword := string(passwordVal)
-
-	// Construct and return the DSPA config
+	// Construct Elyra-compatible config
 	return map[string]interface{}{
 		"display_name": "Data Science Pipeline",
 		"schema_name":  "kfp",
@@ -150,8 +153,8 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dynamicClient dynamic.In
 			"api_endpoint":        apiEndpoint,
 			"cos_endpoint":        cosEndpoint,
 			"cos_bucket":          cosBucket,
-			"cos_username":        cosUsername,
-			"cos_password":        cosPassword,
+			"cos_username":        string(usernameVal),
+			"cos_password":        string(passwordVal),
 			"cos_secret":          cosSecret,
 		},
 	}, nil
@@ -164,13 +167,30 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 		log.Error(err, "Failed to create dynamic client")
 		return err
 	}
+	dashboardInstance, err := getDashboardInstance(ctx, dynamicClient, log)
+	if err != nil {
+		return err
+	}
+	// Skipping Elyra secret creation; Dashboard CR not found (optional cr)
+	if dashboardInstance == nil {
+		return nil
+	}
 
-	dspData, err := extractElyraRuntimeConfigInfo(ctx, dynamicClient, c, notebook, log)
+	dspaInstance, err := getDSPAInstance(ctx, c, notebook.Namespace, log)
+	if err != nil {
+		return err
+	}
+	// Skipping Elyra secret creation; DSPA CR not found (optional cr)
+	if dspaInstance == nil {
+		return nil
+	}
+
+	// Generate DSPA-based Elyra config
+	dspData, err := extractElyraRuntimeConfigInfo(ctx, dashboardInstance, dspaInstance, c, notebook, log)
 	if err != nil {
 		log.Error(err, "Failed to extract Elyra runtime config info")
 		return err
 	}
-	// // In case No DSPA present in namespace skipping Elyra secret creation as DSPA is not present
 	if dspData == nil {
 		return nil
 	}
@@ -185,20 +205,12 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      elyraRuntimeSecretName,
 			Namespace: notebook.Namespace,
-			Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
+			Labels:    map[string]string{managedByKey: managedByValue},
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"odh_dsp.json": dspJSON,
 		},
-	}
-
-	// Fetch the DSPA instance
-	dspaInstance := &dspav1.DataSciencePipelinesApplication{}
-	err = c.Get(ctx, types.NamespacedName{Name: dspaInstanceName, Namespace: desiredSecret.Namespace}, dspaInstance)
-	if err != nil {
-		log.Error(err, "Failed to fetch DSPA instance")
-		return err
 	}
 
 	// Set owner reference only on the secrets created by nbc (avoid blockOwnerDeletion issue)
@@ -218,7 +230,7 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	err = c.Get(ctx, types.NamespacedName{Name: elyraRuntimeSecretName, Namespace: notebook.Namespace}, existingSecret)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Creating Elyra runtime config secret", "name", elyraRuntimeSecretName)
+			log.Info("Creating Elyra runtime config secret", "secret", elyraRuntimeSecretName, "notebook", notebook.Name, "namespace", notebook.Namespace)
 			if err := c.Create(ctx, desiredSecret); err != nil && !apierrs.IsAlreadyExists(err) {
 				log.Error(err, "Failed to create Elyra runtime config secret")
 				return err
@@ -232,17 +244,16 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 
 	// Update Secret
 	requiresUpdate := !reflect.DeepEqual(existingSecret.Data, desiredSecret.Data) ||
-		existingSecret.Labels["opendatahub.io/managed-by"] != "workbenches"
+		existingSecret.Labels[managedByKey] != managedByValue
 
 	if requiresUpdate {
-		log.Info("Overriding existing Elyra runtime config secret", "name", elyraRuntimeSecretName)
-
+		log.Info("Updating existing Elyra runtime config secret", "name", elyraRuntimeSecretName)
 		// Set correct label and data
-		existingSecret.Labels = map[string]string{"opendatahub.io/managed-by": "workbenches"}
+		existingSecret.Labels = desiredSecret.Labels
 		existingSecret.Data = desiredSecret.Data
 
 		if err := c.Update(ctx, existingSecret); err != nil {
-			log.Error(err, "Failed to override existing Elyra runtime config secret")
+			log.Error(err, "Failed to update existing Elyra runtime config secret")
 			return err
 		}
 	}
@@ -267,8 +278,8 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 	}
 
 	// Check that it's our managed secret and has expected data
-	if secret.Labels["opendatahub.io/managed-by"] != "workbenches" {
-		log.Info("Skipping mounting secret not managed by workbenches", "Secret", elyraRuntimeSecretName)
+	if secret.Labels[managedByKey] != managedByValue {
+		log.Info("Skipping mounting secret not managed by workbenches", "secret", elyraRuntimeSecretName)
 		return nil
 	}
 	if len(secret.Data) == 0 {
