@@ -35,6 +35,6 @@ replacements:
   targets:
   - fieldPaths:
     - spec.template.spec.containers.0.image
-    select: 
+    select:
       kind: Deployment
-      name: data.odh-kf-notebook-controller-image
+      name: odh-kf-notebook-controller-image_PLACEHOLDER
