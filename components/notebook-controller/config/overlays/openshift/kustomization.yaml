@@ -37,4 +37,4 @@ replacements:
     - spec.template.spec.containers.0.image
     select: 
       kind: Deployment
-      name: kf-notebook-controller-manager
+      name: odh-kf-notebook-controller-image

@@ -21,4 +21,4 @@ replacements:
     - spec.template.spec.containers.0.image
     select:
       kind: Deployment
-      name: odh-notebook-controller
+      name: odh-notebook-controller-image
