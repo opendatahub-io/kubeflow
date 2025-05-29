@@ -20,5 +20,8 @@ replacements:
   - fieldPaths:
     - spec.template.spec.containers.0.image
     select:
+      group: apps
       kind: Deployment
-      name: data.odh-notebook-controller-image
+      name: manager
+      namespace: system
+      version: v1
