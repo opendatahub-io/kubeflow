@@ -32,7 +32,7 @@ spec:
                   name: notebook-controller-culler-config
                   key: IDLENESS_CHECK_PERIOD
                   optional: true
-          image: $(odh-kf-notebook-controller-image)
+          image: odh-kf-notebook-controller-image_PLACEHOLDER
           resources:
             limits:
               cpu: 500m

@@ -4,7 +4,7 @@ resources:
 - ../../base
 namespace: notebook-controller-system
 configMapGenerator:
-- name: config
-  behavior: merge
+- behavior: merge
   literals:
   - USE_ISTIO=false
+  name: config
