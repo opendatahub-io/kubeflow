@@ -38,6 +38,5 @@ replacements:
     select:
       group: apps
       kind: Deployment
-      name: manager
-      namespace: system
+      name: deployment
       version: v1
