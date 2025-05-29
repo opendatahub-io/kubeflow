@@ -389,6 +389,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	updatePendingAnnotation := "notebooks.opendatahub.io/update-pending"
+	// Initialize annotations to avoid panic error when map nil
+	if mutatedNotebook.ObjectMeta.Annotations == nil {
+		mutatedNotebook.ObjectMeta.Annotations = make(map[string]string)
+	}
 	if needsRestart != NoPendingUpdates {
 		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {

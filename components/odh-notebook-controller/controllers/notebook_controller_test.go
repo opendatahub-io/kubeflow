@@ -1234,25 +1234,17 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return false, nil
 			}, time.Second*10, time.Millisecond*250).Should(BeTrue())
 
-			By("Creating a Notebook in the same namespace")
+			By("Creating Notebook")
 			notebook := createNotebook(notebookName, Namespace)
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
 
 			By("Waiting for ds-pipeline-config Secret to be created")
 			Eventually(func() error {
-				var fetchedSecret corev1.Secret
-				err := cli.Get(ctx, types.NamespacedName{
-					Name:      dsSecretName,
-					Namespace: Namespace,
-				}, &fetchedSecret)
-				if err != nil {
-					_, _ = fmt.Fprintf(GinkgoWriter, "ds-pipeline-config not found: %v\n", err)
-				}
-				return err
-			}, timeout).
-				WithPolling(2 * time.Second).
-				Should(Succeed())
+				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
+			// This is needed until RHOAIENG-24545 bug get fix, related with the maybeRestartRunningNotebook logic
+			By("Triggering Notebook reconciliation")
 			patched := notebook.DeepCopy()
 			if patched.Annotations == nil {
 				patched.Annotations = make(map[string]string)
@@ -1260,26 +1252,33 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			patched.Annotations["test/reconcile-trigger"] = fmt.Sprintf("%d", time.Now().UnixNano())
 			Expect(cli.Patch(ctx, patched, client.MergeFrom(notebook))).To(Succeed())
 
-			By("Inspecting the content of the ds-pipeline-config Secret")
+			By("Check notebook status")
+			notebook = &nbv1.Notebook{}
+			err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Validating the presence of volumeMount 'elyra-dsp-details'")
+			foundVolumeMount := false
+			for _, container := range notebook.Spec.Template.Spec.Containers {
+				for _, vm := range container.VolumeMounts {
+					if vm.Name == "elyra-dsp-details" && vm.MountPath == "/opt/app-root/runtimes" {
+						foundVolumeMount = true
+						break
+					}
+				}
+			}
+			Expect(foundVolumeMount).To(BeTrue(), "Expected volumeMount 'elyra-dsp-details' to be present in notebook container")
+
+			By("Validating the content and ownership of the ds-pipeline-config Secret")
 			var fetchedSecret corev1.Secret
-			err := cli.Get(ctx, types.NamespacedName{
+			err = cli.Get(ctx, types.NamespacedName{
 				Name:      dsSecretName,
 				Namespace: Namespace,
 			}, &fetchedSecret)
-			Expect(err).NotTo(HaveOccurred())
-			for key, val := range fetchedSecret.Data {
-				_, _ = fmt.Fprintf(GinkgoWriter, "🔍 Secret Key: %s\n", key)
-				_, _ = fmt.Fprintf(GinkgoWriter, "🔐 Value:\n%s\n", string(val))
-			}
-			_, _ = fmt.Fprintln(GinkgoWriter, "🔗 Inspecting ownerReferences of ds-pipeline-config Secret:")
-			if len(fetchedSecret.OwnerReferences) == 0 {
-				_, _ = fmt.Fprintln(GinkgoWriter, "⚠️  No ownerReferences found on ds-pipeline-config Secret!")
-			} else {
-				for _, ref := range fetchedSecret.OwnerReferences {
-					_, _ = fmt.Fprintf(GinkgoWriter, "- Kind: %s, Name: %s, UID: %s, Controller: %v\n",
-						ref.Kind, ref.Name, ref.UID, ref.Controller != nil && *ref.Controller)
-				}
-			}
+			Expect(err).NotTo(HaveOccurred(), "Expected ds-pipeline-config Secret to exist")
+			Expect(fetchedSecret.Data).To(HaveKey("odh_dsp.json"))
+			Expect(fetchedSecret.Data["odh_dsp.json"]).ToNot(BeEmpty())
+			Expect(fetchedSecret.OwnerReferences).ToNot(BeEmpty(), "ds-pipeline-config Secret should have ownerReference")
 
 			By("Deleting the DSPA and Notebook")
 			Expect(cli.Delete(ctx, notebook)).To(Succeed())
