@@ -187,7 +187,7 @@ var _ = BeforeSuite(func() {
 	// Setup notebook controller
 	err = (&OpenshiftNotebookReconciler{
 		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
+		Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
 		Scheme:    mgr.GetScheme(),
 		Namespace: odhNotebookControllerTestNamespace,
 		Config:    mgr.GetConfig(),
@@ -198,7 +198,7 @@ var _ = BeforeSuite(func() {
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &NotebookWebhook{
-			Log:       ctrl.Log.WithName("controllers").WithName("notebook-controller"),
+			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
