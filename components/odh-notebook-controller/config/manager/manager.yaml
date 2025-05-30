@@ -59,4 +59,3 @@ spec:
               value: "false"
             - name: SET_PIPELINE_SECRET
               value: "true"
-  
