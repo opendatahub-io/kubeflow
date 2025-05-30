@@ -33,7 +33,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -1095,6 +1094,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			dashboardInstanceName = "default-dashboard"
 		)
 
+		testNamespaces = append(testNamespaces, Namespace)
+
 		var (
 			dspaObj      *dspav1.DataSciencePipelinesApplication
 			s3CredSecret *corev1.Secret
@@ -1108,13 +1109,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Skip("Skipping elyra secret creation reconciliation tests as SET_PIPELINE_SECRET is not set to 'true'")
 			}
 
-			// Creates dspa namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: Namespace,
-				},
-			}
-			Expect(cli.Create(ctx, ns)).To(Succeed())
 		})
 
 		It("should create a ds-pipeline-config secret if a DSPA is present", func() {
@@ -1311,42 +1305,42 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		})
 
-		AfterEach(func() {
-			By("Cleaning up all created resources")
+		// AfterEach(func() {
+		// 	By("Cleaning up all created resources")
 
-			// Delete DSPA
-			if dspaObj != nil {
-				_ = cli.Delete(ctx, dspaObj)
-				Eventually(func() error {
-					return cli.Get(ctx, client.ObjectKeyFromObject(dspaObj), dspaObj)
-				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
-			}
-			// Simulate garbage collection of owned resources
-			// (only needed in tests due to lack of real GC)
-			eventuallyDeleted := &corev1.Secret{}
-			Eventually(func() bool {
-				err := cli.Get(ctx, types.NamespacedName{
-					Name:      dsSecretName,
-					Namespace: Namespace,
-				}, eventuallyDeleted)
-				return apierrors.IsNotFound(err)
-			}, time.Second*5, time.Millisecond*500).Should(BeTrue())
+		// 	// Delete DSPA
+		// 	if dspaObj != nil {
+		// 		_ = cli.Delete(ctx, dspaObj)
+		// 		Eventually(func() error {
+		// 			return cli.Get(ctx, client.ObjectKeyFromObject(dspaObj), dspaObj)
+		// 		}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
+		// 	}
+		// 	// Simulate garbage collection of owned resources
+		// 	// (only needed in tests due to lack of real GC)
+		// 	eventuallyDeleted := &corev1.Secret{}
+		// 	Eventually(func() bool {
+		// 		err := cli.Get(ctx, types.NamespacedName{
+		// 			Name:      dsSecretName,
+		// 			Namespace: Namespace,
+		// 		}, eventuallyDeleted)
+		// 		return apierrors.IsNotFound(err)
+		// 	}, time.Second*5, time.Millisecond*500).Should(BeTrue())
 
-			// Delete Dashboard
-			if dashboard != nil {
-				_ = cli.Delete(ctx, dashboard)
-				Eventually(func() error {
-					return cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)
-				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
-			}
+		// 	// Delete Dashboard
+		// 	if dashboard != nil {
+		// 		_ = cli.Delete(ctx, dashboard)
+		// 		Eventually(func() error {
+		// 			return cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)
+		// 		}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
+		// 	}
 
-			ns := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: Namespace,
-				},
-			}
-			_ = cli.Delete(ctx, ns)
-		})
+		// 	ns := &corev1.Namespace{
+		// 		ObjectMeta: metav1.ObjectMeta{
+		// 			Name: Namespace,
+		// 		},
+		// 	}
+		// 	_ = cli.Delete(ctx, ns)
+		// })
 
 	})
 
