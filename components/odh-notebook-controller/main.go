@@ -79,7 +79,7 @@ func getControllerNamespace() (string, error) {
 }
 
 func main() {
-	var metricsAddr, probeAddr, oauthProxyImage string
+	var metricsAddr, probeAddr, oauthProxyImage, webhookCertDir string
 	var webhookPort int
 	var enableLeaderElection, enableDebugLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
@@ -88,6 +88,10 @@ func main() {
 		"The address the probe endpoint binds to.")
 	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
 		"Image of the OAuth proxy sidecar container.")
+	// specified explicitly, since on macOS the default temporary directory often resolves to a path under /var/folders/...
+	// this default path in /tmp/ is already hardcoded in the Makefile and manifests used for ktunnel deployment
+	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
+		"Directory that contains the server key and certificate for the webhook server.")
 	flag.IntVar(&webhookPort, "webhook-port", 8443,
 		"Port that the webhook server serves at.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -112,7 +116,8 @@ func main() {
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "odh-notebook-controller",
 		WebhookServer: webhook.NewServer(webhook.Options{
-			Port: webhookPort,
+			Port:    webhookPort,
+			CertDir: webhookCertDir,
 		}),
 	}
 
