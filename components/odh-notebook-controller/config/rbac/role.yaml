@@ -111,3 +111,19 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dashboards
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - datasciencepipelinesapplications.opendatahub.io
+  resources:
+  - datasciencepipelinesapplications
+  verbs:
+  - get
+  - list
+  - watch
