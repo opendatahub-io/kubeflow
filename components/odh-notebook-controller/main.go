@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	imagev1 "github.com/openshift/api/image/v1"
 	oauthv1 "github.com/openshift/api/oauth/v1"
@@ -60,6 +61,7 @@ func init() {
 	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(oauthv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
+	utilruntime.Must(dspav1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }

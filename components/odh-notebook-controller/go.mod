@@ -8,7 +8,8 @@ require (
 	github.com/go-logr/logr v1.4.2
 	github.com/google/go-cmp v0.7.0
 	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
-	github.com/openshift/api v0.0.0-20190924102528-32369d4db2ad
+	github.com/opendatahub-io/data-science-pipelines-operator v1.1.1-0.20250318214030-560cbc1d827a
+	github.com/openshift/api v0.0.0-20231118005202-0f638a8a4705
 	github.com/pkg/errors v0.9.1
 	go.uber.org/zap v1.26.0
 	k8s.io/api v0.29.0
@@ -74,7 +75,7 @@ require (
 	golang.org/x/time v0.3.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
+	google.golang.org/protobuf v1.35.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -353,6 +354,16 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		// Mount ConfigMap pipeline-runtime-images as runtime-images
 		err = MountPipelineRuntimeImages(ctx, w.Client, notebook, log)
 		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+
+	// // Mount Secret ds-pipeline-config
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+		// Mount Secret ds-pipeline-config
+		err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
+		if err != nil {
+			log.Error(err, "Unable to mount Elyra runtime config volume")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 	}
