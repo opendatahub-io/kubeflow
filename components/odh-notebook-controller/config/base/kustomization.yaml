@@ -1,20 +1,27 @@
----
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../default
+- ../default
 
 configMapGenerator:
-- name: odh-notebook-controller-image-parameters
-  env: params.env
+- envs:
+  - params.env
+  name: odh-notebook-controller-image-parameters
 generatorOptions:
   disableNameSuffixHash: true
 
-vars:
-- name: odh-notebook-controller-image
-  objref:
+replacements:
+- source:
+    fieldPath: data.odh-notebook-controller-image
     kind: ConfigMap
     name: odh-notebook-controller-image-parameters
-    apiVersion: v1
-  fieldref:
-    fieldpath: data.odh-notebook-controller-image
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.0.image
+    select:
+      group: apps
+      kind: Deployment
+      name: manager
+      namespace: system
+      version: v1

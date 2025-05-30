@@ -21,7 +21,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: manager
-          image: $(odh-notebook-controller-image)
+          image: odh-notebook-controller-image_PLACEHOLDER
           imagePullPolicy: Always
           command:
             - /manager
