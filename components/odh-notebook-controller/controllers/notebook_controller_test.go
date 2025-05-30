@@ -33,7 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1119,7 +1119,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check and log the final state
 			client := &oauthv1.OAuthClient{}
 			err := cli.Get(ctx, oauthClientKey, client)
-			if errors.IsNotFound(err) {
+			if apierr.IsNotFound(err) {
 				GinkgoT().Logf("OAuthClient was successfully deleted by the controller")
 			} else if err != nil {
 				GinkgoT().Logf("Error checking OAuthClient: %v", err)
