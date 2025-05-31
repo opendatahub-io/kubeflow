@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	imagev1 "github.com/openshift/api/image/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	v1 "k8s.io/api/core/v1"
@@ -156,6 +157,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
+	utilruntime.Must(dspav1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 
