@@ -109,7 +109,7 @@ func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
 func (tc *testContext) testNotebookRouteCreation(nbMeta *metav1.ObjectMeta) error {
 	nbRoute, err := tc.getNotebookRoute(nbMeta)
 	if err != nil {
-		return fmt.Errorf("error getting Route for Notebook: %v", err)
+		return fmt.Errorf("error getting Route for Notebook %v: %v", nbRoute.Name, err)
 	}
 	isReady := false
 	for _, ingress := range nbRoute.Status.Ingress {
