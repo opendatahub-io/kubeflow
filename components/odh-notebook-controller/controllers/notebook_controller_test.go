@@ -1205,51 +1205,31 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
 			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
-			// This is needed until RHOAIENG-24545 bug get fix, related with the maybeRestartRunningNotebook func
-			By("Stopping the Notebook to allow volume injection")
-			stopPatch := notebook.DeepCopy()
-			if stopPatch.Annotations == nil {
-				stopPatch.Annotations = map[string]string{}
-			}
-			stopPatch.Annotations["kubeflow-resource-stopped"] = "true"
-			Expect(cli.Patch(ctx, stopPatch, client.MergeFrom(notebook))).To(Succeed())
-
-			By("Waiting for controller to reconcile after notebook is stopped")
-			Eventually(func(g Gomega) {
+			By("Waiting and validating for volumeMount 'elyra-dsp-details' to be injected into the Notebook")
+			Eventually(func() bool {
 				var refreshed nbv1.Notebook
-				g.Expect(cli.Get(ctx, types.NamespacedName{
+				if err := cli.Get(ctx, types.NamespacedName{
 					Name:      notebookName,
 					Namespace: Namespace,
-				}, &refreshed)).To(Succeed())
-
-				found := false
-				for _, container := range refreshed.Spec.Template.Spec.Containers {
-					for _, vm := range container.VolumeMounts {
+				}, &refreshed); err != nil {
+					return false
+				}
+				for _, c := range refreshed.Spec.Template.Spec.Containers {
+					for _, vm := range c.VolumeMounts {
 						if vm.Name == "elyra-dsp-details" && vm.MountPath == "/opt/app-root/runtimes" {
-							found = true
-							break
+							return true
 						}
 					}
 				}
-				g.Expect(found).To(BeTrue(), "Expected volumeMount 'elyra-dsp-details' after notebook was stopped")
-			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
+				return false
+			}, 15*time.Second, 500*time.Millisecond).Should(
+				BeTrue(), "Expected elyra-dsp-details volumeMount to be present",
+			)
 
 			By("Check notebook status")
 			notebook = &nbv1.Notebook{}
 			err = cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
 			Expect(err).ToNot(HaveOccurred())
-
-			By("Validating the presence of volumeMount 'elyra-dsp-details'")
-			foundVolumeMount := false
-			for _, container := range notebook.Spec.Template.Spec.Containers {
-				for _, vm := range container.VolumeMounts {
-					if vm.Name == "elyra-dsp-details" && vm.MountPath == "/opt/app-root/runtimes" {
-						foundVolumeMount = true
-						break
-					}
-				}
-			}
-			Expect(foundVolumeMount).To(BeTrue(), "Expected volumeMount 'elyra-dsp-details' to be present in notebook container")
 
 			By("Validating the content of the ds-pipeline-config Secret")
 			var fetchedSecret corev1.Secret

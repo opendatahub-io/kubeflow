@@ -477,6 +477,12 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 		return mutatedNotebook, NoPendingUpdates, nil
 	}
 
+	// If generation is 1, allow updates on initial generation of the notebook CR
+	if updatedNotebook.GetGeneration() == 1 {
+		log.Info("Not blocking update, this is the initial generation of the Notebook")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
 	// Now we know we have to block the update
 	// Keep the old values and mark the Notebook as UpdatesPending
 	diff := getStructDiff(ctx, mutatedNotebook.Spec.Template.Spec, updatedNotebook.Spec.Template.Spec)
