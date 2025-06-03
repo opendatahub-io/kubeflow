@@ -19,14 +19,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - config.openshift.io
-  resources:
-  - proxies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - image.openshift.io
   resources:
   - imagestreams
