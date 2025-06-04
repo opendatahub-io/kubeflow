@@ -63,7 +63,7 @@ func getDashboardInstance(ctx context.Context, dynamicClient dynamic.Interface, 
 		return nil, err
 	}
 
-	return obj.Object, nil
+	return obj.UnstructuredContent(), nil
 }
 
 func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace string, log logr.Logger) (*dspav1.DataSciencePipelinesApplication, error) {
@@ -84,16 +84,22 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 // extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and dashboard CRs used for pipeline execution.
 func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
 
+	// Dashboard is optional.  Default to an empty URL if the CR is absent.
 	publicAPIEndpoint := ""
-	// Extract dashboard URL from status
-	if status, ok := dashboardInstance["status"].(map[string]interface{}); ok {
-		if dashboardURL, ok := status["url"].(string); ok && dashboardURL != "" {
-			publicAPIEndpoint = fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
+	if len(dashboardInstance) != 0 {
+		if status, ok := dashboardInstance["status"]; ok {
+			if statusMap, ok := status.(map[string]interface{}); ok {
+				if urlVal, ok := statusMap["url"].(string); ok && urlVal != "" {
+					publicAPIEndpoint = fmt.Sprintf("https://%s/experiments/%s/", urlVal, notebook.Namespace)
+				} else {
+					log.Info("Dashboard CR: missing or empty 'url' in status")
+				}
+			} else {
+				log.Info("Dashboard CR: 'status' is not a mapped")
+			}
 		} else {
-			log.Info("Dashboard CR missing 'url' in status; skipping public API endpoint configuration")
+			log.Info("Dashboard CR: missing 'status' field")
 		}
-	} else {
-		log.Info("Dashboard CR missing 'status'; skipping public API endpoint configuration")
 	}
 
 	// Extract API Endpoint from DSPA status
@@ -167,18 +173,25 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 		log.Error(err, "Failed to create dynamic client")
 		return err
 	}
+
+	// Dashboard is optional: retrieve it, but continue even when it's absent.
 	dashboardInstance, err := getDashboardInstance(ctx, dynamicClient, log)
 	if err != nil {
 		return err
 	}
-	// Skipping Elyra secret creation; Dashboard CR not found (optional cr)
+	// Dashboard CR not found (optional cr)
 	if dashboardInstance == nil {
-		return nil
+		log.Info("Dashboard CR not present - will create Elyra secret with empty dashboard_url")
+		dashboardInstance = map[string]interface{}{}
 	}
 
 	dspaInstance, err := getDSPAInstance(ctx, c, notebook.Namespace, log)
 	if err != nil {
 		return err
+	}
+	// Neither DSPA nor Dashboard CRs are present — skipping Elyra secret creatio
+	if dspaInstance == nil && len(dashboardInstance) == 0 {
+		return nil
 	}
 	// Skipping Elyra secret creation; DSPA CR not found (optional cr)
 	if dspaInstance == nil {
