@@ -29,21 +29,23 @@ import (
 
 	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
+	configv1 "github.com/openshift/api/config/v1"
+	imagev1 "github.com/openshift/api/image/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
+	routev1 "github.com/openshift/api/route/v1"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	configv1 "github.com/openshift/api/config/v1"
-	imagev1 "github.com/openshift/api/image/v1"
-	oauthv1 "github.com/openshift/api/oauth/v1"
-	routev1 "github.com/openshift/api/route/v1"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -60,6 +62,7 @@ func init() {
 	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(oauthv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
+	utilruntime.Must(dspav1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }
