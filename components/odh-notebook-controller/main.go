@@ -137,12 +137,12 @@ func main() {
 	setupLog.Info("Controller is running in namespace", "namespace", namespace)
 	if err = (&controllers.OpenshiftNotebookReconciler{
 		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("Notebook"),
+		Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
 		Namespace: namespace,
 		Scheme:    mgr.GetScheme(),
 		Config:    mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Notebook")
+		setupLog.Error(err, "unable to create controller", "controller", "odh-notebook-controller")
 		os.Exit(1)
 	}
 
@@ -150,7 +150,7 @@ func main() {
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &controllers.NotebookWebhook{
-			Log:       ctrl.Log.WithName("controllers").WithName("Notebook"),
+			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: namespace,
