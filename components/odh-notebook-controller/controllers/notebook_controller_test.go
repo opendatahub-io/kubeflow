@@ -1113,7 +1113,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("should create a ds-pipeline-config secret if a DSPA is present", func() {
-
 			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Dashboard CR, and Dashboard Secret.
 			// These components require the 'ds-pipeline-config' secret to be generated beforehand.
 			By("Creating a DSPA object")
@@ -1135,15 +1134,18 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						},
 					},
 				},
-				Status: dspav1.DSPAStatus{
-					Components: dspav1.ComponentStatus{
-						APIServer: dspav1.ComponentDetailStatus{
-							ExternalUrl: "https://pipeline-api.example.com",
-						},
+			}
+			Expect(cli.Create(ctx, dspaObj)).To(Succeed())
+			By("Setting DSPA Status with a API server URL")
+			dspaObj.Status = dspav1.DSPAStatus{
+				Components: dspav1.ComponentStatus{
+					APIServer: dspav1.ComponentDetailStatus{
+						ExternalUrl: "https://pipeline-api.example.com",
 					},
 				},
 			}
-			Expect(cli.Create(ctx, dspaObj)).To(Succeed())
+			// Update only the status subresource
+			Expect(cli.Status().Update(ctx, dspaObj)).To(Succeed())
 
 			By("Creating a COS3 credentials Secret")
 			s3CredSecret = &corev1.Secret{

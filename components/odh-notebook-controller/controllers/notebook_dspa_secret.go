@@ -26,6 +26,7 @@ import (
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -56,7 +57,12 @@ func getDashboardInstance(ctx context.Context, dynamicClient dynamic.Interface, 
 	obj, err := dynamicClient.Resource(dashboardGVR).Get(ctx, dashboardInstanceName, metav1.GetOptions{})
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			// Skipping as Dashboard CR not found (optional cr)
+			// Skipping as Dashboard CR not found (optional CR)
+			return nil, nil
+		}
+		// Catch "no matches for kind" when CRD is missing
+		if meta.IsNoMatchError(err) {
+			log.Info("Dashboard CRD is not installed in the cluster — skipping")
 			return nil, nil
 		}
 		log.Error(err, "Failed to retrieve Dashboard CR", "name", dashboardInstanceName)
@@ -70,37 +76,23 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 	dspa := &dspav1.DataSciencePipelinesApplication{}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: dspaInstanceName, Namespace: namespace}, dspa)
 	if err != nil {
+		// Skipping as DSPA CR not found in namespace (optional CR)
 		if apierrs.IsNotFound(err) {
-			// Skipping as DSPA CR not found (optional cr)
+			return nil, nil
+		}
+		// Catch "no matches for kind" when CRD is missing
+		if meta.IsNoMatchError(err) {
+			log.Info("DSPA CRD is not installed in the cluster — skipping")
 			return nil, nil
 		}
 		log.Error(err, "Failed to retrieve DSPA CR", "name", dspaInstanceName, "namespace", namespace)
 		return nil, err
 	}
-
 	return dspa, nil
 }
 
 // extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and dashboard CRs used for pipeline execution.
 func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
-
-	// Dashboard is optional.  Default to an empty URL if the CR is absent.
-	publicAPIEndpoint := ""
-	if len(dashboardInstance) != 0 {
-		if status, ok := dashboardInstance["status"]; ok {
-			if statusMap, ok := status.(map[string]interface{}); ok {
-				if urlVal, ok := statusMap["url"].(string); ok && urlVal != "" {
-					publicAPIEndpoint = fmt.Sprintf("https://%s/experiments/%s/", urlVal, notebook.Namespace)
-				} else {
-					log.Info("Dashboard CR: missing or empty 'url' in status")
-				}
-			} else {
-				log.Info("Dashboard CR: 'status' is not a mapped")
-			}
-		} else {
-			log.Info("Dashboard CR: missing 'status' field")
-		}
-	}
 
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
@@ -145,24 +137,38 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[st
 	}
 
 	// Construct Elyra-compatible config
+	metadata := map[string]interface{}{
+		"tags":          []string{},
+		"display_name":  "Data Science Pipeline",
+		"engine":        "Argo",
+		"runtime_type":  "KUBEFLOW_PIPELINES",
+		"auth_type":     "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
+		"cos_auth_type": "KUBERNETES_SECRET",
+		"api_endpoint":  apiEndpoint,
+		"cos_endpoint":  cosEndpoint,
+		"cos_bucket":    cosBucket,
+		"cos_username":  string(usernameVal),
+		"cos_password":  string(passwordVal),
+		"cos_secret":    cosSecret,
+	}
+
+	// Extract optional Dashboard public API URL if exists and append it on the metadata
+	if len(dashboardInstance) == 0 {
+		log.Info("Dashboard CR: not present or empty")
+	} else if status, ok := dashboardInstance["status"].(map[string]interface{}); !ok {
+		log.Info("Dashboard CR: 'status' field is missing or invalid")
+	} else if dashboardURL, ok := status["url"].(string); !ok || dashboardURL == "" {
+		log.Info("Dashboard CR: 'url' field is missing or empty")
+	} else {
+		publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
+		metadata["public_api_endpoint"] = publicAPIEndpoint
+	}
+
+	// Return the full runtime config
 	return map[string]interface{}{
 		"display_name": "Data Science Pipeline",
 		"schema_name":  "kfp",
-		"metadata": map[string]interface{}{
-			"tags":                []string{},
-			"display_name":        "Data Science Pipeline",
-			"engine":              "Argo",
-			"runtime_type":        "KUBEFLOW_PIPELINES",
-			"auth_type":           "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
-			"cos_auth_type":       "KUBERNETES_SECRET",
-			"public_api_endpoint": publicAPIEndpoint,
-			"api_endpoint":        apiEndpoint,
-			"cos_endpoint":        cosEndpoint,
-			"cos_bucket":          cosBucket,
-			"cos_username":        string(usernameVal),
-			"cos_password":        string(passwordVal),
-			"cos_secret":          cosSecret,
-		},
+		"metadata":     metadata,
 	}, nil
 }
 
@@ -181,7 +187,6 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	}
 	// Dashboard CR not found (optional cr)
 	if dashboardInstance == nil {
-		log.Info("Dashboard CR not present - will create Elyra secret with empty dashboard_url")
 		dashboardInstance = map[string]interface{}{}
 	}
 
@@ -189,11 +194,11 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	if err != nil {
 		return err
 	}
-	// Neither DSPA nor Dashboard CRs are present — skipping Elyra secret creatio
+	// Neither DSPA nor Dashboard CRs are present — skipping Elyra secret creation
 	if dspaInstance == nil && len(dashboardInstance) == 0 {
 		return nil
 	}
-	// Skipping Elyra secret creation; DSPA CR not found (optional cr)
+	// Skipping Elyra secret creation; DSPA CR not found (optional cr but madatory for secret creation)
 	if dspaInstance == nil {
 		return nil
 	}
