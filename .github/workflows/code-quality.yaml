@@ -112,6 +112,12 @@ jobs:
               git diff
               exit 1
           fi
+          
+  code-static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       # This simply checks that the manifests and respective kustomization.yaml finishes without an error.
       - name: Check kustomize manifest
         id: kustomize-manifests
