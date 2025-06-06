@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -355,6 +356,17 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
+
+		// // Mount Secret ds-pipeline-config
+		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+			// Mount Secret ds-pipeline-config
+			err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
+			if err != nil {
+				log.Error(err, "Unable to mount Elyra runtime config volume")
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+		}
+
 	}
 
 	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
@@ -383,6 +395,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	updatePendingAnnotation := "notebooks.opendatahub.io/update-pending"
+	// Initialize annotations to avoid panic error when map nil
+	if mutatedNotebook.Annotations == nil {
+		mutatedNotebook.Annotations = make(map[string]string)
+	}
 	if needsRestart != NoPendingUpdates {
 		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {
@@ -458,6 +474,12 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 	// Nothing about the Pod definition is actually changing and we can proceed
 	if equality.Semantic.DeepEqual(oldNotebook.Spec.Template.Spec, mutatedNotebook.Spec.Template.Spec) {
 		log.Info("Not blocking update, the pod template is not being modified at all")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// If generation is 1, allow updates on initial generation of the notebook CR
+	if updatedNotebook.GetGeneration() == 1 {
+		log.Info("Not blocking update, this is the initial generation of the Notebook")
 		return mutatedNotebook, NoPendingUpdates, nil
 	}
 
