@@ -73,6 +73,9 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 const (
 	IMAGE_STREAM_NOT_FOUND_EVENT     = "imagestream-not-found"
 	IMAGE_STREAM_TAG_NOT_FOUND_EVENT = "imagestream-tag-not-found"
+
+	WorkbenchImageNamespaceAnnotation = "opendatahub.io/workbench-image-namespace"
+	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -716,7 +719,7 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 
 	annotations := notebook.GetAnnotations()
 	if annotations != nil {
-		if imageSelection, exists := annotations["notebooks.opendatahub.io/last-image-selection"]; exists {
+		if imageSelection, exists := annotations[LastImageSelectionAnnotation]; exists {
 
 			containerFound := false
 			// Iterate over containers to find the one matching the notebook name
@@ -743,35 +746,34 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 					imagestreamName := imageSelected[0]
 					imgSelection := &imagev1.ImageStream{}
 
-					// Search for the ImageStream in the controller namespace first
-					// As default, the ImageStream is created in the controller namespace
-					// if not found, search in the notebook namespace
-					// Note: This is in this order, so users should not overwrite the ImageStream
-					err := cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: controllerNamespace}, imgSelection)
+					imageNamespace, nsExists := annotations[WorkbenchImageNamespaceAnnotation]
+					if !nsExists {
+						log.Info("Unable to find the namespace annotation in the Notebook CR, will search in controller namespace",
+							"annotationName", WorkbenchImageNamespaceAnnotation,
+							"controllerNamespace", controllerNamespace)
+						imageNamespace = controllerNamespace
+					}
+
+					// Search for the ImageStream in the specified namespace
+					// As default when no namespace specified, the ImageStream is searched for in the controller namespace
+					err := cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: imageNamespace}, imgSelection)
 					if apierrs.IsNotFound(err) {
-						log.Info("Unable to find the ImageStream in controller namespace, try finding in notebook namespace", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
-						// Check if the ImageStream is present in the notebook namespace
-						err = cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: notebook.Namespace}, imgSelection)
-						if err != nil {
-							log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
-							span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
-						} else {
-							// ImageStream found in the notebook namespace
-							imagestreamFound = true
-							log.Info("ImageStream found in notebook namespace", "imagestream", imagestreamName, "namespace", notebook.Namespace)
-						}
+						span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
+						log.Info("Unable to find the ImageStream in the expected namespace",
+							"imagestream", imagestreamName,
+							"imageNamespace", imageNamespace)
 					} else if err != nil {
-						log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
+						log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "imageNamespace", imageNamespace)
 					} else {
-						// ImageStream found in the controller namespace
+						// ImageStream found
 						imagestreamFound = true
-						log.Info("ImageStream found in controller namespace", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
+						log.Info("ImageStream found", "imagestream", imagestreamName, "namespace", imageNamespace)
 					}
 
 					if imagestreamFound {
 						// Check if the ImageStream has a status and tags
 						if imgSelection.Status.Tags == nil {
-							log.Error(nil, "ImageStream has no status or tags", "name", imagestreamName, "namespace", controllerNamespace)
+							log.Error(nil, "ImageStream has no status or tags", "name", imagestreamName, "namespace", imageNamespace)
 							span.AddEvent(IMAGE_STREAM_TAG_NOT_FOUND_EVENT)
 							return fmt.Errorf("ImageStream has no status or tags")
 						}
