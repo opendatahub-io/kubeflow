@@ -746,9 +746,12 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 					imagestreamName := imageSelected[0]
 					imgSelection := &imagev1.ImageStream{}
 
+					// in user-created Notebook CRs, the annotation may be missing
+					// Dashboard creates it with an empty value (null in TypeScript) when the controllerNamespace is intended
+					//  https://github.com/opendatahub-io/odh-dashboard/blob/2692224c3157f00a6fe93a2ca5bd267e3ff964ca/frontend/src/api/k8s/notebooks.ts#L215-L216
 					imageNamespace, nsExists := annotations[WorkbenchImageNamespaceAnnotation]
-					if !nsExists {
-						log.Info("Unable to find the namespace annotation in the Notebook CR, will search in controller namespace",
+					if !nsExists || strings.TrimSpace(imageNamespace) == "" {
+						log.Info("Unable to find the namespace annotation in the Notebook CR, or the value of it is an empty string. Will search in controller namespace",
 							"annotationName", WorkbenchImageNamespaceAnnotation,
 							"controllerNamespace", controllerNamespace)
 						imageNamespace = controllerNamespace

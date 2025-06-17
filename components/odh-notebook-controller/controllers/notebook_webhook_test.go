@@ -99,6 +99,8 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 						Namespace: Namespace,
 						Annotations: map[string]string{
 							"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
+							// dashboard gives an empty string here to mean the image is from the operator's namespace
+							"opendatahub.io/workbench-image-namespace": "",
 						},
 					},
 					Spec: nbv1.NotebookSpec{
