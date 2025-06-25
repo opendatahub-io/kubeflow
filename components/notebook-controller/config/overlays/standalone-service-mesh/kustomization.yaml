@@ -4,7 +4,6 @@ resources:
 - ../openshift
 - gateway.yaml
 - gateway-route.yaml
-- cert-secret.yaml
 - smm.yaml
 namespace: odh-notebook-controller-system
 
@@ -24,15 +23,6 @@ patches:
     group: route.openshift.io
     kind: Route
     name: opendatahub-odh-gateway
-    namespace: odh-notebook-controller-system
-    version: v1
-- patch: |-
-    - op: replace
-      path: /metadata/namespace
-      value: istio-system
-  target:
-    kind: Secret
-    name: odh-dashboard-cert
     namespace: odh-notebook-controller-system
     version: v1
 - patch: |-
