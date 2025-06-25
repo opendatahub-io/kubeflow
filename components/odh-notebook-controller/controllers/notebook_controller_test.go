@@ -1349,22 +1349,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 })
 
-func createNotebook(name, namespace string) *nbv1.Notebook {
-	return &nbv1.Notebook{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: nbv1.NotebookSpec{
-			Template: nbv1.NotebookTemplateSpec{
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{
-					Name:  name,
-					Image: "registry.redhat.io/ubi8/ubi:latest",
-				}}}},
-		},
-	}
-}
-
 func getRouteFromList(route *routev1.Route, notebook *nbv1.Notebook, name, namespace string) (*routev1.Route, error) {
 	routeList := &routev1.RouteList{}
 	opts := []client.ListOption{

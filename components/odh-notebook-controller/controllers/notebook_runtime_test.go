@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -18,418 +19,270 @@ import (
 )
 
 const (
-	resource_reconciliation_timeout      = time.Second * 30
-	resource_reconciliation_check_period = time.Second * 2
-	Namespace                            = "default"
-	RuntimeImagesCMName                  = "pipeline-runtime-images"
-	expectedMountName                    = "runtime-images"
-	expectedMountPath                    = "/opt/app-root/pipeline-runtimes/"
+	resourceReconciliationTimeout     = time.Second * 30
+	resourceReconciliationCheckPeriod = time.Second * 2
+	testNamespace                     = "default"
+	runtimeImagesCMName               = "pipeline-runtime-images"
+	expectedMountName                 = "runtime-images"
+	expectedMountPath                 = "/opt/app-root/pipeline-runtimes/"
 )
 
-var _ = Describe("Runtime images ConfigMap should be mounted", func() {
+// Check common Notebook volume and volume mount expectations
+func expectNotebookVolumesAndMounts(ctx context.Context, notebookName, namespace string, expectedCM bool) {
+	typedNotebook := &nbv1.Notebook{}
+	Eventually(func(g Gomega) error {
+		err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: namespace}, typedNotebook)
+		if err != nil {
+			return err
+		}
+
+		c := typedNotebook.Spec.Template.Spec.Containers[0]
+
+		foundMount := false
+		for _, vm := range c.VolumeMounts {
+			if vm.Name == expectedMountName && vm.MountPath == expectedMountPath {
+				foundMount = true
+				break // Found it, no need to check further
+			}
+		}
+
+		// Check volumeMounts
+		if expectedCM {
+			g.Expect(foundMount).To(BeTrue(), "expected VolumeMount not found")
+		} else {
+			g.Expect(foundMount).To(BeFalse(), "unexpected VolumeMount found")
+		}
+
+		foundVolume := false
+		for _, v := range typedNotebook.Spec.Template.Spec.Volumes {
+			if v.Name == expectedMountName && v.ConfigMap != nil && v.ConfigMap.Name == runtimeImagesCMName {
+				foundVolume = true
+				break // Found it
+			}
+		}
+
+		// Check volumes
+		if expectedCM {
+			g.Expect(foundVolume).To(BeTrue(), "expected ConfigMap volume not found")
+		} else {
+			g.Expect(foundVolume).To(BeFalse(), "unexpected ConfigMap volume found")
+		}
+
+		return nil
+	}, resourceReconciliationTimeout, resourceReconciliationCheckPeriod).Should(Succeed())
+}
+
+var _ = Describe("Runtime Images ConfigMap Mounting", func() {
 	ctx := context.Background()
 
-	When("Empty ConfigMap for runtime images", func() {
-
-		BeforeEach(func() {
-			err := cli.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: odhNotebookControllerTestNamespace}}, &client.CreateOptions{})
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				Expect(err).ToNot(HaveOccurred())
-			}
-		})
-
+	When("Runtime images ConfigMap is empty or irrelevant", func() {
 		testCases := []struct {
-			name         string
-			notebook     *nbv1.Notebook
-			notebookName string
-			ConfigMap    *corev1.ConfigMap
+			name        string
+			configMap   *corev1.ConfigMap
+			description string
 		}{
 			{
-				name:         "ConfigMap without data",
-				notebookName: "test-notebook-runtime-empty-cf",
-				ConfigMap: &corev1.ConfigMap{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ConfigMap",
-						APIVersion: "v1",
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      RuntimeImagesCMName,
-						Namespace: Namespace,
-					},
-					Data: map[string]string{},
-				},
+				name:        "ConfigMap without data",
+				description: "the Notebook should not have the ConfigMap mounted",
+				configMap:   createRuntimeConfigMap(runtimeImagesCMName, testNamespace, map[string]string{}),
 			},
 		}
 
-		for _, testCase := range testCases {
-			Context(fmt.Sprintf("The Notebook runtime pipeline images ConfigMap test case: %s", testCase.name), func() {
-				notebook := createNotebook(testCase.notebookName, Namespace)
-				configMap := &corev1.ConfigMap{}
-				It(fmt.Sprintf("Should mount ConfigMap correctly: %s", testCase.name), func() {
+		for _, tc := range testCases {
+			Context(fmt.Sprintf("with a %s", tc.name), func() {
+				notebookName := strings.ToLower(fmt.Sprintf("test-notebook-runtime-%s", strings.ReplaceAll(tc.name, " ", "-")))
+				notebook := createNotebook(notebookName, testNamespace)
 
-					// cleanup first
+				BeforeEach(func() {
+					err := cli.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: odhNotebookControllerTestNamespace}}, &client.CreateOptions{})
+					if err != nil && !apierrs.IsAlreadyExists(err) {
+						Expect(err).ToNot(HaveOccurred())
+					}
+
 					_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
-					_ = cli.Delete(ctx, testCase.ConfigMap, &client.DeleteOptions{})
+					_ = cli.Delete(ctx, tc.configMap, &client.DeleteOptions{})
 
-					// wait until deleted
-					By("Waiting for the Notebook to be deleted")
-					Eventually(func(g Gomega) {
-						err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, &nbv1.Notebook{})
-						g.Expect(apierrs.IsNotFound(err)).To(BeTrue(), fmt.Sprintf("expected Notebook %q to be deleted", testCase.notebookName))
-					}).WithOffset(1).Should(Succeed())
+					By(fmt.Sprintf("Waiting for the Notebook %q to be deleted", notebookName))
+					Eventually(func() bool {
+						err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: testNamespace}, &nbv1.Notebook{})
+						return apierrs.IsNotFound(err)
+					}).WithOffset(1).Should(BeTrue(), fmt.Sprintf("expected Notebook %q to be deleted", notebookName))
 
-					// test code start
-					By("Create the ConfigMap directly")
-					Expect(cli.Create(ctx, testCase.ConfigMap)).To(Succeed())
+					By(fmt.Sprintf("Waiting for ConfigMap %q to be deleted", tc.configMap.Name))
+					Eventually(func() bool {
+						err := cli.Get(ctx, client.ObjectKey{Name: tc.configMap.Name, Namespace: tc.configMap.Namespace}, &corev1.ConfigMap{})
+						return apierrs.IsNotFound(err)
+					}).WithOffset(1).Should(BeTrue(), fmt.Sprintf("expected ConfigMap %q to be deleted", tc.configMap.Name))
+				})
+
+				It(fmt.Sprintf("should behave as expected: %s", tc.description), func() {
+					By("Creating the ConfigMap directly")
+					Expect(cli.Create(ctx, tc.configMap)).To(Succeed())
 
 					By("Creating the Notebook")
 					Expect(cli.Create(ctx, notebook)).To(Succeed())
 
-					By("Fetching the ConfigMap for the runtime images")
-					Eventually(func(g Gomega) {
-						err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: Namespace}, configMap)
-						g.Expect(err).ToNot(HaveOccurred())
-					}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
-
-					// Check volumeMounts
-					By("Fetching the created Notebook CR as typed object and volumeMounts check")
-					typedNotebook := &nbv1.Notebook{}
-					Eventually(func(g Gomega) {
-						err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, typedNotebook)
-						g.Expect(err).ToNot(HaveOccurred())
-
-						c := typedNotebook.Spec.Template.Spec.Containers[0]
-
-						foundMount := false
-						for _, vm := range c.VolumeMounts {
-							if vm.Name == expectedMountName && vm.MountPath == expectedMountPath {
-								foundMount = true
-							}
-						}
-
-						g.Expect(foundMount).To(BeFalse(), "unexpected VolumeMount found")
-					}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
-
-					// Check volumes
-					foundVolume := false
-					for _, v := range typedNotebook.Spec.Template.Spec.Volumes {
-						if v.Name == expectedMountName && v.ConfigMap != nil && v.ConfigMap.Name == RuntimeImagesCMName {
-							foundVolume = true
-						}
-					}
-					Expect(foundVolume).To(BeFalse(), "unexpected ConfigMap volume found")
+					// Call the helper without the Gomega parameter
+					expectNotebookVolumesAndMounts(ctx, notebookName, testNamespace, false)
 				})
+
 				AfterEach(func() {
-					By("Deleting the created resources")
-					Expect(cli.Delete(ctx, notebook, &client.DeleteOptions{})).To(Succeed())
-					Expect(cli.Delete(ctx, configMap, &client.DeleteOptions{})).To(Succeed())
+					By("Deleting created resources after test")
+					_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
+					_ = cli.Delete(ctx, tc.configMap, &client.DeleteOptions{})
 				})
 			})
 		}
 	})
 
-	When("Creating a Notebook", func() {
-
-		BeforeEach(func() {
-			err := cli.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: odhNotebookControllerTestNamespace}}, &client.CreateOptions{})
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				Expect(err).ToNot(HaveOccurred())
-			}
-		})
-
+	When("ImageStream data leads to a runtime images ConfigMap", func() {
 		testCases := []struct {
 			name                  string
-			notebook              *nbv1.Notebook
-			notebookName          string
-			expectedConfigMapData map[string]string
 			imageStream           *imagev1.ImageStream
+			expectedConfigMapData map[string]string
+			expectCMMounted       bool
 		}{
 			{
-				name:         "ImageStream with two tags",
-				notebookName: "test-notebook-runtime-1",
+				name: "ImageStream with two valid tags",
+				imageStream: createRuntimeImageStream("some-image", odhNotebookControllerTestNamespace, []imagev1.TagReference{
+					{
+						Name: "some-tag",
+						Annotations: map[string]string{
+							"opendatahub.io/runtime-image-metadata": `[{"display_name":"Python 3.11 (UBI9)","metadata":{"tags":["some-tag"],"display_name":"Python 3.11 (UBI9)","pull_policy":"IfNotPresent"},"schema_name":"runtime-image"}]`,
+						},
+						From: &corev1.ObjectReference{Kind: "DockerImage", Name: "quay.io/opendatahub/test"},
+					},
+					{
+						Name: "some-tag2",
+						Annotations: map[string]string{
+							"opendatahub.io/runtime-image-metadata": `[{"display_name":"Hohoho Python 3.12 (UBI9)","metadata":{"tags":["some-tag2"],"display_name":"Python 3.12 (UBI9)","pull_policy":"IfNotPresent"},"schema_name":"runtime-image"}]`,
+						},
+						From: &corev1.ObjectReference{Kind: "DockerImage", Name: "quay.io/opendatahub/test2"},
+					},
+				}),
 				expectedConfigMapData: map[string]string{
 					"python-3.11-ubi9.json":        `{"display_name":"Python 3.11 (UBI9)","metadata":{"display_name":"Python 3.11 (UBI9)","image_name":"quay.io/opendatahub/test","pull_policy":"IfNotPresent","tags":["some-tag"]},"schema_name":"runtime-image"}`,
 					"hohoho-python-3.12-ubi9.json": `{"display_name":"Hohoho Python 3.12 (UBI9)","metadata":{"display_name":"Python 3.12 (UBI9)","image_name":"quay.io/opendatahub/test2","pull_policy":"IfNotPresent","tags":["some-tag2"]},"schema_name":"runtime-image"}`,
 				},
-				imageStream: &imagev1.ImageStream{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ImageStream",
-						APIVersion: "image.openshift.io/v1",
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "some-image",
-						Namespace: "redhat-ods-applications",
-						Labels: map[string]string{
-							"opendatahub.io/runtime-image": "true",
-						},
-					},
-					Spec: imagev1.ImageStreamSpec{
-						LookupPolicy: imagev1.ImageLookupPolicy{
-							Local: true,
-						},
-						Tags: []imagev1.TagReference{
-							{
-								Name: "some-tag",
-								Annotations: map[string]string{
-									"opendatahub.io/runtime-image-metadata": `
-										[
-											{
-												"display_name": "Python 3.11 (UBI9)",
-												"metadata": {
-													"tags": [
-														"some-tag"
-													],
-													"display_name": "Python 3.11 (UBI9)",
-													"pull_policy": "IfNotPresent"
-												},
-												"schema_name": "runtime-image"
-											}
-										]
-									`,
-								},
-								From: &corev1.ObjectReference{
-									Kind: "DockerImage",
-									Name: "quay.io/opendatahub/test",
-								},
-							},
-							{
-								Name: "some-tag2",
-								Annotations: map[string]string{
-									"opendatahub.io/runtime-image-metadata": `
-										[
-											{
-												"display_name": "Hohoho Python 3.12 (UBI9)",
-												"metadata": {
-													"tags": [
-														"some-tag2"
-													],
-													"display_name": "Python 3.12 (UBI9)",
-													"pull_policy": "IfNotPresent"
-												},
-												"schema_name": "runtime-image"
-											}
-										]
-									`,
-								},
-								From: &corev1.ObjectReference{
-									Kind: "DockerImage",
-									Name: "quay.io/opendatahub/test2",
-								},
-							},
-						},
-					},
-				},
+				expectCMMounted: true,
 			},
 			{
-				name:         "ImageStream with one tag",
-				notebookName: "test-notebook-runtime-2",
+				name: "ImageStream with one valid tag",
+				imageStream: createRuntimeImageStream("some-image", odhNotebookControllerTestNamespace, []imagev1.TagReference{
+					{
+						Name: "some-tag",
+						Annotations: map[string]string{
+							"opendatahub.io/runtime-image-metadata": `[{"display_name":"Python 3.11 (UBI9)","metadata":{"tags":["some-tag"],"display_name":"Python 3.11 (UBI9)","pull_policy":"IfNotPresent"},"schema_name":"runtime-image"}]`,
+						},
+						From: &corev1.ObjectReference{Kind: "DockerImage", Name: "quay.io/modh/odh-pipeline-runtime-datascience-cpu-py311-ubi9@sha256:5aa8868be00f304084ce6632586c757bc56b28300779495d14b08bcfbcd3357f"},
+					},
+				}),
 				expectedConfigMapData: map[string]string{
 					"python-3.11-ubi9.json": `{"display_name":"Python 3.11 (UBI9)","metadata":{"display_name":"Python 3.11 (UBI9)","image_name":"quay.io/modh/odh-pipeline-runtime-datascience-cpu-py311-ubi9@sha256:5aa8868be00f304084ce6632586c757bc56b28300779495d14b08bcfbcd3357f","pull_policy":"IfNotPresent","tags":["some-tag"]},"schema_name":"runtime-image"}`,
 				},
-				imageStream: &imagev1.ImageStream{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ImageStream",
-						APIVersion: "image.openshift.io/v1",
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "some-image",
-						Namespace: "redhat-ods-applications",
-						Labels: map[string]string{
-							"opendatahub.io/runtime-image": "true",
-						},
-					},
-					Spec: imagev1.ImageStreamSpec{
-						LookupPolicy: imagev1.ImageLookupPolicy{
-							Local: true,
-						},
-						Tags: []imagev1.TagReference{
-							{
-								Name: "some-tag",
-								Annotations: map[string]string{
-									"opendatahub.io/runtime-image-metadata": `
-										[
-											{
-												"display_name": "Python 3.11 (UBI9)",
-												"metadata": {
-													"tags": [
-														"some-tag"
-													],
-													"display_name": "Python 3.11 (UBI9)",
-													"pull_policy": "IfNotPresent"
-												},
-												"schema_name": "runtime-image"
-											}
-										]
-									`,
-								},
-								From: &corev1.ObjectReference{
-									Kind: "DockerImage",
-									Name: "quay.io/modh/odh-pipeline-runtime-datascience-cpu-py311-ubi9@sha256:5aa8868be00f304084ce6632586c757bc56b28300779495d14b08bcfbcd3357f",
-								},
-							},
-						},
-					},
-				},
+				expectCMMounted: true,
 			},
 			{
-				name:                  "ImageStream with irrelevant data",
-				notebookName:          "test-notebook-runtime-3",
-				expectedConfigMapData: nil,
-				imageStream: &imagev1.ImageStream{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ImageStream",
-						APIVersion: "image.openshift.io/v1",
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "some-image",
-						Namespace: "redhat-ods-applications",
-						Labels: map[string]string{
-							"opendatahub.io/runtime-image": "true",
+				name: "ImageStream with irrelevant data",
+				imageStream: createRuntimeImageStream("some-image", odhNotebookControllerTestNamespace, []imagev1.TagReference{
+					{
+						Name: "some-tag",
+						Annotations: map[string]string{
+							"opendatahub.io/runtime-image-metadata-fake": `[{"display_name":"Python 3.11 (UBI9)","metadata":{"tags":["some-tag"],"display_name":"Python 3.11 (UBI9)","pull_policy":"IfNotPresent"},"schema_name":"runtime-image-fake"}]`,
 						},
+						From: &corev1.ObjectReference{Kind: "DockerImage", Name: "quay.io/opendatahub/test"},
 					},
-					Spec: imagev1.ImageStreamSpec{
-						LookupPolicy: imagev1.ImageLookupPolicy{
-							Local: true,
-						},
-						Tags: []imagev1.TagReference{
-							{
-								Name: "some-tag",
-								Annotations: map[string]string{
-									"opendatahub.io/runtime-image-metadata-fake": `
-										[
-											{
-												"display_name": "Python 3.11 (UBI9)",
-												"metadata": {
-													"tags": [
-														"some-tag"
-													],
-													"display_name": "Python 3.11 (UBI9)",
-													"pull_policy": "IfNotPresent"
-												},
-												"schema_name": "runtime-image-fake"
-											}
-										]
-									`,
-								},
-								From: &corev1.ObjectReference{
-									Kind: "DockerImage",
-									Name: "quay.io/opendatahub/test",
-								},
-							},
-						},
-					},
-				},
+				}),
+				expectedConfigMapData: nil, // Expect no ConfigMap data for this case
+				expectCMMounted:       false,
 			},
 		}
 
-		for _, testCase := range testCases {
-			Context(fmt.Sprintf("The Notebook runtime pipeline images ConfigMap test case: %s", testCase.name), func() {
-				notebook := createNotebook(testCase.notebookName, Namespace)
+		for _, tc := range testCases {
+			Context(fmt.Sprintf("with %s", tc.name), func() {
+				notebookName := strings.ToLower(fmt.Sprintf("test-notebook-runtime-%s", strings.ReplaceAll(tc.name, " ", "-")))
+				notebook := createNotebook(notebookName, testNamespace)
 				configMap := &corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      RuntimeImagesCMName,
-						Namespace: Namespace,
+						Name:      runtimeImagesCMName,
+						Namespace: testNamespace,
 					},
 				}
-				It(fmt.Sprintf("Should mount ConfigMap correctly: %s", testCase.name), func() {
 
-					// cleanup first
+				BeforeEach(func() {
+					err := cli.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: odhNotebookControllerTestNamespace}}, &client.CreateOptions{})
+					if err != nil && !apierrs.IsAlreadyExists(err) {
+						Expect(err).ToNot(HaveOccurred())
+					}
+
 					_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
-					_ = cli.Delete(ctx, testCase.imageStream, &client.DeleteOptions{})
-					_ = cli.Delete(ctx, configMap, &client.DeleteOptions{})
+					_ = cli.Delete(ctx, tc.imageStream, &client.DeleteOptions{})
+					_ = cli.Delete(ctx, configMap, &client.DeleteOptions{}) // Attempt to delete, ignore if not found
 
-					// wait until deleted
-					By("Waiting for the Notebook to be deleted")
-					Eventually(func(g Gomega) {
-						err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, &nbv1.Notebook{})
-						g.Expect(apierrs.IsNotFound(err)).To(BeTrue(), fmt.Sprintf("expected Notebook %q to be deleted", testCase.notebookName))
-					}).WithOffset(1).Should(Succeed())
+					By(fmt.Sprintf("Waiting for the Notebook %q to be deleted", notebookName))
+					Eventually(func() bool {
+						err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: testNamespace}, &nbv1.Notebook{})
+						return apierrs.IsNotFound(err)
+					}).WithOffset(1).Should(BeTrue(), fmt.Sprintf("expected Notebook %q to be deleted", notebookName))
 
-					// test code start
-					By("Create the ImageStream")
-					Expect(cli.Create(ctx, testCase.imageStream)).To(Succeed())
+					By(fmt.Sprintf("Waiting for ImageStream %q to be deleted", tc.imageStream.Name))
+					Eventually(func() bool {
+						err := cli.Get(ctx, client.ObjectKey{Name: tc.imageStream.Name, Namespace: tc.imageStream.Namespace}, &imagev1.ImageStream{})
+						return apierrs.IsNotFound(err)
+					}).WithOffset(1).Should(BeTrue(), fmt.Sprintf("expected ImageStream %q to be deleted", tc.imageStream.Name))
+				})
+
+				It(fmt.Sprintf("should ensure the ConfigMap is %s and Notebook is %s",
+					func() string {
+						if tc.expectedConfigMapData != nil {
+							return "created and correctly populated"
+						}
+						return "not created"
+					}(),
+					func() string {
+						if tc.expectCMMounted {
+							return "correctly mounted"
+						}
+						return "not mounted"
+					}(),
+				), func() {
+					By("Creating the ImageStream")
+					Expect(cli.Create(ctx, tc.imageStream)).To(Succeed())
 
 					By("Creating the Notebook")
 					Expect(cli.Create(ctx, notebook)).To(Succeed())
 
-					By("Fetching the ConfigMap for the runtime images")
-					if testCase.expectedConfigMapData != nil {
-						Eventually(func(g Gomega) {
-							err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: Namespace}, configMap)
-							g.Expect(err).ToNot(HaveOccurred())
-						}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
+					if tc.expectedConfigMapData != nil {
+						By("Fetching the ConfigMap for the runtime images and checking its content")
+						Eventually(func(g Gomega) error {
+							err := cli.Get(ctx, client.ObjectKey{Name: runtimeImagesCMName, Namespace: testNamespace}, configMap)
+							g.Expect(err).ToNot(HaveOccurred(), "Expected ConfigMap to be created")
+							g.Expect(configMap.GetName()).To(Equal(runtimeImagesCMName))
+							g.Expect(configMap.Data).To(Equal(tc.expectedConfigMapData))
+							return nil // Return nil on success
+						}, resourceReconciliationTimeout, resourceReconciliationCheckPeriod).Should(Succeed())
 
-						// Let's check the content of the ConfigMap created from the given ImageStream.
-						Expect(configMap.GetName()).To(Equal(RuntimeImagesCMName))
-						Expect(configMap.Data).To(Equal(testCase.expectedConfigMapData))
+						// Call the helper without the Gomega parameter
+						expectNotebookVolumesAndMounts(ctx, notebookName, testNamespace, true)
 
-						// Check volumeMounts
-						By("Fetching the created Notebook CR as typed object and volumeMounts check")
-						typedNotebook := &nbv1.Notebook{}
-						Eventually(func(g Gomega) {
-							err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, typedNotebook)
-							g.Expect(err).ToNot(HaveOccurred())
-
-							c := typedNotebook.Spec.Template.Spec.Containers[0]
-
-							foundMount := false
-							for _, vm := range c.VolumeMounts {
-								if vm.Name == expectedMountName && vm.MountPath == expectedMountPath {
-									foundMount = true
-								}
-							}
-							g.Expect(foundMount).To(BeTrue(), "expected VolumeMount not found")
-						}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
-
-						// Check volumes
-						foundVolume := false
-						for _, v := range typedNotebook.Spec.Template.Spec.Volumes {
-							if v.Name == expectedMountName && v.ConfigMap != nil && v.ConfigMap.Name == RuntimeImagesCMName {
-								foundVolume = true
-							}
-						}
-						Expect(foundVolume).To(BeTrue(), "expected ConfigMap volume not found")
 					} else {
-						// The data in the given ImageStream weren't supposed to create a runtime image configmap
-						Eventually(func(g Gomega) {
-							err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: Namespace}, configMap)
-							g.Expect(err).ToNot(HaveOccurred())
-						}, resource_reconciliation_timeout, resource_reconciliation_check_period).ShouldNot(Succeed())
+						By("Verifying the ConfigMap for runtime images is NOT created")
+						Eventually(func() bool {
+							err := cli.Get(ctx, client.ObjectKey{Name: runtimeImagesCMName, Namespace: testNamespace}, configMap)
+							return apierrs.IsNotFound(err)
+						}, resourceReconciliationTimeout, resourceReconciliationCheckPeriod).Should(BeTrue(), "Expected ConfigMap NOT to be created")
 
-						// Check volumeMounts
-						By("Fetching the created Notebook CR as typed object and volumeMounts check")
-						typedNotebook := &nbv1.Notebook{}
-						Eventually(func(g Gomega) {
-							err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, typedNotebook)
-							g.Expect(err).ToNot(HaveOccurred())
-
-							c := typedNotebook.Spec.Template.Spec.Containers[0]
-
-							foundMount := false
-							for _, vm := range c.VolumeMounts {
-								if vm.Name == expectedMountName && vm.MountPath == expectedMountPath {
-									foundMount = true
-								}
-							}
-							g.Expect(foundMount).To(BeTrue(), "expected VolumeMount not found")
-						}, resource_reconciliation_timeout, resource_reconciliation_check_period).ShouldNot(Succeed())
-
-						// Check volumes
-						foundVolume := false
-						for _, v := range typedNotebook.Spec.Template.Spec.Volumes {
-							if v.Name == expectedMountName && v.ConfigMap != nil && v.ConfigMap.Name == RuntimeImagesCMName {
-								foundVolume = true
-							}
-						}
-						Expect(foundVolume).To(BeFalse(), "expected ConfigMap volume not found")
+						// Call the helper without the Gomega parameter
+						expectNotebookVolumesAndMounts(ctx, notebookName, testNamespace, false)
 					}
 				})
+
 				AfterEach(func() {
-					By("Deleting the created resources")
-					Expect(cli.Delete(ctx, notebook, &client.DeleteOptions{})).To(Succeed())
-					Expect(cli.Delete(ctx, testCase.imageStream, &client.DeleteOptions{})).To(Succeed())
-					if testCase.expectedConfigMapData != nil {
-						Expect(cli.Delete(ctx, configMap, &client.DeleteOptions{})).To(Succeed())
+					By("Deleting created resources after test")
+					_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
+					_ = cli.Delete(ctx, tc.imageStream, &client.DeleteOptions{})
+					if tc.expectedConfigMapData != nil { // Only delete if it was expected to be created
+						_ = cli.Delete(ctx, configMap, &client.DeleteOptions{})
 					}
 				})
 			})
