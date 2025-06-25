@@ -1023,114 +1023,112 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		)
 
 		var (
-			notebook        *nbv1.Notebook
-			oauthClient     *oauthv1.OAuthClient
-			oauthClientName string
-			ctx             context.Context
+			notebook    *nbv1.Notebook
+			ctx         context.Context
+			notebookKey types.NamespacedName
 		)
 
-		// Setup for all tests in this context
-		BeforeEach(func() {
-			ctx = context.Background()
-			notebook = createNotebook(Name, Namespace)
-			oauthClientName = fmt.Sprintf("%s-%s-%s", Name, Namespace, "oauth-client")
+		// Initialize context and keys once
+		ctx = context.Background()
+		notebookKey = types.NamespacedName{Name: Name, Namespace: Namespace}
 
-			oauthClient = &oauthv1.OAuthClient{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: oauthClientName,
-				},
-				RedirectURIs: []string{"https://www.kubeflow.org/"},
-				GrantMethod:  oauthv1.GrantHandlerAuto,
-			}
-		})
+		// Create notebook once for all tests - WITH OAUTH ENABLED
+		notebook = createNotebookWithOAuth(Name, Namespace)
 
-		// Clean up resources after each test
-		AfterEach(func() {
-			nbToCleanup := &nbv1.Notebook{}
-			err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nbToCleanup)
-			if err == nil {
-				// Remove finalizers to allow deletion
-				nbToCleanup.Finalizers = nil
-				_ = cli.Update(ctx, nbToCleanup)
-				_ = cli.Delete(ctx, nbToCleanup)
-			}
-
-			oauthClientToCleanup := &oauthv1.OAuthClient{}
-			err = cli.Get(ctx, types.NamespacedName{Name: oauthClientName}, oauthClientToCleanup)
-			if err == nil {
-				_ = cli.Delete(ctx, oauthClientToCleanup)
-			}
-		})
-
-		It("Should add a finalizer when a Notebook has been created", func() {
+		It("Should create a Notebook CR successfully", func() {
 			By("Creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			By("Creating an OAuthClient")
-			err := cli.Create(ctx, oauthClient)
-			if err != nil {
-				GinkgoT().Logf("OAuthClient creation result: %v", err)
-			}
-
-			By("Adding the finalizer to the Notebook")
-			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-
-			notebook.Finalizers = append(notebook.Finalizers, Finalizer)
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-
-			By("Verifying the finalizer is added to the Notebook")
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-			Expect(notebook.Finalizers).To(ContainElement(Finalizer))
+			// Wait for the Reconciler to create the route, or else the OAuth reconciler
+			// cannot create the OAuthClient object
+			time.Sleep(3 * time.Second)
 		})
 
-		It("Should delete the OAuthClient when the Notebook is deleted", func() {
-			By("Creating a Notebook with finalizer")
-			notebook.Finalizers = []string{Finalizer}
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-
-			By("Creating an OAuthClient")
-			Expect(cli.Create(ctx, oauthClient)).Should(Succeed())
-
-			By("Requesting deletion of the Notebook")
-			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
-
-			By("Checking if the controller deletes the OAuthClient")
-			oauthClientKey := types.NamespacedName{Name: oauthClientName}
-
-			// First verify that the OAuthClient exists initially
-			Expect(cli.Get(ctx, oauthClientKey, oauthClient)).Should(Succeed())
-
-			// Log the notebook state for debugging
-			key := types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}
-			nb := &nbv1.Notebook{}
-			if err := cli.Get(ctx, key, nb); err == nil {
-				hasTimestamp := "no"
-				if nb.DeletionTimestamp != nil {
-					hasTimestamp = "yes"
+		It("Should have finalizer set by controller or webhook", func() {
+			By("Waiting for controller to add the finalizer")
+			Eventually(func() []string {
+				var updated nbv1.Notebook
+				err := cli.Get(ctx, notebookKey, &updated)
+				if err != nil {
+					return nil
 				}
-				GinkgoT().Logf("Notebook state: exists=true, has deletion timestamp=%s, finalizers=%v",
-					hasTimestamp, nb.Finalizers)
-			} else {
-				GinkgoT().Logf("Notebook state: exists=false, error=%v", err)
-			}
+				return updated.Finalizers
+			}, duration, interval).Should(ContainElement(Finalizer),
+				"Expected finalizer '%s' to be added by controller", Finalizer)
+		})
 
-			// Wait for the controller to potentially delete the OAuthClient
-			// without any manual intervention
-			time.Sleep(5 * time.Second)
+		It("Should create OAuthClient for the Notebook CR", func() {
+			By("Ensuring finalizer exists first")
+			Eventually(func() []string {
+				var updated nbv1.Notebook
+				cli.Get(ctx, notebookKey, &updated)
+				return updated.Finalizers
+			}, duration, interval).Should(ContainElement(Finalizer))
 
-			// Check and log the final state
-			client := &oauthv1.OAuthClient{}
-			err := cli.Get(ctx, oauthClientKey, client)
-			if apierrors.IsNotFound(err) {
-				GinkgoT().Logf("OAuthClient was successfully deleted by the controller")
-			} else if err != nil {
-				GinkgoT().Logf("Error checking OAuthClient: %v", err)
-			} else {
-				GinkgoT().Logf("OAuthClient still exists, which suggests the controller isn't handling deletion in the test environment")
-			}
+			By("Waiting for controller to create OAuthClient")
+			oauthClientKey := types.NamespacedName{Name: Name + "-" + Namespace + "-oauth-client"}
+			createdOAuthClient := &oauthv1.OAuthClient{}
+			Eventually(func() error {
+				return cli.Get(ctx, oauthClientKey, createdOAuthClient)
+			}, time.Second*90, time.Second*3).Should(Succeed(),
+				"Expected OAuthClient to be created by odh-notebook-controller")
 
-			// No assertion here - we're just observing behavior
+			By("Verifying OAuthClient has proper labels")
+			Expect(createdOAuthClient.Labels).Should(
+				HaveKeyWithValue("notebook-owner", Name),
+				"OAuthClient should have labels linking it to the notebook")
+		})
+
+		It("Should delete OAuthClient when Notebook is deleted", func() {
+			By("Ensuring prerequisite resources exist")
+			Eventually(func() []string {
+				var updated nbv1.Notebook
+				cli.Get(ctx, notebookKey, &updated)
+				return updated.Finalizers
+			}, duration, interval).Should(ContainElement(Finalizer))
+
+			oauthClientKey := types.NamespacedName{Name: Name + "-" + Namespace + "-oauth-client"}
+			Eventually(func() error {
+				return cli.Get(ctx, oauthClientKey, &oauthv1.OAuthClient{})
+			}, duration, interval).Should(Succeed())
+
+			By("Deleting the notebook")
+			var notebookToDelete nbv1.Notebook
+			Expect(cli.Get(ctx, notebookKey, &notebookToDelete)).Should(Succeed())
+			Expect(cli.Delete(ctx, &notebookToDelete)).Should(Succeed())
+
+			By("Verifying notebook is marked for deletion but persists due to finalizer")
+			Eventually(func() bool {
+				var updated nbv1.Notebook
+				err := cli.Get(ctx, notebookKey, &updated)
+				return err == nil && updated.DeletionTimestamp != nil
+			}, duration, interval).Should(BeTrue(),
+				"Notebook should be marked for deletion but persist due to finalizer")
+
+			By("Verifying controller deletes the OAuthClient")
+			Eventually(func() error {
+				var oauth oauthv1.OAuthClient
+				return cli.Get(ctx, oauthClientKey, &oauth)
+			}, time.Second*90, time.Second*3).Should(
+				MatchError(ContainSubstring("not found")),
+				"Expected OAuthClient to be deleted by odh-notebook-controller during finalizer processing")
+		})
+
+		It("Should remove finalizer and delete Notebook after OAuthClient cleanup", func() {
+			By("Verifying OAuthClient was deleted in previous test")
+			oauthClientKey := types.NamespacedName{Name: Name + "-" + Namespace + "-oauth-client"}
+			Eventually(func() error {
+				var oauth oauthv1.OAuthClient
+				return cli.Get(ctx, oauthClientKey, &oauth)
+			}, time.Second*30).Should(MatchError(ContainSubstring("not found")))
+
+			By("Verifying finalizer is removed and notebook is deleted")
+			Eventually(func() error {
+				var updated nbv1.Notebook
+				return cli.Get(ctx, notebookKey, &updated)
+			}, time.Second*60, time.Second*2).Should(
+				MatchError(ContainSubstring("not found")),
+				"Expected Notebook to be fully deleted after finalizer removal")
 		})
 	})
 
@@ -1462,6 +1460,75 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 					Name:  name,
 					Image: "registry.redhat.io/ubi8/ubi:latest",
 				}}}},
+		},
+	}
+}
+
+func createNotebookWithOAuth(name, namespace string) *nbv1.Notebook {
+	return &nbv1.Notebook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": name,
+			},
+			Annotations: map[string]string{
+				"notebooks.opendatahub.io/inject-oauth":     "true",
+				"notebooks.opendatahub.io/foo":              "bar",
+				"notebooks.opendatahub.io/oauth-logout-url": "https://example.notebook-url/notebook/" + namespace + "/" + name,
+				"kubeflow-resource-stopped":                 "odh-notebook-controller-lock",
+			},
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: name,
+					Containers: []corev1.Container{
+						{
+							Name:  name,
+							Image: "registry.redhat.io/ubi8/ubi:latest",
+						},
+						createOAuthContainer(name, namespace),
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "notebook-data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: name + "-data",
+								},
+							},
+						},
+						{
+							Name: "oauth-config",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName:  name + "-oauth-config",
+									DefaultMode: ptr.To[int32](420),
+								},
+							},
+						},
+						{
+							Name: "oauth-client",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName:  name + "-oauth-client",
+									DefaultMode: ptr.To[int32](420),
+								},
+							},
+						},
+						{
+							Name: "tls-certificates",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName:  name + "-tls",
+									DefaultMode: ptr.To[int32](420),
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 }
