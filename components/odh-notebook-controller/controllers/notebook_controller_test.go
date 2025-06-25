@@ -1225,6 +1225,16 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
 			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
+			// ----------------------------------------------------------------
+			// Test workaround for the RHOAIENG-24545 - we need to manually modify
+			// the workbench so that the expected resource is mounted properly
+			// kubeflow-resource-stopped: '2025-06-25T13:53:46Z'
+			By("Running the workaround for RHOAIENG-24545")
+			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			// end of workaround
+			// ----------------------------------------------------------------
+
 			By("Waiting and validating for volumeMount 'elyra-dsp-details' to be injected into the Notebook")
 			Eventually(func() bool {
 				var refreshed nbv1.Notebook
