@@ -48,10 +48,54 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			}
 		})
 
+		var newImageStream = func(name, namespace, tag, dockerImageReference string) *imagev1.ImageStream {
+			return &imagev1.ImageStream{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ImageStream",
+					APIVersion: "image.openshift.io/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: imagev1.ImageStreamSpec{
+					LookupPolicy: imagev1.ImageLookupPolicy{
+						Local: true,
+					},
+				},
+				Status: imagev1.ImageStreamStatus{
+					Tags: []imagev1.NamedTagEventList{{
+						Tag: tag,
+						Items: []imagev1.TagEvent{{
+							DockerImageReference: dockerImageReference,
+						}},
+					}},
+				},
+			}
+		}
+
+		var newNotebook = func(annotations map[string]string, initialImage string) *nbv1.Notebook {
+			return &nbv1.Notebook{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        Name,
+					Namespace:   Namespace,
+					Annotations: annotations,
+				},
+				Spec: nbv1.NotebookSpec{
+					Template: nbv1.NotebookTemplateSpec{
+						Spec: corev1.PodSpec{Containers: []corev1.Container{{
+							Name:  Name,
+							Image: initialImage,
+						}}},
+					},
+				},
+			}
+		}
+
 		testCases := []struct {
-			name        string
-			imageStream *imagev1.ImageStream
-			notebook    *nbv1.Notebook
+			name         string
+			imageStreams []*imagev1.ImageStream
+			notebook     *nbv1.Notebook
 			// currently we expect that Notebook CR is always created,
 			// and when unable to resolve imagestream, image: is left alone
 			expectedImage string
@@ -60,8 +104,10 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			unexpectedEvents []string
 		}{
 			{
-				name: "ImageStream with all that is needful",
-				imageStream: &imagev1.ImageStream{
+				name: "ImageStream with all that is needful is correctly resolved",
+				// The first test case does not use the CR creation helpers
+				// so that everything going in is fully visible
+				imageStreams: []*imagev1.ImageStream{{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ImageStream",
 						APIVersion: "image.openshift.io/v1",
@@ -92,7 +138,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 							}},
 						}},
 					},
-				},
+				}},
 				notebook: &nbv1.Notebook{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      Name,
@@ -118,7 +164,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			},
 			{
 				name: "ImageStream with a tag without items (RHOAIENG-13916)",
-				imageStream: &imagev1.ImageStream{
+				imageStreams: []*imagev1.ImageStream{{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ImageStream",
 						APIVersion: "image.openshift.io/v1",
@@ -144,32 +190,72 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 							}},
 						}},
 					},
-				},
-				notebook: &nbv1.Notebook{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      Name,
-						Namespace: Namespace,
-						Annotations: map[string]string{
-							"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
-						},
-					},
-					Spec: nbv1.NotebookSpec{
-						Template: nbv1.NotebookTemplateSpec{
-							Spec: corev1.PodSpec{Containers: []corev1.Container{{
-								Name:  Name,
-								Image: ":some-tag",
-							}}}},
-					},
-				},
+				}},
+				notebook: newNotebook(map[string]string{
+					"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
+				}, ":some-tag"),
+
 				// there is no update to the Notebook
 				expectedImage: ":some-tag",
 				expectedEvents: []string{
 					IMAGE_STREAM_TAG_NOT_FOUND_EVENT,
 				},
 			},
+
 			{
 				name: "ImageStream in the same namespace as the Notebook",
-				imageStream: &imagev1.ImageStream{
+				imageStreams: []*imagev1.ImageStream{
+					newImageStream("some-image", Namespace, "some-tag", "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e"),
+				},
+				notebook: newNotebook(map[string]string{
+					"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
+					"opendatahub.io/workbench-image-namespace":      Namespace,
+				}, ":some-tag"),
+
+				// valid new image is picked from user namespace
+				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+				unexpectedEvents: []string{
+					IMAGE_STREAM_NOT_FOUND_EVENT,
+				},
+			},
+
+			{
+				name: "last-image-selection is specified, workbench-image-namespace is not specified",
+				imageStreams: []*imagev1.ImageStream{
+					newImageStream("some-image", Namespace, "some-tag", "quay.io/image-namespace-imagestream:latest"),
+					newImageStream("some-image", odhNotebookControllerTestNamespace, "some-tag", "operator-namespace-imagestream:latest"),
+				},
+				notebook: newNotebook(map[string]string{
+					"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
+					"opendatahub.io/workbench-image-namespace":      "",
+				}, ":some-tag"),
+
+				// valid new image is picked from user namespace.
+				expectedImage: "operator-namespace-imagestream:latest",
+				unexpectedEvents: []string{
+					IMAGE_STREAM_NOT_FOUND_EVENT,
+				},
+			},
+
+			{
+				name: "ImageStream in the same namespace as the Notebook",
+				imageStreams: []*imagev1.ImageStream{
+					newImageStream("some-image", Namespace, "some-tag", "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e"),
+				},
+				notebook: newNotebook(map[string]string{
+					"opendatahub.io/workbench-image-namespace": Namespace,
+				}, ":some-tag"),
+
+				// valid new image is picked from user namespace
+				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+				unexpectedEvents: []string{
+					IMAGE_STREAM_NOT_FOUND_EVENT,
+				},
+			},
+
+			{
+				name: "last-image-selection is not specified",
+				imageStreams: []*imagev1.ImageStream{{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ImageStream",
 						APIVersion: "image.openshift.io/v1",
@@ -187,27 +273,17 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 						Tags: []imagev1.NamedTagEventList{{
 							Tag: "some-tag",
 							Items: []imagev1.TagEvent{{
-								Created:              toMetav1Time("2025-05-14T02:36:21Z"),
 								DockerImageReference: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
-								Image:                "sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
-								Generation:           2,
-							}},
-							Conditions: []imagev1.TagEventCondition{{
-								Type:               "ImportSuccess",
-								Status:             "False",
-								LastTransitionTime: toMetav1Time("2025-05-14T02:36:21Z"),
-								Reason:             "NotFound",
 							}},
 						}},
 					},
-				},
+				}},
 				notebook: &nbv1.Notebook{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      Name,
 						Namespace: Namespace,
 						Annotations: map[string]string{
-							"notebooks.opendatahub.io/last-image-selection": "some-image:some-tag",
-							"opendatahub.io/workbench-image-namespace":      Namespace,
+							"opendatahub.io/workbench-image-namespace": Namespace,
 						},
 					},
 					Spec: nbv1.NotebookSpec{
@@ -219,7 +295,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 					},
 				},
 				// valid new image is picked from user namespace.
-				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
+				expectedImage: ":some-tag",
 				unexpectedEvents: []string{
 					IMAGE_STREAM_NOT_FOUND_EVENT,
 				},
@@ -235,7 +311,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 			Context(fmt.Sprintf("The Notebook webhook test case: %s", testCase.name), func() {
 				It("Should create a Notebook resource successfully", func() {
 					By("Creating a Notebook resource successfully")
-					Expect(cli.Create(ctx, testCase.imageStream, &client.CreateOptions{})).To(Succeed())
+					Expect(cli.Create(ctx, testCase.imageStreams, &client.CreateOptions{})).To(Succeed())
 					// if our webhook panics, then cli.Create will err
 					Expect(cli.Create(ctx, testCase.notebook, &client.CreateOptions{})).To(Succeed())
 
@@ -259,7 +335,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 				AfterEach(func() {
 					By("Deleting the created resources")
 					Expect(cli.Delete(ctx, testCase.notebook, &client.DeleteOptions{})).To(Succeed())
-					Expect(cli.Delete(ctx, testCase.imageStream, &client.DeleteOptions{})).To(Succeed())
+					Expect(cli.Delete(ctx, testCase.imageStreams, &client.DeleteOptions{})).To(Succeed())
 				})
 			})
 		}
