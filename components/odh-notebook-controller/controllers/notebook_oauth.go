@@ -327,10 +327,13 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthClient(notebook *nbv1.Notebo
 
 func (r *OpenshiftNotebookReconciler) HandleOAuthClientFinalizer(notebook *nbv1.Notebook, ctx context.Context) (bool, error) {
 	finalizerName := "notebooks.kubeflow.org/oauthclient"
+	log := logf.FromContext(ctx)
 
 	// Check if object is being deleted
 	if notebook.GetDeletionTimestamp() != nil {
 		if controllerutil.ContainsFinalizer(notebook, finalizerName) {
+			log.Info("Notebook deletion detected, cleaning up OAuthClient", "notebook", notebook.Name)
+
 			if err := r.cleanupOAuthClient(notebook, ctx); err != nil {
 				return true, err
 			}
@@ -339,6 +342,8 @@ func (r *OpenshiftNotebookReconciler) HandleOAuthClientFinalizer(notebook *nbv1.
 			if err := r.Update(ctx, notebook); err != nil {
 				return true, err
 			}
+
+			log.Info("OAuthClient cleanup completed", "notebook", notebook.Name)
 		}
 		// Return true to indicate finalization is in progress
 		return true, nil
@@ -346,6 +351,8 @@ func (r *OpenshiftNotebookReconciler) HandleOAuthClientFinalizer(notebook *nbv1.
 
 	// Add finalizer if it doesn't exist yet
 	if !controllerutil.ContainsFinalizer(notebook, finalizerName) {
+		log.Info("Adding finalizer to notebook", "notebook", notebook.Name)
+
 		controllerutil.AddFinalizer(notebook, finalizerName)
 		if err := r.Update(ctx, notebook); err != nil {
 			return true, err

@@ -1061,7 +1061,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Ensuring finalizer exists first")
 			Eventually(func() []string {
 				var updated nbv1.Notebook
-				cli.Get(ctx, notebookKey, &updated)
+				err := cli.Get(ctx, notebookKey, &updated)
+				if err != nil {
+					return nil
+				}
 				return updated.Finalizers
 			}, duration, interval).Should(ContainElement(Finalizer))
 
@@ -1083,7 +1086,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Ensuring prerequisite resources exist")
 			Eventually(func() []string {
 				var updated nbv1.Notebook
-				cli.Get(ctx, notebookKey, &updated)
+				err := cli.Get(ctx, notebookKey, &updated)
+				if err != nil {
+					return nil
+				}
 				return updated.Finalizers
 			}, duration, interval).Should(ContainElement(Finalizer))
 
@@ -1100,8 +1106,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Verifying notebook is marked for deletion but persists due to finalizer")
 			Eventually(func() bool {
 				var updated nbv1.Notebook
-				err := cli.Get(ctx, notebookKey, &updated)
-				return err == nil && updated.DeletionTimestamp != nil
+				if err := cli.Get(ctx, notebookKey, &updated); err != nil {
+					return false
+				}
+				return updated.DeletionTimestamp != nil
 			}, duration, interval).Should(BeTrue(),
 				"Notebook should be marked for deletion but persist due to finalizer")
 
@@ -1120,7 +1128,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Eventually(func() error {
 				var oauth oauthv1.OAuthClient
 				return cli.Get(ctx, oauthClientKey, &oauth)
-			}, time.Second*30).Should(MatchError(ContainSubstring("not found")))
+			}, duration, interval).Should(MatchError(ContainSubstring("not found")))
 
 			By("Verifying finalizer is removed and notebook is deleted")
 			Eventually(func() error {
