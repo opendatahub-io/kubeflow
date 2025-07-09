@@ -439,6 +439,7 @@ func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv
 	ssObjectMeta := metav1.ObjectMeta{
 		Name:      instance.Name,
 		Namespace: instance.Namespace,
+		Labels:    map[string]string{},
 	}
 	if isGenerateName {
 		ssObjectMeta = metav1.ObjectMeta{
@@ -468,6 +469,11 @@ func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv
 				Spec: *instance.Spec.Template.Spec.DeepCopy(),
 			},
 		},
+	}
+
+	sl := &ss.Labels
+	for k, v := range instance.Labels {
+		(*sl)[k] = v
 	}
 
 	// copy all of the Notebook labels to the pod including poddefault related labels

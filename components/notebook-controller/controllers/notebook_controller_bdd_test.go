@@ -37,6 +37,9 @@ var _ = Describe("Notebook controller", func() {
 		Namespace = "default"
 		timeout   = time.Second * 10
 		interval  = time.Millisecond * 250
+
+		testLabelName  = "testLabel"
+		testLabelValue = "testLabelValue"
 	)
 
 	Context("When validating the notebook controller", func() {
@@ -47,6 +50,9 @@ var _ = Describe("Notebook controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      Name,
 					Namespace: Namespace,
+					Labels: map[string]string{
+						testLabelName: testLabelValue,
+					},
 				},
 				Spec: nbv1beta1.NotebookSpec{
 					Template: nbv1beta1.NotebookTemplateSpec{
@@ -62,10 +68,7 @@ var _ = Describe("Notebook controller", func() {
 
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, notebookLookupKey, createdNotebook)
-				if err != nil {
-					return false
-				}
-				return true
+				return err == nil
 			}, timeout, interval).Should(BeTrue())
 			/*
 				Checking for the underlying statefulset.
@@ -82,6 +85,10 @@ var _ = Describe("Notebook controller", func() {
 				if err != nil {
 					return false, err
 				}
+
+				By("By checking that the StatefulSet has identical Labels as the Notebook")
+				Expect(sts.GetLabels()).To(Equal(notebook.GetLabels()))
+
 				return true, nil
 			}, timeout, interval).Should(BeTrue())
 		})
