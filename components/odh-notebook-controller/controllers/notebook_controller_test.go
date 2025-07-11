@@ -93,9 +93,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		route := &routev1.Route{}
 
 		It("Should create a Route to expose the traffic externally", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the controller has created the Route")
@@ -185,9 +184,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should create a RoleBinding when the referenced Role exists", func() {
-			ctx := context.Background()
-
 			By("Creating a Notebook and ensuring the Role exists")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
 
@@ -217,7 +215,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should delete the RoleBinding when the Notebook is deleted", func() {
-			ctx := context.Background()
+			// Use global ctx directly
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("Ensuring the RoleBinding exists")
 			roleBinding := &rbacv1.RoleBinding{}
@@ -244,7 +243,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		)
 
 		It("Should mount a trusted-ca when it exists on the given namespace", func() {
-			ctx := context.Background()
 			logger := logr.Discard()
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
@@ -277,6 +275,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 
 			// Create the ConfigMap
+			// Use global ctx directly
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
 			Expect(cli.Create(ctx, serviceCACertBundle)).Should(Succeed())
 			defer func() {
@@ -293,6 +292,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By creating a new Notebook")
 			notebook := createNotebook(Name, Namespace)
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that trusted-ca bundle is mounted")
@@ -381,9 +381,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		route := &routev1.Route{}
 
 		It("Should create a Route to expose the traffic externally", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
 
@@ -471,9 +470,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebook := createNotebook(Name, Namespace)
 
 		It("Should update the Notebook specification", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By updating the Notebook's image")
@@ -492,7 +490,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("When notebook CR is updated, should mount a trusted-ca if it exists on the given namespace", func() {
-			ctx := context.Background()
 			logger := logr.Discard()
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
@@ -509,6 +506,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
 				})
 			// Create the ConfigMap
+			// Use global ctx directly
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
 			defer func() {
 				// Clean up the ConfigMap after the test
@@ -622,9 +620,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebookOAuthNetworkPolicy := &netv1.NetworkPolicy{}
 
 		It("Should create network policies to restrict undesired traffic", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the controller has created Network policy to allow only controller traffic")
@@ -803,9 +800,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		}
 
 		It("Should inject the OAuth proxy as a sidecar container", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the webhook has injected the sidecar container")
@@ -1045,7 +1041,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should not add OAuth sidecar", func() {
 			notebook := createNotebook(name, namespace)
 			notebook.SetAnnotations(map[string]string{AnnotationServiceMesh: "true"})
-			ctx := context.Background()
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			actualNotebook := &nbv1.Notebook{}
@@ -1218,6 +1214,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Creating Notebook")
 			notebook := createNotebook(notebookName, Namespace)
+			// Use global ctx directly
 			Expect(cli.Create(ctx, notebook)).To(Succeed())
 
 			By("Waiting for ds-pipeline-config Secret to be created")
