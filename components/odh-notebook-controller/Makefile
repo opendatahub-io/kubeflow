@@ -93,12 +93,10 @@ vet: ## Run go vet against code.
 test: test-with-rbac-false test-with-rbac-true
 test-with-rbac-false: manifests generate fmt vet envtest ## Run tests.
 	export SET_PIPELINE_RBAC=false && \
-	ACK_GINKGO_DEPRECATIONS=1.16.5 \
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover-rbac-false.out
 test-with-rbac-true: manifests generate fmt vet envtest ## Run tests.
 	export SET_PIPELINE_RBAC=true && \
-	ACK_GINKGO_DEPRECATIONS=1.16.5 \
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover-rbac-true.out
 
