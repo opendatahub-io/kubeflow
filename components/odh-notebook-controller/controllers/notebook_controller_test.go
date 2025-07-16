@@ -93,8 +93,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		route := &routev1.Route{}
 
 		It("Should create a Route to expose the traffic externally", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
@@ -185,8 +183,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should create a RoleBinding when the referenced Role exists", func() {
-			ctx := context.Background()
-
 			By("Creating a Notebook and ensuring the Role exists")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
@@ -217,8 +213,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should delete the RoleBinding when the Notebook is deleted", func() {
-			ctx := context.Background()
-
 			By("Ensuring the RoleBinding exists")
 			roleBinding := &rbacv1.RoleBinding{}
 			Eventually(func() error {
@@ -244,7 +238,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		)
 
 		It("Should mount a trusted-ca when it exists on the given namespace", func() {
-			ctx := context.Background()
 			logger := logr.Discard()
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
@@ -381,8 +374,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		route := &routev1.Route{}
 
 		It("Should create a Route to expose the traffic externally", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
@@ -471,8 +462,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebook := createNotebook(Name, Namespace)
 
 		It("Should update the Notebook specification", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
@@ -492,7 +481,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("When notebook CR is updated, should mount a trusted-ca if it exists on the given namespace", func() {
-			ctx := context.Background()
 			logger := logr.Discard()
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
@@ -622,8 +610,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebookOAuthNetworkPolicy := &netv1.NetworkPolicy{}
 
 		It("Should create network policies to restrict undesired traffic", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
@@ -803,8 +789,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		}
 
 		It("Should inject the OAuth proxy as a sidecar container", func() {
-			ctx := context.Background()
-
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
@@ -1045,7 +1029,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should not add OAuth sidecar", func() {
 			notebook := createNotebook(name, namespace)
 			notebook.SetAnnotations(map[string]string{AnnotationServiceMesh: "true"})
-			ctx := context.Background()
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			actualNotebook := &nbv1.Notebook{}
@@ -1060,7 +1043,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should not define OAuth network policy", func() {
 			policies := &netv1.NetworkPolicyList{}
 			Eventually(func() error {
-				return cli.List(context.Background(), policies, client.InNamespace(namespace))
+				return cli.List(ctx, policies, client.InNamespace(namespace))
 			}, duration, interval).Should(Succeed())
 
 			Expect(policies.Items).To(Not(ContainElement(notebookOAuthNetworkPolicy)))
@@ -1069,7 +1052,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should not create routes", func() {
 			routes := &routev1.RouteList{}
 			Eventually(func() error {
-				return cli.List(context.Background(), routes, client.InNamespace(namespace))
+				return cli.List(ctx, routes, client.InNamespace(namespace))
 			}, duration, interval).Should(Succeed())
 
 			Expect(routes.Items).To(BeEmpty())
@@ -1080,7 +1063,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			serviceAccounts := &corev1.ServiceAccountList{}
 			Eventually(func() error {
-				return cli.List(context.Background(), serviceAccounts, client.InNamespace(namespace))
+				return cli.List(ctx, serviceAccounts, client.InNamespace(namespace))
 			}, duration, interval).Should(Succeed())
 
 			Expect(serviceAccounts.Items).ToNot(ContainElement(oauthServiceAccount))
@@ -1094,7 +1077,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				},
 			}
 			Eventually(func() error {
-				return cli.List(context.Background(), secrets, client.InNamespace(namespace))
+				return cli.List(ctx, secrets, client.InNamespace(namespace))
 			}, duration, interval).Should(Succeed())
 
 			Expect(secrets.Items).To(BeEmpty())

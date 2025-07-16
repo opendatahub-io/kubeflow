@@ -16,7 +16,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -33,8 +32,6 @@ import (
 )
 
 var _ = Describe("The Openshift Notebook webhook", func() {
-	ctx := context.Background()
-
 	When("Creating a Notebook with internal registry disabled", func() {
 		const (
 			Name      = "test-notebook-with-last-image-selection"
@@ -290,7 +287,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 		}
 
 		BeforeEach(func() {
-			Expect(tracings.TraceProvider.ForceFlush(context.Background())).To(Succeed())
+			Expect(tracings.TraceProvider.ForceFlush(ctx)).To(Succeed())
 			tracings.SpanExporter.Reset()
 		})
 
@@ -311,7 +308,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 					Expect(testCase.notebook.Spec.Template.Spec.Containers[0].Image).To(Equal(testCase.expectedImage))
 
 					By("Checking telemetry events")
-					Expect(tracings.TraceProvider.ForceFlush(context.Background())).To(Succeed())
+					Expect(tracings.TraceProvider.ForceFlush(ctx)).To(Succeed())
 					spans := tracings.SpanExporter.GetSpans()
 					events := make([]string, 0)
 					for _, span := range spans {

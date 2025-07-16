@@ -57,6 +57,7 @@ func TestGetStructDiff(t *testing.T) {
 
 	for _, v := range tests {
 		t.Run(v.name, func(t *testing.T) {
+			// global context isn´t used here (tests were failing)
 			diff := getStructDiff(context.Background(), v.a, v.b)
 			assert.Equal(t, diff, v.expected)
 		})

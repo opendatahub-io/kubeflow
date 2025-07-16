@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -27,8 +26,6 @@ const (
 )
 
 var _ = Describe("Runtime images ConfigMap should be mounted", func() {
-	ctx := context.Background()
-
 	When("Empty ConfigMap for runtime images", func() {
 
 		BeforeEach(func() {
