@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -182,9 +183,12 @@ func extractDisplayName(metadata string) string {
 	return displayName
 }
 
+var multiDash = regexp.MustCompile(`-+`)
+
 func formatKeyName(displayName string) string {
-	replacer := strings.NewReplacer(" ", "-", "(", "", ")", "")
-	return strings.ToLower(replacer.Replace(displayName)) + ".json"
+	s := strings.NewReplacer(" ", "-", "(", "", ")", "", "|", "").Replace(displayName)
+	s = multiDash.ReplaceAllString(strings.ToLower(s), "-")
+	return strings.Trim(s, "-") + ".json"
 }
 
 // parseRuntimeImageMetadata extracts the first object from the JSON array
