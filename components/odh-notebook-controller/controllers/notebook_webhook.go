@@ -392,9 +392,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	if raw, ok := os.LookupEnv("INJECT_CLUSTER_PROXY_ENV"); ok {
 		if val, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
 			injectClusterProxy = val
+		} else {
+			log.Info("Failed to parse INJECT_CLUSTER_PROXY_ENV as boolean, defaulting to false", "value", raw, "error", err)
 		}
 	}
-	if w.ClusterWideProxyIsEnabled() && injectClusterProxy {
+	if injectClusterProxy && w.ClusterWideProxyIsEnabled() {
 		err = InjectProxyConfigEnvVars(notebook)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
