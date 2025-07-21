@@ -105,7 +105,11 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 				// Construct the key name
 				if displayName != "" {
 					formattedName := formatKeyName(displayName)
-					data[formattedName] = metadataParsed
+					if formattedName != "" {
+						data[formattedName] = metadataParsed
+					} else {
+						log.Error(nil, "Failed to construct ConfigMap key name", "ImageStream", item.GetName(), "Tag", tag)
+					}
 				}
 			}
 		}
@@ -183,12 +187,21 @@ func extractDisplayName(metadata string) string {
 	return displayName
 }
 
-var multiDash = regexp.MustCompile(`-+`)
+var (
+	invalidChars = regexp.MustCompile(`[^-._a-zA-Z0-9]+`)
+	multiDash    = regexp.MustCompile(`-+`)
+)
 
+// formatKeyName sanitizes display names for use as ConfigMap keys.
+// Returns empty string if input contains only invalid characters.
 func formatKeyName(displayName string) string {
-	s := strings.NewReplacer(" ", "-", "(", "", ")", "", "|", "").Replace(displayName)
-	s = multiDash.ReplaceAllString(strings.ToLower(s), "-")
-	return strings.Trim(s, "-") + ".json"
+	s := invalidChars.ReplaceAllString(strings.ToLower(displayName), "-")
+	s = multiDash.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return ""
+	}
+	return s + ".json"
 }
 
 // parseRuntimeImageMetadata extracts the first object from the JSON array
