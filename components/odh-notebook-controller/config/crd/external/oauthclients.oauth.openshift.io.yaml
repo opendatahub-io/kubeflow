@@ -1,0 +1,65 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    crd/fake: "true"
+  name: oauthclients.oauth.openshift.io
+spec:
+  group: oauth.openshift.io
+  names:
+    kind: OAuthClient
+    listKind: OAuthClientList
+    plural: oauthclients
+    singular: oauthclient
+  scope: Cluster
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: OAuthClient represents an OAuth client
+        type: object
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object.'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents.'
+            type: string
+          metadata:
+            type: object
+          grantMethod:
+            description: 'Method used to authorize client users (auto, prompt, or deny)'
+            type: string
+          secret:
+            description: 'Client secret'
+            type: string
+          redirectURIs:
+            description: 'List of valid redirect URIs for the client'
+            type: array
+            items:
+              type: string
+          respondWithChallenges:
+            description: 'If true, respond to 401 errors with a WWW-Authenticate challenge'
+            type: boolean
+          accessTokenMaxAgeSeconds:
+            description: 'Maximum token lifetime in seconds'
+            type: integer
+            format: int32
+          accessTokenInactivityTimeoutSeconds:
+            description: 'Timeout for inactive tokens in seconds'
+            type: integer
+            format: int32
+          additionalSecrets:
+            description: 'Additional client secrets'
+            type: array
+            items:
+              type: string
+          scopeRestrictions:
+            description: 'Restrictions on scopes the client can request'
+            type: array
+            items:
+              type: object
+    served: true
+    storage: true
