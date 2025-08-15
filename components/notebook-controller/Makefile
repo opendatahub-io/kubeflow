@@ -104,7 +104,7 @@ docker-build-multi-arch: ##  Build multi-arch docker images with docker buildx
 
 
 .PHONY: docker-build-push-multi-arch
-docker-build-push-multi-arch: ## Build multi-arch docker images with docker buildx and push to docker registry 
+docker-build-push-multi-arch: ## Build multi-arch docker images with docker buildx and push to docker registry
 	cd .. && docker buildx build --platform ${ARCH} --tag ${IMG}:${TAG} --push -f ./notebook-controller/Dockerfile .
 
 
@@ -143,7 +143,7 @@ $(LOCALBIN): ## Ensure that the directory exists
 CONTROLLER_GEN = $(LOCALBIN)/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.3
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 .PHONY: kustomize
@@ -151,7 +151,7 @@ kustomize: ## Download kustomize locally if necessary.
 	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5@v5.0.2)
 
 ENVTEST = $(shell pwd)/bin/setup-envtest
-ENVTEST_VERSION?=v0.0.0-20240923090159-236e448db12c
+ENVTEST_VERSION?=v0.0.0-20250723164028-948d554cd9c7
 
 .PHONY: envtest
 envtest: ## Download setup-envtest locally if necessary.

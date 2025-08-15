@@ -469,7 +469,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
 			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
 
-			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
+			updatedImage := "registry.redhat.io/ubi9/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
@@ -510,7 +510,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
 			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
 
-			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
+			updatedImage := "registry.redhat.io/ubi9/ubi:updated"
 			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
@@ -705,7 +705,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:  Name,
-						Image: "registry.redhat.io/ubi8/ubi:latest",
+						Image: "registry.redhat.io/ubi9/ubi:latest",
 					}},
 					Volumes: []corev1.Volume{
 						{
@@ -742,7 +742,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Containers: []corev1.Container{
 							{
 								Name:  Name,
-								Image: "registry.redhat.io/ubi8/ubi:latest",
+								Image: "registry.redhat.io/ubi9/ubi:latest",
 							},
 							createOAuthContainer(Name, Namespace),
 						},
@@ -1352,7 +1352,7 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 			Template: nbv1.NotebookTemplateSpec{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
 					Name:  name,
-					Image: "registry.redhat.io/ubi8/ubi:latest",
+					Image: "registry.redhat.io/ubi9/ubi:latest",
 				}}}},
 		},
 	}

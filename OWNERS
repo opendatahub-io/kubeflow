@@ -1,27 +1,25 @@
 approvers:
   - andyatmiami
-  - atheo89
   - caponetto
   - harshad16
   - jesuino
-  - jiridanek
   - jstourac
   - paulovmr
 
 reviewers:
   - andyatmiami
-  - atheo89
   - caponetto
-  - dibryant
   - harshad16
   - jesuino
-  - jiridanek
   - jstourac
   - paulovmr
 
 emeritus_approvers:
-  - VaishnaviHire
+  - atheo89
+  - jiridanek
   - LavLas
+  - VaishnaviHire
 
 emeritus_reviewers:
+  - dibryant
   - rkpattnaik780
