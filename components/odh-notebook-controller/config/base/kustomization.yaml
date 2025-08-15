@@ -25,3 +25,17 @@ replacements:
       name: manager
       namespace: system
       version: v1
+- source:
+    fieldPath: data.oauth-proxy-image
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.0.args.1
+    select:
+      group: apps
+      kind: Deployment
+      name: manager
+      namespace: system
+      version: v1
