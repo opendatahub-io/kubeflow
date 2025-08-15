@@ -227,7 +227,7 @@ jobs:
           # switching to unauthenticated oauth-proxy image, c.f. https://github.com/opendatahub-io/opendatahub-community/issues/100
           kustomize build . | \
             sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | \
-            sed 's|registry.redhat.io/openshift4/ose-oauth-proxy.*|quay.io/openshift/origin-oauth-proxy@sha256:1ece77d14a685ef2397c3a327844eea45ded00c95471e9e333e35ef3860b1895|g' | \
+            sed 's|registry.redhat.io/openshift4/ose-oauth-proxy.*|quay.io/openshift/origin-oauth-proxy:4.19|g' | \
             kubectl apply -f -
 
           # patch the webhook with our self-signed CA

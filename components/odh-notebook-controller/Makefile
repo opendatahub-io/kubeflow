@@ -12,7 +12,9 @@ KF_TAG ?= $(KF_TAG)
 CONTAINER_ENGINE ?= podman
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26
+# We should try to use the kubernetes version that is used in the oldest OpenShift we support: https://access.redhat.com/solutions/4870701
+# Right now we target the OCP 4.15 as the oldest one: https://access.redhat.com/articles/rhoai-supported-configs
+ENVTEST_K8S_VERSION = 1.28
 
 # Kubernetes configuration
 K8S_NAMESPACE ?= odh-notebook-controller-system
@@ -232,7 +234,7 @@ $(LOCALBIN): ## Ensure that the directory exists
 CONTROLLER_GEN = $(LOCALBIN)/controller-gen
 .PHONY: controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.3
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0
 
 KUSTOMIZE = $(LOCALBIN)/kustomize
 .PHONY: kustomize
@@ -240,9 +242,11 @@ kustomize: ## Download kustomize locally if necessary.
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@v5.0.2
 
 ENVTEST = $(LOCALBIN)/setup-envtest
+ENVTEST_VERSION?=v0.0.0-20250723164028-948d554cd9c7
+
 .PHONY: envtest
-envtest: ## Download setup-envtest locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20240923090159-236e448db12c
+envtest: ## Download setup-envtest locally if necessary - https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest#section-readme
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
 
 KTUNNEL = $(LOCALBIN)/ktunnel
 .PHONY: ktunnel

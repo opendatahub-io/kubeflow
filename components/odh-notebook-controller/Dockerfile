@@ -7,12 +7,12 @@
 
 # Build arguments
 ARG SOURCE_CODE=.
-ARG GOLANG_VERSION=1.23
+ARG GOLANG_VERSION=1.24
 
-# Use ubi8/go-toolset as base image
-# https://catalog.redhat.com/software/containers/ubi8/go-toolset/5ce8713aac3db925c03774d1
+# Use ubi9/go-toolset as base image
+# https://catalog.redhat.com/software/containers/ubi9/go-toolset/61e5c00b4ec9945c18787690
 # image sets GOTOOLCHAIN=local so it won't end up downloading if go.mod requests different version
-FROM registry.access.redhat.com/ubi8/go-toolset:${GOLANG_VERSION} as builder
+FROM registry.access.redhat.com/ubi9/go-toolset:${GOLANG_VERSION} as builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -39,8 +39,8 @@ USER root
 RUN if [ -z ${CACHITO_ENV_FILE} ]; then go mod download; else source ${CACHITO_ENV_FILE}; fi && \
   CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -tags strictfipsruntime -a -o ./bin/manager main.go
 
-# Use ubi8/ubi-minimal as base image
-FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+# Use ubi9/ubi-minimal as base image
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 ## Install additional packages
 RUN microdnf install -y shadow-utils &&\

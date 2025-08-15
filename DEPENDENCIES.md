@@ -7,7 +7,7 @@ This guide outlines the steps to upgrade the Go version and dependencies in the 
 Upgrading the Go version should be done in a separate PR to isolate the changes and make review easier.
 
 > [!IMPORTANT]  
-> Images are to be built in the [ubi8/go-toolset](https://catalog.redhat.com/software/containers/ubi8/go-toolset/5ce8713aac3db925c03774d1) container.
+> Images are to be built in the [ubi9/go-toolset](https://catalog.redhat.com/software/containers/ubi9/go-toolset/61e5c00b4ec9945c18787690) container.
 > It contains a customized FIPS-compatible version of Go, that however lags behind the latest upstream Go version.
 > Always use a Go version that has a supporting go-toolset image available.
 
@@ -32,7 +32,7 @@ Upgrading the Go version should be done in a separate PR to isolate the changes 
 5. After merging the Go upgrade PR, update the fork at https://github.com/red-hat-data-services/kubeflow:
    - Locate all `Dockerfile.konflux` files in the repository.
    - Update the Go version in each of these files to match the new version.
-   - Refer to the [ubi8/go-toolset](https://catalog.redhat.com/software/containers/ubi8/go-toolset/5ce8713aac3db925c03774d1) in Red Hat image catalog to locate `sha256` hash
+   - Refer to the [ubi9/go-toolset](https://catalog.redhat.com/software/containers/ubi9/go-toolset/61e5c00b4ec9945c18787690) in Red Hat image catalog to locate `sha256` hash
    - Create a pull request in the fork repository with these changes.
 
 6. Review CI/CD configuration files (especially openshift/release OCP-CI yamls) that specify a Go version.

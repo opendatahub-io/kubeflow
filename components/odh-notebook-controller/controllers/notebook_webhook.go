@@ -57,7 +57,7 @@ type NotebookWebhook struct {
 	Log         logr.Logger
 	Client      client.Client
 	Config      *rest.Config
-	Decoder     *admission.Decoder
+	Decoder     admission.Decoder
 	OAuthConfig OAuthConfig
 	// controller namespace
 	Namespace string
@@ -392,9 +392,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	if raw, ok := os.LookupEnv("INJECT_CLUSTER_PROXY_ENV"); ok {
 		if val, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
 			injectClusterProxy = val
+		} else {
+			log.Info("Failed to parse INJECT_CLUSTER_PROXY_ENV as boolean, defaulting to false", "value", raw, "error", err)
 		}
 	}
-	if w.ClusterWideProxyIsEnabled() && injectClusterProxy {
+	if injectClusterProxy && w.ClusterWideProxyIsEnabled() {
 		err = InjectProxyConfigEnvVars(notebook)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
@@ -425,12 +427,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledNotebook)
-}
-
-// InjectDecoder injects the decoder.
-func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
-	w.Decoder = d
-	return nil
 }
 
 // maybeRestartRunningNotebook evaluates whether the updates being made cause notebook pod to restart.

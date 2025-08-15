@@ -317,6 +317,101 @@ var _ = Describe("Runtime images ConfigMap should be mounted", func() {
 					},
 				},
 			},
+			{
+				name:         "ImageStream with formatKeyName edge cases",
+				notebookName: "test-notebook-runtime-format-key",
+				expectedConfigMapData: map[string]string{
+					"foo-bar.json":       `{"display_name":"foo  bar","metadata":{"display_name":"foo  bar","image_name":"quay.io/opendatahub/test1","pull_policy":"IfNotPresent","tags":["tag1"]},"schema_name":"runtime-image"}`,
+					"invalid-chars.json": `{"display_name":" !@#$|| invalid chars","metadata":{"display_name":" !@#$|| invalid chars","image_name":"quay.io/opendatahub/test2","pull_policy":"IfNotPresent","tags":["tag2"]},"schema_name":"runtime-image"}`,
+					"cz.json":            `{"display_name":"CZ ěščřžýáíé","metadata":{"display_name":"CZ ěščřžýáíé","image_name":"quay.io/opendatahub/test3","pull_policy":"IfNotPresent","tags":["tag3"]},"schema_name":"runtime-image"}`,
+				},
+				imageStream: &imagev1.ImageStream{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "ImageStream",
+						APIVersion: "image.openshift.io/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "format-key-test-image",
+						Namespace: "redhat-ods-applications",
+						Labels: map[string]string{
+							"opendatahub.io/runtime-image": "true",
+						},
+					},
+					Spec: imagev1.ImageStreamSpec{
+						LookupPolicy: imagev1.ImageLookupPolicy{
+							Local: true,
+						},
+						Tags: []imagev1.TagReference{
+							{
+								Name: "tag1",
+								Annotations: map[string]string{
+									"opendatahub.io/runtime-image-metadata": `
+										[
+											{
+												"display_name": "foo  bar",
+												"metadata": {
+													"tags": ["tag1"],
+													"display_name": "foo  bar",
+													"pull_policy": "IfNotPresent"
+												},
+												"schema_name": "runtime-image"
+											}
+										]
+									`,
+								},
+								From: &corev1.ObjectReference{
+									Kind: "DockerImage",
+									Name: "quay.io/opendatahub/test1",
+								},
+							},
+							{
+								Name: "tag2",
+								Annotations: map[string]string{
+									"opendatahub.io/runtime-image-metadata": `
+										[
+											{
+												"display_name": " !@#$|| invalid chars",
+												"metadata": {
+													"tags": ["tag2"],
+													"display_name": " !@#$|| invalid chars",
+													"pull_policy": "IfNotPresent"
+												},
+												"schema_name": "runtime-image"
+											}
+										]
+									`,
+								},
+								From: &corev1.ObjectReference{
+									Kind: "DockerImage",
+									Name: "quay.io/opendatahub/test2",
+								},
+							},
+							{
+								Name: "tag3",
+								Annotations: map[string]string{
+									"opendatahub.io/runtime-image-metadata": `
+										[
+											{
+												"display_name": "CZ ěščřžýáíé",
+												"metadata": {
+													"tags": ["tag3"],
+													"display_name": "CZ ěščřžýáíé",
+													"pull_policy": "IfNotPresent"
+												},
+												"schema_name": "runtime-image"
+											}
+										]
+									`,
+								},
+								From: &corev1.ObjectReference{
+									Kind: "DockerImage",
+									Name: "quay.io/opendatahub/test3",
+								},
+							},
+						},
+					},
+				},
+			},
 		}
 
 		for _, testCase := range testCases {
@@ -440,6 +535,47 @@ var _ = Describe("Runtime images ConfigMap should be mounted", func() {
 					}
 				})
 			})
+		}
+	})
+})
+
+var _ = Describe("FormatKeyName function", func() {
+	It("should format key names correctly", func() {
+		var tests = []struct {
+			input    string
+			expected string
+		}{
+			// Cases with valid characters
+			{"foo", "foo.json"},
+			{"foo-bar", "foo-bar.json"},
+			{"foo__bar", "foo__bar.json"},
+			{"FOO_-BAR-999", "foo_-bar-999.json"},
+			{"some.name_with-numbers-123", "some.name_with-numbers-123.json"},
+			{"_leading_underscore", "_leading_underscore.json"},
+			{"trailing_underscore_", "trailing_underscore_.json"},
+			{"_-_leading_and_trailing_", "_-_leading_and_trailing_.json"},
+
+			// Cases with invalid characters
+			{"@@@", ""},
+			{"foo  bar", "foo-bar.json"},
+			{"!@#$%^&*()", ""},
+			{"  leading and trailing spaces  ", "leading-and-trailing-spaces.json"},
+			{" !@#$ invalid chars & valid ones", "invalid-chars-valid-ones.json"},
+			{"CZ ěščřžýáíé", "cz.json"},
+			{"  --FOO Bar--  ", "foo-bar.json"},
+
+			// Edge cases
+			{"", ""},
+			{"-", ""},
+			{"--", ""},
+			{".", "..json"},
+			{"_", "_.json"},
+			{"... ---___", "...-___.json"},
+		}
+
+		for _, testCase := range tests {
+			result := formatKeyName(testCase.input)
+			Expect(result).To(Equal(testCase.expected), fmt.Sprintf("input: '%s'", testCase.input))
 		}
 	})
 })
