@@ -168,15 +168,27 @@ func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depM
 		log.Printf("error rolling out the deployment %v: %v ", depMeta.Name, err)
 	}
 
-	testNotebook := &nbv1.Notebook{
-		ObjectMeta: *nbMeta,
+	// Get the current notebook object before patching to ensure webhook compatibility
+	notebookLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}
+	testNotebook := &nbv1.Notebook{}
+	err = tc.customClient.Get(tc.ctx, notebookLookupKey, testNotebook)
+	if err != nil {
+		log.Printf("failed to get current Notebook CR: %v ", err)
+		return
 	}
+
 	// The NBC added the annotation to stop the idle workbench: kubeflow-resource-stopped: '2024-11-26T17:20:42Z'
 	// To make the workbench running again, we need to also remove that annotation.
-	patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
-
-	if err := tc.customClient.Patch(tc.ctx, testNotebook, patch); err != nil {
-		log.Printf("failed to patch Notebook CR removing the kubeflow-resource-stopped annotation: %v ", err)
+	// Check if the annotation exists before trying to remove it
+	if testNotebook.Annotations != nil {
+		if _, exists := testNotebook.Annotations["kubeflow-resource-stopped"]; exists {
+			patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
+			if err := tc.customClient.Patch(tc.ctx, testNotebook, patch); err != nil {
+				log.Printf("failed to patch Notebook CR removing the kubeflow-resource-stopped annotation: %v ", err)
+			}
+		} else {
+			log.Printf("kubeflow-resource-stopped annotation not found, skipping patch")
+		}
 	}
 	// now we should wait for pod to start again
 	err = tc.waitForStatefulSet(nbMeta, 1, 1)
