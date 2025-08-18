@@ -31,10 +31,24 @@ export K8S_NAMESPACE="${TEST_NAMESPACE}"
 # From now on we want to be sure that undeploy and testing project deletion are called
 
 function cleanup() {
+    local ret_code=0
+
     echo "Performing deployment cleanup of the ${0}"
-    make undeploy-with-mesh undeploy-service-mesh && oc delete project "${TEST_NAMESPACE}"
+    make undeploy || {
+        echo "Warning [cleanup]: make undeploy failed, continuing with project deletion!"
+        ret_code=1
+    }
+    oc delete --wait=true --ignore-not-found=true project "${TEST_NAMESPACE}" || {
+        echo "Warning [cleanup]: project deletion failed!"
+        ret_code=1
+    }
+    return ${ret_code}
 }
 trap cleanup EXIT
+
+# assure that the project is deleted on the cluster before running the tests
+# Note: We only delete the project here, not calling cleanup() to avoid unnecessary make undeploy
+oc delete --wait=true --ignore-not-found=true project "${TEST_NAMESPACE}" || echo "Warning [pre-test-cleanup]: project deletion failed!"
 
 # setup and deploy the controller
 oc new-project "${TEST_NAMESPACE}" --skip-config-write
