@@ -274,8 +274,14 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
-	time.Sleep(180 * time.Second)
+	// Wait a bit for the controller to fully restart and load new config
+	log.Printf("Waiting for controller to restart and load culling config...")
+	time.Sleep(30 * time.Second)
+
+	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes
+	// CULL_IDLE_TIME=2 minutes + buffer for processing
+	log.Printf("Waiting 150 seconds for culling to trigger...")
+	time.Sleep(150 * time.Second)
 
 	// Debug: Check if the notebook has been marked for culling
 	notebookLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}
@@ -286,6 +292,23 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 			log.Printf("✓ Notebook is marked for culling")
 		} else {
 			log.Printf("✗ Notebook is NOT marked for culling")
+
+			// Calculate timing to debug why culling didn't happen
+			if lastActivityStr, exists := notebook.Annotations["notebooks.kubeflow.org/last-activity"]; exists {
+				if lastActivity, err := time.Parse(time.RFC3339, lastActivityStr); err == nil {
+					now := time.Now()
+					idleTime := now.Sub(lastActivity)
+					expectedCullTime := lastActivity.Add(2 * time.Minute) // CULL_IDLE_TIME = 2 minutes
+					log.Printf("Debug timing - Last activity: %v, Now: %v, Idle for: %v, Should cull at: %v",
+						lastActivity, now, idleTime, expectedCullTime)
+
+					if now.After(expectedCullTime) {
+						log.Printf("🚨 Notebook SHOULD have been culled but wasn't!")
+					} else {
+						log.Printf("ℹ️  Notebook not yet ready for culling (need %v more)", expectedCullTime.Sub(now))
+					}
+				}
+			}
 		}
 	}
 
