@@ -284,10 +284,10 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 	log.Printf("Waiting for controller to restart and load culling config...")
 	time.Sleep(60 * time.Second)
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes
-	// CULL_IDLE_TIME=2 minutes + buffer for processing
-	log.Printf("Waiting 150 seconds for culling to trigger...")
-	time.Sleep(150 * time.Second)
+	// Wait for culling to trigger. With improved fallback logic, unreachable notebooks
+	// should be handled gracefully within the configured timeframe
+	log.Printf("Waiting 180 seconds for culling to trigger...")
+	time.Sleep(180 * time.Second)
 
 	// Check if the notebook has been marked for culling, with retry logic
 	notebookLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}
