@@ -276,6 +276,19 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 
 	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
 	time.Sleep(180 * time.Second)
+
+	// Debug: Check if the notebook has been marked for culling
+	notebookLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}
+	notebook := &nbv1.Notebook{}
+	if err := tc.customClient.Get(tc.ctx, notebookLookupKey, notebook); err == nil {
+		log.Printf("Notebook annotations after culling wait: %+v", notebook.Annotations)
+		if _, exists := notebook.Annotations["kubeflow-resource-stopped"]; exists {
+			log.Printf("✓ Notebook is marked for culling")
+		} else {
+			log.Printf("✗ Notebook is NOT marked for culling")
+		}
+	}
+
 	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
 	resp, err := tc.curlNotebookEndpoint(*nbMeta)
 	if err != nil {
