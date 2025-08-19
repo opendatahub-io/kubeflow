@@ -260,6 +260,11 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 	if err != nil {
 		return fmt.Errorf("error creating configmapnotebook-controller-culler-config: %v", err)
 	}
+
+	// Wait for ConfigMap to be fully propagated
+	log.Printf("Waiting for ConfigMap to be propagated...")
+	time.Sleep(5 * time.Second)
+
 	// Restart the deployment to get changes from configmap
 	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
 		"notebook-controller-deployment", metav1.GetOptions{})
@@ -274,9 +279,10 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait a bit for the controller to fully restart and load new config
+	// Wait longer for the controller to fully restart and load new config
+	// Need to ensure new pods fully start and read the correct ConfigMap values
 	log.Printf("Waiting for controller to restart and load culling config...")
-	time.Sleep(30 * time.Second)
+	time.Sleep(60 * time.Second)
 
 	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes
 	// CULL_IDLE_TIME=2 minutes + buffer for processing
