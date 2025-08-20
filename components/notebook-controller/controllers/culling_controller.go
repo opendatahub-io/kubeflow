@@ -198,7 +198,9 @@ func notebookIsIdle(meta metav1.ObjectMeta, log logr.Logger) bool {
 			return false
 		}
 
-		timeCap := LastActivity.Add(time.Duration(CULL_IDLE_TIME) * time.Minute)
+		// Read CULL_IDLE_TIME dynamically to handle configuration changes
+		cullIdleTime := getCurrentCullIdleTime()
+		timeCap := LastActivity.Add(time.Duration(cullIdleTime) * time.Minute)
 		if time.Now().After(timeCap) {
 			return true
 		}
@@ -356,7 +358,7 @@ func compareAnnotationTimeToResource(meta *metav1.ObjectMeta, resourceTime strin
 
 func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []KernelStatus, log logr.Logger) bool {
 
-	if kernels == nil || len(kernels) == 0 {
+	if len(kernels) == 0 {
 		log.Info("Notebook has no kernels. Will not update last-activity")
 		return false
 	}
@@ -365,7 +367,7 @@ func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []Kerne
 		// At least one kernel is "busy" so the last-activity annotation should
 		// should be the current time.
 		t := createTimestamp()
-		log.Info(fmt.Sprintf("Found a busy kernel. Updating the last-activity to %s", t))
+		log.Info("Found a busy kernel. Updating the last-activity to " + t)
 
 		meta.Annotations[LAST_ACTIVITY_ANNOTATION] = t
 		return false
@@ -377,13 +379,13 @@ func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []Kerne
 	}
 
 	t := getNotebookRecentTime(arr, "api/kernels", log)
-	log.Info(fmt.Sprintf("Comparing api/kernels last_activity time to current notebook annotation time"))
+	log.Info("Comparing api/kernels last_activity time to current notebook annotation time")
 	if t == "" || !compareAnnotationTimeToResource(meta, t, log) {
 		return false
 	}
 
 	meta.Annotations[LAST_ACTIVITY_ANNOTATION] = t
-	log.Info(fmt.Sprintf("Successfully updated last-activity from latest kernel action, %s", t))
+	log.Info("Successfully updated last-activity from latest kernel action, " + t)
 	return true
 }
 
@@ -392,7 +394,7 @@ func updateTimestampFromTerminalsActivity(meta *metav1.ObjectMeta, terminals []T
 	// check this timestamp against the current annotation timestamp to ensure we are not
 	// going backwards in time.
 
-	if terminals == nil || len(terminals) == 0 {
+	if len(terminals) == 0 {
 		log.Info("Notebook has no terminals. Will not update last-activity")
 		return false
 	}
@@ -403,13 +405,13 @@ func updateTimestampFromTerminalsActivity(meta *metav1.ObjectMeta, terminals []T
 	}
 
 	t := getNotebookRecentTime(arr, "api/terminals", log)
-	log.Info(fmt.Sprintf("Comparing api/terminals last_activity time to current notebook annotation time"))
+	log.Info("Comparing api/terminals last_activity time to current notebook annotation time")
 	if t == "" || !compareAnnotationTimeToResource(meta, t, log) {
 		return false
 	}
 
 	meta.Annotations[LAST_ACTIVITY_ANNOTATION] = t
-	log.Info(fmt.Sprintf("Successfully updated last-activity from latest terminal action, %s", t))
+	log.Info("Successfully updated last-activity from latest terminal action, " + t)
 	return true
 }
 
@@ -485,6 +487,19 @@ func StopAnnotationIsSet(meta metav1.ObjectMeta) bool {
 		return true
 	}
 	return false
+}
+
+// getCurrentCullIdleTime reads the current CULL_IDLE_TIME from environment variables
+// This allows for dynamic configuration updates without controller restart
+func getCurrentCullIdleTime() int {
+	log := logf.Log.WithName("Culler")
+	idleTime := GetEnvDefault("CULL_IDLE_TIME", DEFAULT_CULL_IDLE_TIME)
+	realIdleTime, err := strconv.Atoi(idleTime)
+	if err != nil {
+		log.Info("CULL_IDLE_TIME should be Int. Got " + idleTime + " instead. Using default value.")
+		realIdleTime, _ = strconv.Atoi(DEFAULT_CULL_IDLE_TIME)
+	}
+	return realIdleTime
 }
 
 // Some Utility Functions
