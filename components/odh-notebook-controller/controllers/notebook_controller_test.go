@@ -321,10 +321,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 3 certificates there in ca-bundle.crt
 			//   - all certificates are valid
-			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
-			time.Sleep(2 * time.Second)
+			// Wait for the controller to create/update the workbench-trusted-ca-bundle
 			configMapName := "workbench-trusted-ca-bundle"
-			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+			// TODO(RHOAIENG-15907): use eventually to mask product flakiness
+			Eventually(func() error {
+				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+			}, duration, interval).Should(Succeed())
 		})
 
 	})
@@ -545,10 +547,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
 			//   - have 3 certificates there in ca-bundle.crt
 			//   - all certificates are valid
-			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
-			time.Sleep(2 * time.Second)
+			// Wait for the controller to create/update the workbench-trusted-ca-bundle
 			configMapName := "workbench-trusted-ca-bundle"
-			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+			// TODO(RHOAIENG-15907): use eventually to mask product flakiness
+			Eventually(func() error {
+				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+			}, duration, interval).Should(Succeed())
 		})
 	})
 
@@ -1533,15 +1537,22 @@ func createOAuthConfigmap(name, namespace string, label map[string]string, confi
 	}
 }
 
-// checkCertConfigMap checks the content of a config map defined by the name and namespace
+// checkCertConfigMapWithError checks the content of a config map defined by the name and namespace
 // It tries to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
-func checkCertConfigMap(ctx context.Context, namespace string, configMapName string, certFileName string, expNumberCerts int) {
+// Returns an error instead of using Expect() for use with Eventually()
+func checkCertConfigMapWithError(ctx context.Context, namespace string, configMapName string, certFileName string, expNumberCerts int) error {
 	configMap := &corev1.ConfigMap{}
 	key := types.NamespacedName{Namespace: namespace, Name: configMapName}
-	Expect(cli.Get(ctx, key, configMap)).Should(Succeed())
+	if err := cli.Get(ctx, key, configMap); err != nil {
+		return fmt.Errorf("failed to get ConfigMap %s/%s: %v", namespace, configMapName, err)
+	}
+
+	certData, exists := configMap.Data[certFileName]
+	if !exists {
+		return fmt.Errorf("certificate file %s not found in ConfigMap %s/%s", certFileName, namespace, configMapName)
+	}
 
 	// Attempt to decode PEM encoded certificates so we are sure all are readable as expected
-	certData := configMap.Data[certFileName]
 	certDataByte := []byte(certData)
 	certificatesFound := 0
 	for len(certDataByte) > 0 {
@@ -1554,10 +1565,16 @@ func checkCertConfigMap(ctx context.Context, namespace string, configMapName str
 
 		if block.Type == "CERTIFICATE" {
 			// Attempt to parse the certificate
-			_, err := x509.ParseCertificate(block.Bytes)
-			Expect(err).ShouldNot(HaveOccurred())
+			if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+				return fmt.Errorf("failed to parse certificate %d: %v", certificatesFound+1, err)
+			}
 			certificatesFound++
 		}
 	}
-	Expect(certificatesFound).Should(Equal(expNumberCerts), "Number of parsed certificates don't match expected one:\n"+certData)
+
+	if certificatesFound != expNumberCerts {
+		return fmt.Errorf("expected %d certificates, found %d. Certificate data:\n%s", expNumberCerts, certificatesFound, certData)
+	}
+
+	return nil
 }
