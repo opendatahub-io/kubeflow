@@ -71,6 +71,9 @@ var (
 	managerStopped = make(chan struct{})
 
 	testNamespaces = []string{}
+
+	// OAuth proxy image hardcoded placeholder value for tests
+	oauthProxyImage string = "quay.io/odh-test-images/oauth-proxy-placeholder:latest"
 )
 
 const (
@@ -205,7 +208,7 @@ var _ = BeforeSuite(func() {
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
 			OAuthConfig: OAuthConfig{
-				ProxyImage: OAuthProxyImage,
+				ProxyImage: oauthProxyImage,
 			},
 			Decoder: admission.NewDecoder(mgr.GetScheme()),
 		},
@@ -256,6 +259,7 @@ var _ = AfterSuite(func() {
 	err := envTest.Stop()
 	Expect(err).NotTo(HaveOccurred())
 
+	By("Shutting down OpenTelemetry")
 	err = otelShutdown(context.Background())
 	Expect(err).NotTo(HaveOccurred())
 })

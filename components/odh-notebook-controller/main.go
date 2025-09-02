@@ -89,8 +89,8 @@ func main() {
 		"The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
-	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", controllers.OAuthProxyImage,
-		"Image of the OAuth proxy sidecar container.")
+	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", "",
+		"Image of the OAuth proxy sidecar container. (required)")
 	// specified explicitly, since on macOS the default temporary directory often resolves to a path under /var/folders/...
 	// this default path in /tmp/ is already hardcoded in the Makefile and manifests used for ktunnel deployment
 	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
@@ -110,6 +110,13 @@ func main() {
 
 	// Setup logger
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Validate required flags
+	if oauthProxyImage == "" {
+		setupLog.Error(fmt.Errorf("missing required flag"), "oauth-proxy-image flag must be set")
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	// Setup controller manager
 	mgrConfig := ctrl.Options{

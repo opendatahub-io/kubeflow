@@ -1399,7 +1399,7 @@ func createOAuthServiceAccount(name, namespace string) corev1.ServiceAccount {
 func createOAuthContainer(name, namespace string) corev1.Container {
 	return corev1.Container{
 		Name:            "oauth-proxy",
-		Image:           OAuthProxyImage,
+		Image:           oauthProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
 		Env: []corev1.EnvVar{{
 			Name: "NAMESPACE",
