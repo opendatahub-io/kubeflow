@@ -16,6 +16,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -56,6 +57,14 @@ func creationTestSuite(t *testing.T) {
 				}
 				err = testCtx.testNotebookOAuthSidecar(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar for Notebook ")
+			})
+
+			t.Run("Notebook OAuth sidecar Resource Validation", func(t *testing.T) {
+				if deploymentMode == ServiceMesh {
+					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
+				}
+				err = testCtx.testNotebookOAuthSidecarResources(nbContext.nbObjectMeta)
+				require.NoError(t, err, "error testing sidecar resources for Notebook ")
 			})
 
 			t.Run("Verify Notebook Traffic", func(t *testing.T) {
@@ -283,6 +292,94 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 	}
 	if resp.StatusCode != 503 {
 		return errorWithBody(resp)
+	}
+	return nil
+}
+
+func (tc *testContext) testNotebookOAuthSidecarResources(nbMeta *metav1.ObjectMeta) error {
+	nbPods, err := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("statefulset=%s", nbMeta.Name)})
+
+	if err != nil {
+		return fmt.Errorf("error retrieving Notebook pods: %v", err)
+	}
+
+	// Get the notebook to check annotations
+	notebook := &nbv1.Notebook{}
+	err = tc.customClient.Get(tc.ctx, types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}, notebook)
+	if err != nil {
+		return fmt.Errorf("error getting notebook: %v", err)
+	}
+
+	for _, nbpod := range nbPods.Items {
+		if nbpod.Status.Phase != v1.PodRunning {
+			return fmt.Errorf("notebook pod %v is not in Running phase", nbpod.Name)
+		}
+
+		// Find oauth-proxy container
+		var oauthContainer *v1.Container
+		for _, container := range nbpod.Spec.Containers {
+			if container.Name == "oauth-proxy" {
+				oauthContainer = &container
+				break
+			}
+		}
+
+		if oauthContainer == nil {
+			return fmt.Errorf("oauth-proxy container not found in pod %v", nbpod.Name)
+		}
+
+		// Validate resource specifications based on annotations
+		annotations := notebook.GetAnnotations()
+		if annotations != nil {
+			// Check CPU request
+			if expectedCPUReqStr, exists := annotations["notebooks.opendatahub.io/auth-sidecar-cpu-request"]; exists {
+				expectedCPUReq, err := resource.ParseQuantity(strings.TrimSpace(expectedCPUReqStr))
+				if err != nil {
+					return fmt.Errorf("invalid expected CPU request in annotation '%s': %v", expectedCPUReqStr, err)
+				}
+				actualCPUReq := oauthContainer.Resources.Requests.Cpu()
+				if actualCPUReq.Cmp(expectedCPUReq) != 0 {
+					return fmt.Errorf("expected CPU request %s, got %s for pod %v", expectedCPUReq.String(), actualCPUReq.String(), nbpod.Name)
+				}
+			}
+
+			// Check Memory request
+			if expectedMemReqStr, exists := annotations["notebooks.opendatahub.io/auth-sidecar-memory-request"]; exists {
+				expectedMemReq, err := resource.ParseQuantity(strings.TrimSpace(expectedMemReqStr))
+				if err != nil {
+					return fmt.Errorf("invalid expected memory request in annotation '%s': %v", expectedMemReqStr, err)
+				}
+				actualMemReq := oauthContainer.Resources.Requests.Memory()
+				if actualMemReq.Cmp(expectedMemReq) != 0 {
+					return fmt.Errorf("expected memory request %s, got %s for pod %v", expectedMemReq.String(), actualMemReq.String(), nbpod.Name)
+				}
+			}
+
+			// Check CPU limit
+			if expectedCPULimitStr, exists := annotations["notebooks.opendatahub.io/auth-sidecar-cpu-limit"]; exists {
+				expectedCPULimit, err := resource.ParseQuantity(strings.TrimSpace(expectedCPULimitStr))
+				if err != nil {
+					return fmt.Errorf("invalid expected CPU limit in annotation '%s': %v", expectedCPULimitStr, err)
+				}
+				actualCPULimit := oauthContainer.Resources.Limits.Cpu()
+				if actualCPULimit.Cmp(expectedCPULimit) != 0 {
+					return fmt.Errorf("expected CPU limit %s, got %s for pod %v", expectedCPULimit.String(), actualCPULimit.String(), nbpod.Name)
+				}
+			}
+
+			// Check Memory limit
+			if expectedMemLimitStr, exists := annotations["notebooks.opendatahub.io/auth-sidecar-memory-limit"]; exists {
+				expectedMemLimit, err := resource.ParseQuantity(strings.TrimSpace(expectedMemLimitStr))
+				if err != nil {
+					return fmt.Errorf("invalid expected memory limit in annotation '%s': %v", expectedMemLimitStr, err)
+				}
+				actualMemLimit := oauthContainer.Resources.Limits.Memory()
+				if actualMemLimit.Cmp(expectedMemLimit) != 0 {
+					return fmt.Errorf("expected memory limit %s, got %s for pod %v", expectedMemLimit.String(), actualMemLimit.String(), nbpod.Name)
+				}
+			}
+		}
 	}
 	return nil
 }

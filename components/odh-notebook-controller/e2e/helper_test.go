@@ -168,21 +168,58 @@ func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depM
 		log.Printf("error rolling out the deployment %v: %v ", depMeta.Name, err)
 	}
 
-	testNotebook := &nbv1.Notebook{
-		ObjectMeta: *nbMeta,
-	}
-	// The NBC added the annotation to stop the idle workbench: kubeflow-resource-stopped: '2024-11-26T17:20:42Z'
-	// To make the workbench running again, we need to also remove that annotation.
-	patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
-
-	if err := tc.customClient.Patch(tc.ctx, testNotebook, patch); err != nil {
-		log.Printf("failed to patch Notebook CR removing the kubeflow-resource-stopped annotation: %v ", err)
-	}
-	// now we should wait for pod to start again
-	err = tc.waitForStatefulSet(nbMeta, 1, 1)
+	// IMPORTANT: Culling affects ALL notebooks in the namespace, not just the test target
+	// The restartAllCulledNotebooks function will handle restarting this notebook and any others that were culled
+	err = tc.restartAllCulledNotebooks()
 	if err != nil {
-		log.Printf("notebook StatefulSet: %s isn't ready as expected: %s", nbMeta.Name, err)
+		log.Printf("Warning: Failed to restart other culled notebooks: %v", err)
 	}
+}
+
+// restartAllCulledNotebooks finds all notebooks with kubeflow-resource-stopped annotation and restarts them
+func (tc *testContext) restartAllCulledNotebooks() error {
+	// List all notebooks in the test namespace
+	notebookList := &nbv1.NotebookList{}
+	err := tc.customClient.List(tc.ctx, notebookList, client.InNamespace(tc.testNamespace))
+	if err != nil {
+		return fmt.Errorf("failed to list notebooks: %v", err)
+	}
+
+	culledNotebooks := []nbv1.Notebook{}
+	for _, notebook := range notebookList.Items {
+		if _, exists := notebook.Annotations["kubeflow-resource-stopped"]; exists {
+			culledNotebooks = append(culledNotebooks, notebook)
+		}
+	}
+
+	if len(culledNotebooks) == 0 {
+		return nil
+	}
+
+	// Restart each culled notebook
+	for _, notebook := range culledNotebooks {
+		// Remove the kubeflow-resource-stopped annotation
+		patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
+		notebookForPatch := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebook.Name,
+				Namespace: notebook.Namespace,
+			},
+		}
+
+		if err := tc.customClient.Patch(tc.ctx, notebookForPatch, patch); err != nil {
+			log.Printf("Failed to patch notebook %s: %v", notebook.Name, err)
+			continue
+		}
+
+		// Wait for the notebook to become ready
+		nbMeta := &metav1.ObjectMeta{Name: notebook.Name, Namespace: notebook.Namespace}
+		if waitErr := tc.waitForStatefulSet(nbMeta, 1, 1); waitErr != nil {
+			log.Printf("Warning: Notebook %s didn't become ready within 2 minutes: %v", notebook.Name, waitErr)
+		}
+	}
+
+	return nil
 }
 
 func (tc *testContext) scaleDeployment(depMeta metav1.ObjectMeta, desiredReplicas int32) error {
@@ -215,7 +252,7 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 				Spec: v1.PodSpec{
 					Containers: []v1.Container{
 						{
-							Name:       "thoth-minimal-oauth-notebook",
+							Name:       testNotebookName,
 							Image:      "quay.io/thoth-station/s2i-minimal-notebook:v0.2.2",
 							WorkingDir: "/opt/app-root/src",
 							Ports: []v1.ContainerPort{
@@ -274,6 +311,71 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 	return thothMinimalOAuthNbContext
 }
 
+// Add spec and metadata for Notebook objects with custom OAuth proxy resources
+func setupThothOAuthCustomResourcesNotebook() notebookContext {
+	// Too long name - shall be resolved via https://issues.redhat.com/browse/RHOAIENG-33609
+	// testNotebookName := "thoth-oauth-custom-resources-notebook"
+	testNotebookName := "thoth-custom-resources-notebook"
+
+	testNotebook := &nbv1.Notebook{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"notebooks.opendatahub.io/inject-oauth":                "true",
+				"notebooks.opendatahub.io/auth-sidecar-cpu-request":    "0.2", // equivalent to 200m
+				"notebooks.opendatahub.io/auth-sidecar-memory-request": "128Mi",
+				"notebooks.opendatahub.io/auth-sidecar-cpu-limit":      "400m",
+				"notebooks.opendatahub.io/auth-sidecar-memory-limit":   "256Mi",
+			},
+			Name:      testNotebookName,
+			Namespace: notebookTestNamespace,
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: v1.PodSpec{
+					Containers: []v1.Container{
+						{
+							Name:       testNotebookName,
+							Image:      "quay.io/thoth-station/s2i-minimal-notebook:v0.2.2",
+							WorkingDir: "/opt/app-root/src",
+							Ports: []v1.ContainerPort{
+								{
+									Name:          "notebook-port",
+									ContainerPort: 8888,
+									Protocol:      "TCP",
+								},
+							},
+							EnvFrom: []v1.EnvFromSource{},
+							Env: []v1.EnvVar{
+								{
+									Name:  "JUPYTER_ENABLE_LAB",
+									Value: "yes",
+								},
+							},
+							Resources: v1.ResourceRequirements{
+								Limits: v1.ResourceList{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+								Requests: v1.ResourceList{
+									v1.ResourceCPU:    resource.MustParse("1"),
+									v1.ResourceMemory: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	thothOAuthCustomResourcesNbContext := notebookContext{
+		nbObjectMeta: &testNotebook.ObjectMeta,
+		nbSpec:       &testNotebook.Spec,
+	}
+	return thothOAuthCustomResourcesNbContext
+}
+
 func setupThothMinimalServiceMeshNotebook() notebookContext {
 	testNotebookName := "thoth-minimal-service-mesh-notebook"
 
@@ -289,7 +391,7 @@ func setupThothMinimalServiceMeshNotebook() notebookContext {
 				Spec: v1.PodSpec{
 					Containers: []v1.Container{
 						{
-							Name:       "thoth-minimal-service-mesh-notebook",
+							Name:       testNotebookName,
 							Image:      "quay.io/thoth-station/s2i-minimal-notebook:v0.2.2",
 							WorkingDir: "/opt/app-root/src",
 							Ports: []v1.ContainerPort{

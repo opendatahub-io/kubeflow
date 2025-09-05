@@ -50,10 +50,18 @@ import (
 )
 
 const (
-	AnnotationInjectOAuth             = "notebooks.opendatahub.io/inject-oauth"
-	AnnotationServiceMesh             = "opendatahub.io/service-mesh"
-	AnnotationValueReconciliationLock = "odh-notebook-controller-lock"
-	AnnotationLogoutUrl               = "notebooks.opendatahub.io/oauth-logout-url"
+	AnnotationInjectOAuth              = "notebooks.opendatahub.io/inject-oauth"
+	AnnotationServiceMesh              = "opendatahub.io/service-mesh"
+	AnnotationValueReconciliationLock  = "odh-notebook-controller-lock"
+	AnnotationLogoutUrl                = "notebooks.opendatahub.io/oauth-logout-url"
+	AnnotationAuthSidecarCPURequest    = "notebooks.opendatahub.io/auth-sidecar-cpu-request"
+	AnnotationAuthSidecarMemoryRequest = "notebooks.opendatahub.io/auth-sidecar-memory-request"
+	AnnotationAuthSidecarCPULimit      = "notebooks.opendatahub.io/auth-sidecar-cpu-limit"
+	AnnotationAuthSidecarMemoryLimit   = "notebooks.opendatahub.io/auth-sidecar-memory-limit"
+	DefaultAuthSidecarCPURequest       = "100m"
+	DefaultAuthSidecarMemoryRequest    = "64Mi"
+	DefaultAuthSidecarCPULimit         = "100m"
+	DefaultAuthSidecarMemoryLimit      = "64Mi"
 )
 
 const (

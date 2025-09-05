@@ -1468,12 +1468,12 @@ func createOAuthContainer(name, namespace string) corev1.Container {
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
-				"memory": resource.MustParse("64Mi"),
+				corev1.ResourceCPU:    resource.MustParse(DefaultAuthSidecarCPURequest),
+				corev1.ResourceMemory: resource.MustParse(DefaultAuthSidecarMemoryRequest),
 			},
 			Limits: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
-				"memory": resource.MustParse("64Mi"),
+				corev1.ResourceCPU:    resource.MustParse(DefaultAuthSidecarCPULimit),
+				corev1.ResourceMemory: resource.MustParse(DefaultAuthSidecarMemoryLimit),
 			},
 		},
 		VolumeMounts: []corev1.VolumeMount{

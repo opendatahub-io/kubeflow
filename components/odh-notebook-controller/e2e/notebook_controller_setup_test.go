@@ -110,7 +110,11 @@ func NewTestContext() (*testContext, error) {
 	}
 
 	// Setup all test Notebooks
-	testNotebooksContextList := []notebookContext{setupThothMinimalOAuthNotebook(), setupThothMinimalServiceMeshNotebook()}
+	testNotebooksContextList := []notebookContext{
+		setupThothMinimalOAuthNotebook(),
+		setupThothOAuthCustomResourcesNotebook(),
+		setupThothMinimalServiceMeshNotebook(),
+	}
 
 	return &testContext{
 		cfg:                     config,

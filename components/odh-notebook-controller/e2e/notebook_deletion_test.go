@@ -3,11 +3,12 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"log"
+	"testing"
+
 	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"log"
-	"testing"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -51,9 +52,7 @@ func (tc *testContext) testNotebookDeletion(nbMeta *metav1.ObjectMeta) error {
 			return fmt.Errorf("error deleting test Notebook %s: %v", nbMeta.Name, nberr)
 		}
 	} else if !errors.IsNotFound(err) {
-		if err != nil {
-			return fmt.Errorf("error getting test Notebook instance :%v", err)
-		}
+		return fmt.Errorf("error getting test Notebook instance :%v", err)
 	}
 	return nil
 }
@@ -87,9 +86,17 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 			}
 			log.Printf("Failed to get Network policies for %v", nbMeta.Name)
 			return false, err
-
 		}
-		if len(nbNetworkPolicyList.Items) == 0 {
+
+		// Filter the policies to only include those related to this specific notebook based on pod selector
+		notebookSpecificPolicies := []netv1.NetworkPolicy{}
+		for _, np := range nbNetworkPolicyList.Items {
+			if isNetworkPolicyForNotebook(&np, nbMeta.Name) {
+				notebookSpecificPolicies = append(notebookSpecificPolicies, np)
+			}
+		}
+
+		if len(notebookSpecificPolicies) == 0 {
 			return true, nil
 		}
 		return false, nil
@@ -110,7 +117,6 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 				}
 				log.Printf("Failed to get %s Route", nbMeta.Name)
 				return false, err
-
 			}
 			return false, nil
 		})
@@ -135,6 +141,18 @@ func filterServiceMeshManagedPolicies(nbMeta *metav1.ObjectMeta) []client.ListOp
 		client.InNamespace(nbMeta.Namespace),
 		client.MatchingLabelsSelector{Selector: notManagedByMeshLabel},
 	}
+}
+
+// isNetworkPolicyForNotebook checks if a NetworkPolicy targets a specific notebook
+// by examining its spec.podSelector for the notebook-name label
+func isNetworkPolicyForNotebook(np *netv1.NetworkPolicy, notebookName string) bool {
+	// Check if the NetworkPolicy's podSelector has the notebook-name label
+	if np.Spec.PodSelector.MatchLabels != nil {
+		if labelValue, exists := np.Spec.PodSelector.MatchLabels["notebook-name"]; exists {
+			return labelValue == notebookName
+		}
+	}
+	return false
 }
 
 func (tc *testContext) isNotebookCRD() error {

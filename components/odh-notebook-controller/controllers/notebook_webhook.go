@@ -97,9 +97,86 @@ func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 	return nil
 }
 
+// resourceConfig holds parsed and validated OAuth proxy resource configuration
+type resourceConfig struct {
+	cpuRequest    resource.Quantity
+	memoryRequest resource.Quantity
+	cpuLimit      resource.Quantity
+	memoryLimit   resource.Quantity
+}
+
+// parseAndValidateAuthSidecarResources parses OAuth proxy resource annotations, applies defaults,
+// and validates that requests <= limits. This centralizes all resource parsing and validation logic.
+func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceConfig, error) {
+	// Start with defaults
+	config := &resourceConfig{
+		cpuRequest:    resource.MustParse(DefaultAuthSidecarCPURequest),
+		memoryRequest: resource.MustParse(DefaultAuthSidecarMemoryRequest),
+		cpuLimit:      resource.MustParse(DefaultAuthSidecarCPULimit),
+		memoryLimit:   resource.MustParse(DefaultAuthSidecarMemoryLimit),
+	}
+
+	annotations := notebook.GetAnnotations()
+	if annotations == nil {
+		return config, nil
+	}
+
+	// Parse and validate each annotation, updating config if valid
+	resourceMap := map[string]*resource.Quantity{
+		AnnotationAuthSidecarCPURequest:    &config.cpuRequest,
+		AnnotationAuthSidecarMemoryRequest: &config.memoryRequest,
+		AnnotationAuthSidecarCPULimit:      &config.cpuLimit,
+		AnnotationAuthSidecarMemoryLimit:   &config.memoryLimit,
+	}
+
+	for key, quantity := range resourceMap {
+		if valStr, ok := annotations[key]; ok && valStr != "" {
+			val, err := resource.ParseQuantity(strings.TrimSpace(valStr))
+			if err != nil {
+				return nil, fmt.Errorf("invalid value for annotation '%s': '%s': %w", key, valStr, err)
+			}
+			if val.Sign() < 0 {
+				return nil, fmt.Errorf("annotation '%s' value '%s' cannot be negative", key, valStr)
+			}
+			*quantity = val
+		}
+	}
+
+	// Validate that requests <= limits (including defaults)
+	if config.cpuRequest.Cmp(config.cpuLimit) > 0 {
+		return nil, fmt.Errorf("CPU request (%s) cannot be greater than CPU limit (%s)",
+			config.cpuRequest.String(), config.cpuLimit.String())
+	}
+
+	if config.memoryRequest.Cmp(config.memoryLimit) > 0 {
+		return nil, fmt.Errorf("memory request (%s) cannot be greater than memory limit (%s)",
+			config.memoryRequest.String(), config.memoryLimit.String())
+	}
+
+	return config, nil
+}
+
 // InjectOAuthProxy injects the OAuth proxy sidecar container in the Notebook
 // spec
 func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
+	// Parse and validate OAuth proxy resource annotations
+	config, err := parseAndValidateAuthSidecarResources(notebook)
+	if err != nil {
+		return fmt.Errorf("invalid OAuth proxy resource configuration: %w", err)
+	}
+
+	// Convert config to ResourceRequirements
+	resourceRequirements := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    config.cpuRequest,
+			corev1.ResourceMemory: config.memoryRequest,
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    config.cpuLimit,
+			corev1.ResourceMemory: config.memoryLimit,
+		},
+	}
+
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
 		Name:            "oauth-proxy",
@@ -165,16 +242,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 			SuccessThreshold:    1,
 			FailureThreshold:    3,
 		},
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
-				"memory": resource.MustParse("64Mi"),
-			},
-			Limits: corev1.ResourceList{
-				"cpu":    resource.MustParse("100m"),
-				"memory": resource.MustParse("64Mi"),
-			},
-		},
+		Resources: resourceRequirements,
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      "oauth-client",
@@ -378,6 +446,8 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
 			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
 		}
+
+		// Inject OAuth proxy
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
