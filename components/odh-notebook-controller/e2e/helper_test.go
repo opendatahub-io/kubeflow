@@ -135,17 +135,30 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
 	// Verify StatefulSet is running expected number of replicas
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
-			nbMeta.Name, metav1.GetOptions{})
-
+		// Find StatefulSet by looking for one that has a selector matching "statefulset": notebook.Name
+		// This works for both regular names and generated names (when notebook name is too long)
+		namespacedStatefulSets := &appsv1.StatefulSetList{}
+		err1 := tc.customClient.List(ctx, namespacedStatefulSets, client.InNamespace(tc.testNamespace))
 		if err1 != nil {
-			if errors.IsNotFound(err1) {
-				return false, nil
-			} else {
-				log.Printf("Failed to get %s statefulset", nbMeta.Name)
-				return false, err1
+			log.Printf("Failed to list StatefulSets in namespace %s", tc.testNamespace)
+			return false, err1
+		}
+
+		// Find the StatefulSet that has a selector for "statefulset": nbMeta.Name
+		var notebookStatefulSet *appsv1.StatefulSet
+		for _, sts := range namespacedStatefulSets.Items {
+			if sts.Spec.Selector != nil && sts.Spec.Selector.MatchLabels != nil {
+				if statefulsetLabel, exists := sts.Spec.Selector.MatchLabels["statefulset"]; exists && statefulsetLabel == nbMeta.Name {
+					notebookStatefulSet = &sts
+					break
+				}
 			}
 		}
+
+		if notebookStatefulSet == nil {
+			return false, nil // StatefulSet not found yet
+		}
+
 		if notebookStatefulSet.Status.AvailableReplicas == availableReplicas &&
 			notebookStatefulSet.Status.ReadyReplicas == readyReplicas {
 			return true, nil
