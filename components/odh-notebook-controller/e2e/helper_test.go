@@ -2,9 +2,11 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -22,6 +24,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
+
+const (
+	// letterRunes contains the characters used for random string generation
+	letterRunes = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+
+// generateRandomString generates a random string of the specified length
+// using alphanumeric characters (0-9, A-Z, a-z)
+func generateRandomString(length int) (string, error) {
+	if length <= 0 {
+		return "", fmt.Errorf("length must be greater than 0")
+	}
+
+	randomValue := make([]byte, length)
+	for i := 0; i < length; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letterRunes))))
+		if err != nil {
+			return "", fmt.Errorf("error generating random string: %w", err)
+		}
+		randomValue[i] = letterRunes[num.Int64()]
+	}
+
+	return string(randomValue), nil
+}
 
 func (tc *testContext) waitForControllerDeployment(name string, replicas int32) error {
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
@@ -166,17 +192,30 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
 	// Verify StatefulSet is running expected number of replicas
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
-			nbMeta.Name, metav1.GetOptions{})
-
+		// Find StatefulSet by looking for one that has a selector matching "statefulset": notebook.Name
+		// This works for both regular names and generated names (when notebook name is too long)
+		namespacedStatefulSets := &appsv1.StatefulSetList{}
+		err1 := tc.customClient.List(ctx, namespacedStatefulSets, client.InNamespace(tc.testNamespace))
 		if err1 != nil {
-			if apierrors.IsNotFound(err1) {
-				return false, nil
-			} else {
-				log.Printf("Failed to get %s statefulset", nbMeta.Name)
-				return false, err1
+			log.Printf("Failed to list StatefulSets in namespace %s", tc.testNamespace)
+			return false, err1
+		}
+
+		// Find the StatefulSet that has a selector for "statefulset": nbMeta.Name
+		var notebookStatefulSet *appsv1.StatefulSet
+		for _, sts := range namespacedStatefulSets.Items {
+			if sts.Spec.Selector != nil && sts.Spec.Selector.MatchLabels != nil {
+				if statefulsetLabel, exists := sts.Spec.Selector.MatchLabels["statefulset"]; exists && statefulsetLabel == nbMeta.Name {
+					notebookStatefulSet = &sts
+					break
+				}
 			}
 		}
+
+		if notebookStatefulSet == nil {
+			return false, nil // StatefulSet not found yet
+		}
+
 		if notebookStatefulSet.Status.AvailableReplicas == availableReplicas &&
 			notebookStatefulSet.Status.ReadyReplicas == readyReplicas {
 			return true, nil
@@ -344,9 +383,21 @@ func setupThothMinimalRbacNotebook() notebookContext {
 
 // Add spec and metadata for Notebook objects with custom rbac proxy resources
 func setupThothRbacCustomResourcesNotebook() notebookContext {
-	// Too long name - shall be resolved via https://issues.redhat.com/browse/RHOAIENG-33609
-	// testNotebookName := "thoth-rbac-custom-resources-notebook-1"
-	testNotebookName := "thoth-custom-resources-notebook"
+	// Let's use long name to test the generated route name https://issues.redhat.com/browse/RHOAIENG-33609
+	// Route threshold: name + namespace > 63 chars
+	// "thoth-oauth-custom-resources-notebook" (38) + "odh-notebook-controller-system" (31) = 69
+	// If total is less than 63, add random characters to exceed the threshold (eg. default namespace name is overrided during the tests execution)
+	testNotebookName := "thoth-oauth-custom-resources-notebook"
+	currentLength := len(testNotebookName) + len(notebookTestNamespace)
+	if currentLength < 63 {
+		// Calculate how many characters we need to add to exceed 63 (add 1 to ensure we exceed, not just reach)
+		charsNeeded := 63 - currentLength + 1
+		randomSuffix, err := generateRandomString(charsNeeded)
+		if err != nil {
+			log.Fatalf("Failed to generate random string for test notebook name: %v", err)
+		}
+		testNotebookName = testNotebookName + "-" + randomSuffix
+	}
 
 	testNotebook := &nbv1.Notebook{
 		TypeMeta: metav1.TypeMeta{},
