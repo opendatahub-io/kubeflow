@@ -139,12 +139,11 @@ func ReconciliationLockIsEnabled(meta metav1.ObjectMeta) bool {
 func (r *OpenshiftNotebookReconciler) RemoveReconciliationLock(notebook *nbv1.Notebook,
 	ctx context.Context) error {
 	// Wait until the image pull secret is mounted in the notebook service
-	// account, but proceed anyway if it takes too long (for test environments
-	// or cases where ImagePullSecrets aren't needed)
+	// account
 	retry.OnError(wait.Backoff{
 		Steps:    3,
 		Duration: 1 * time.Second,
-		Factor:   2.0, // Reduced factor for faster timeout
+		Factor:   5.0,
 	}, func(error) bool { return true },
 		func() error {
 			serviceAccount := &corev1.ServiceAccount{}

@@ -43,6 +43,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/go-logr/logr"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -199,6 +200,16 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
+	// Setup test helper to add ImagePullSecrets to service accounts
+	// This simulates the behavior of real OpenShift environments where
+	// ImagePullSecrets are automatically mounted on service accounts
+	err = (&TestServiceAccountReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("test-serviceaccount-helper"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+
 	// Setup notebook mutating webhook
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
@@ -248,6 +259,45 @@ var _ = BeforeSuite(func() {
 	}
 
 }, 60)
+
+// TestServiceAccountReconciler is a test-only controller that automatically
+// adds ImagePullSecrets to service accounts to simulate real OpenShift behavior
+type TestServiceAccountReconciler struct {
+	client.Client
+	Log    logr.Logger
+	Scheme *runtime.Scheme
+}
+
+func (r *TestServiceAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	serviceAccount := &v1.ServiceAccount{}
+	if err := r.Get(ctx, req.NamespacedName, serviceAccount); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Skip if it already has ImagePullSecrets or if it's not a notebook-related service account
+	if len(serviceAccount.ImagePullSecrets) > 0 || serviceAccount.Labels["notebook-name"] == "" {
+		return ctrl.Result{}, nil
+	}
+
+	// Add a test ImagePullSecret to simulate real OpenShift behavior
+	serviceAccount.ImagePullSecrets = []v1.LocalObjectReference{
+		{Name: "test-pull-secret"},
+	}
+
+	if err := r.Update(ctx, serviceAccount); err != nil {
+		r.Log.Error(err, "Failed to add ImagePullSecrets to service account")
+		return ctrl.Result{}, err
+	}
+
+	r.Log.Info("Added test ImagePullSecrets to service account", "serviceAccount", serviceAccount.Name)
+	return ctrl.Result{}, nil
+}
+
+func (r *TestServiceAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1.ServiceAccount{}).
+		Complete(r)
+}
 
 var _ = AfterSuite(func() {
 	By("Stopping the manager")
