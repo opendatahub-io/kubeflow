@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/require"
@@ -322,28 +323,182 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
-	logger.Info("Waiting for notebook to be culled due to inactivity",
-		"waitTime", "180 seconds")
-	time.Sleep(180 * time.Second)
-
-	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
-	logger.Info("Testing notebook endpoint - expecting 503 status after culling")
-	resp, err := tc.curlNotebookEndpoint(*nbMeta)
+	// Active monitoring of culling process with detailed timing validation
+	err = tc.monitorNotebookCulling(nbMeta, logger, startTime)
 	if err != nil {
-		logger.V(1).Info("Error accessing notebook endpoint", "error", err)
-		return fmt.Errorf("error accessing Notebook Endpoint with 503: %v ", err)
+		return err
 	}
-	if resp.StatusCode != 503 {
-		logger.Info("Expected 503 but got different status code - culling may not have occurred",
-			"expectedStatus", 503,
-			"actualStatus", resp.StatusCode)
-		return errorWithBody(resp)
-	}
-	logger.Info("Successfully verified notebook was culled",
-		"statusCode", resp.StatusCode,
+	logger.Info("Successfully verified notebook culling process",
 		"duration", time.Since(startTime))
 	return nil
+}
+
+// monitorNotebookCulling actively monitors the notebook culling process with detailed validation
+// It monitors StatefulSet/Pod status and last activity annotations instead of accessing the endpoint
+// to avoid interfering with the culling process
+func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger logr.Logger, testStartTime time.Time) error {
+	// Configuration for culling monitoring
+	const (
+		minimumCullTime = 2 * time.Minute  // Notebook should NOT be culled before this
+		maximumCullTime = 4 * time.Minute  // Notebook SHOULD be culled by this time
+		checkInterval   = 10 * time.Second // Check every 10 seconds
+	)
+
+	logger.Info("Starting active notebook culling monitoring (non-intrusive)",
+		"minimumCullTime", minimumCullTime,
+		"maximumCullTime", maximumCullTime,
+		"checkInterval", checkInterval,
+		"method", "StatefulSet/Pod monitoring")
+
+	checkCount := 0
+	cullingStartTime := time.Now()
+
+	// Monitor until maximum timeout
+	for {
+		checkCount++
+		elapsedSinceStart := time.Since(cullingStartTime)
+		elapsedSinceTestStart := time.Since(testStartTime)
+
+		// Check notebook CR for last activity annotation
+		lastActivity, annotationErr := tc.getNotebookLastActivity(nbMeta)
+
+		// Check StatefulSet status (primary culling indicator)
+		isCulled, ssReplicas, podCount, err := tc.checkNotebookCullingStatus(nbMeta)
+
+		// Log comprehensive status
+		logFields := []interface{}{
+			"check", checkCount,
+			"elapsedTime", elapsedSinceStart,
+			"totalTestTime", elapsedSinceTestStart,
+			"isCulled", isCulled,
+			"statefulSetReplicas", ssReplicas,
+			"podCount", podCount,
+		}
+
+		if annotationErr == nil && lastActivity != "" {
+			logFields = append(logFields, "lastActivity", lastActivity)
+		} else if annotationErr != nil {
+			logFields = append(logFields, "lastActivityError", annotationErr.Error())
+		}
+
+		if err != nil {
+			logFields = append(logFields, "statusCheckError", err.Error())
+		}
+
+		logger.V(1).Info("Notebook culling status check", logFields...)
+
+		// If notebook has been culled (StatefulSet scaled to 0 or pods removed)
+		if isCulled {
+			if elapsedSinceStart < minimumCullTime {
+				logger.Info("Notebook was culled too early - this may indicate a timing issue",
+					"actualCullTime", elapsedSinceStart,
+					"minimumExpectedTime", minimumCullTime,
+					"checks", checkCount,
+					"lastActivity", lastActivity)
+				return fmt.Errorf("notebook was culled too early: culled after %v, expected minimum %v",
+					elapsedSinceStart, minimumCullTime)
+			}
+
+			logger.Info("Notebook successfully culled within expected timeframe",
+				"actualCullTime", elapsedSinceStart,
+				"totalTestTime", elapsedSinceTestStart,
+				"checks", checkCount,
+				"lastActivity", lastActivity,
+				"finalStatefulSetReplicas", ssReplicas,
+				"finalPodCount", podCount)
+			return nil
+		}
+
+		// If we've exceeded maximum time and notebook is still active
+		if elapsedSinceStart >= maximumCullTime {
+			logger.Info("Notebook was not culled within maximum expected time",
+				"actualTime", elapsedSinceStart,
+				"maximumExpectedTime", maximumCullTime,
+				"checks", checkCount,
+				"lastActivity", lastActivity,
+				"statefulSetReplicas", ssReplicas,
+				"podCount", podCount)
+			return fmt.Errorf("notebook was not culled within expected timeframe: still active after %v (replicas: %d, pods: %d)",
+				elapsedSinceStart, ssReplicas, podCount)
+		}
+
+		// Break if we've exceeded absolute maximum time (safety check)
+		if elapsedSinceStart >= maximumCullTime+time.Minute {
+			logger.Info("Exceeded absolute maximum monitoring time",
+				"elapsedTime", elapsedSinceStart,
+				"checks", checkCount)
+			return fmt.Errorf("culling monitoring exceeded absolute maximum time: %v", elapsedSinceStart)
+		}
+
+		// Wait before next check
+		time.Sleep(checkInterval)
+	}
+}
+
+// getNotebookLastActivity retrieves the last activity annotation from the Notebook CR
+func (tc *testContext) getNotebookLastActivity(nbMeta *metav1.ObjectMeta) (string, error) {
+	notebook := &nbv1.Notebook{}
+	err := tc.customClient.Get(tc.ctx, types.NamespacedName{
+		Name:      nbMeta.Name,
+		Namespace: nbMeta.Namespace,
+	}, notebook)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get notebook CR: %v", err)
+	}
+
+	// Look for common last activity annotation keys
+	lastActivityKeys := []string{
+		"notebooks.kubeflow.org/last-activity",
+		"opendatahub.io/last-activity",
+		"last-activity",
+	}
+
+	for _, key := range lastActivityKeys {
+		if value, exists := notebook.Annotations[key]; exists {
+			return value, nil
+		}
+	}
+
+	return "", nil // No last activity annotation found
+}
+
+// checkNotebookCullingStatus checks if the notebook has been culled by examining StatefulSet and Pod status
+func (tc *testContext) checkNotebookCullingStatus(nbMeta *metav1.ObjectMeta) (isCulled bool, ssReplicas int32, podCount int, err error) {
+	// Check StatefulSet replicas
+	ss, ssErr := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx, nbMeta.Name, metav1.GetOptions{})
+	if ssErr != nil {
+		if errors.IsNotFound(ssErr) {
+			// StatefulSet deleted = definitely culled
+			return true, 0, 0, nil
+		}
+		return false, 0, 0, fmt.Errorf("error getting StatefulSet: %v", ssErr)
+	}
+
+	ssReplicas = ss.Status.ReadyReplicas
+
+	// Check Pod count
+	pods, podErr := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("statefulset=%s", nbMeta.Name),
+	})
+	if podErr != nil {
+		return false, ssReplicas, 0, fmt.Errorf("error getting Pods: %v", podErr)
+	}
+
+	// Count only running/pending pods (not terminating)
+	activePodCount := 0
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp == nil {
+			activePodCount++
+		}
+	}
+
+	// Notebook is considered culled if:
+	// 1. StatefulSet has 0 ready replicas AND
+	// 2. No active pods are running
+	isCulled = ssReplicas == 0 && activePodCount == 0
+
+	return isCulled, ssReplicas, activePodCount, nil
 }
 
 func (tc *testContext) testNotebookOAuthSidecarResources(nbMeta *metav1.ObjectMeta) error {
