@@ -28,6 +28,9 @@ fi
 
 export K8S_NAMESPACE="${TEST_NAMESPACE}"
 
+# Enable debug logging by default in CI environment for better debugging
+export E2E_LOG_LEVEL="${E2E_LOG_LEVEL:-debug}"
+
 # From now on we want to be sure that undeploy and testing project deletion are called
 
 function cleanup() {
