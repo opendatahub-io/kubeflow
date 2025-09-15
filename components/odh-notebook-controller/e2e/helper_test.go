@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -23,83 +22,184 @@ import (
 )
 
 func (tc *testContext) waitForControllerDeployment(name string, replicas int32) error {
-	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+	logger := GetHelperLogger().WithValues(
+		"deployment", name,
+		"replicas", replicas,
+		"timeout", tc.resourceCreationTimeout,
+	)
+	logger.Info("Waiting for controller deployment")
 
+	startTime := time.Now()
+	pollCount := 0
+
+	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		pollCount++
 		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(ctx, name, metav1.GetOptions{})
 
 		if err != nil {
 			if errors.IsNotFound(err) {
+				logger.V(1).Info("Deployment not found, continuing to wait",
+					"poll", pollCount)
 				return false, nil
 			}
-			log.Printf("Failed to get %s controller deployment", name)
+			logger.V(1).Info("Error getting controller deployment",
+				"poll", pollCount,
+				"error", err)
 			return false, err
 		}
+
+		logger.V(1).Info("Deployment status",
+			"poll", pollCount,
+			"readyReplicas", controllerDeployment.Status.ReadyReplicas,
+			"expectedReplicas", replicas,
+			"availableReplicas", controllerDeployment.Status.AvailableReplicas,
+			"unavailableReplicas", controllerDeployment.Status.UnavailableReplicas)
 
 		for _, condition := range controllerDeployment.Status.Conditions {
 			if condition.Type == appsv1.DeploymentAvailable {
 				if condition.Status == v1.ConditionTrue && controllerDeployment.Status.ReadyReplicas == replicas {
+					logger.Info("Controller deployment ready",
+						"duration", time.Since(startTime),
+						"polls", pollCount)
 					return true, nil
 				}
+				logger.V(1).Info("Deployment not yet ready",
+					"poll", pollCount,
+					"availableCondition", condition.Status,
+					"readyReplicas", controllerDeployment.Status.ReadyReplicas,
+					"expectedReplicas", replicas)
 			}
 		}
 
-		log.Printf("Error in %s deployment", name)
 		return false, nil
 
 	})
+
+	if err != nil {
+		logger.Error(err, "Controller deployment failed to become ready",
+			"polls", pollCount,
+			"duration", time.Since(startTime))
+	}
 	return err
 }
 
 func (tc *testContext) getNotebookRoute(nbMeta *metav1.ObjectMeta) (*routev1.Route, error) {
+	logger := GetHelperLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+		"deploymentMode", deploymentMode.String(),
+	)
+	logger.Info("Getting notebook route")
+
+	startTime := time.Now()
 	nbRouteList := routev1.RouteList{}
 
 	var opts []client.ListOption
 	if deploymentMode == ServiceMesh {
 		opts = append(opts, client.MatchingLabels{"maistra.io/gateway-name": "odh-gateway"})
+		logger.V(1).Info("Using Service Mesh mode",
+			"label", "maistra.io/gateway-name=odh-gateway")
 	} else {
 		opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
+		logger.V(1).Info("Using OAuth mode",
+			"label", fmt.Sprintf("notebook-name=%s", nbMeta.Name))
 	}
+
+	pollCount := 0
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		pollCount++
 		routeErr := tc.customClient.List(ctx, &nbRouteList, opts...)
 		if routeErr != nil {
-			log.Printf("error retrieving Notebook route %v", err)
+			logger.V(1).Info("Error retrieving route list",
+				"poll", pollCount,
+				"error", routeErr)
 			return false, nil
 		} else {
+			logger.V(1).Info("Retrieved route list",
+				"poll", pollCount,
+				"routeCount", len(nbRouteList.Items))
 			return true, nil
 		}
 	})
 
+	if err != nil {
+		logger.V(1).Info("Failed to retrieve notebook route after polling",
+			"polls", pollCount,
+			"error", err)
+		return nil, err
+	}
+
 	if len(nbRouteList.Items) == 0 {
+		logger.V(1).Info("No notebook route found matching the specified labels")
 		return nil, fmt.Errorf("no Notebook route found")
 	}
 
-	return &nbRouteList.Items[0], err
+	route := &nbRouteList.Items[0]
+	logger.Info("Found notebook route",
+		"routeName", route.Name,
+		"host", route.Spec.Host,
+		"duration", time.Since(startTime))
+	return route, nil
 }
 
 func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
+	logger := GetHelperLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+		"networkPolicy", name,
+	)
+	logger.Info("Getting notebook network policy")
+
+	startTime := time.Now()
 	nbNetworkPolicy := &netv1.NetworkPolicy{}
+	pollCount := 0
+
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		pollCount++
 		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if npErr != nil {
-			log.Printf("error retrieving Notebook Network policy %v: %v", name, err)
+			logger.V(1).Info("Network policy not found yet",
+				"poll", pollCount,
+				"error", npErr)
 			return false, nil
 		} else {
 			nbNetworkPolicy = np
+			logger.Info("Network policy found",
+				"duration", time.Since(startTime),
+				"polls", pollCount)
 			return true, nil
 		}
 	})
 
+	if err != nil {
+		logger.V(1).Info("Failed to get network policy",
+			"polls", pollCount,
+			"duration", time.Since(startTime),
+			"error", err)
+	}
 	return nbNetworkPolicy, err
 }
 
 func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Response, error) {
+	logger := GetHelperLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+	)
+	logger.Info("Accessing notebook endpoint")
+
+	startTime := time.Now()
+
 	nbRoute, err := tc.getNotebookRoute(&nbMeta)
 	if err != nil {
+		logger.V(1).Info("Failed to get notebook route", "error", err)
 		return nil, err
 	}
+
 	// Access the Notebook endpoint using http request
 	notebookEndpoint := "https://" + nbRoute.Spec.Host + "/notebook/" +
 		nbMeta.Namespace + "/" + nbMeta.Name + "/api"
+	logger.V(1).Info("Making HTTP GET request",
+		"endpoint", notebookEndpoint)
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -108,10 +208,22 @@ func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Res
 
 	req, err := http.NewRequest("GET", notebookEndpoint, nil)
 	if err != nil {
+		logger.V(1).Info("Failed to create HTTP request", "error", err)
 		return nil, err
 	}
 
-	return httpClient.Do(req)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		logger.V(1).Info("HTTP request failed",
+			"endpoint", notebookEndpoint,
+			"error", err)
+		return nil, err
+	}
+
+	logger.Info("HTTP request completed",
+		"statusCode", resp.StatusCode,
+		"duration", time.Since(startTime))
+	return resp, nil
 }
 
 func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
@@ -133,46 +245,91 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 }
 
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
+	logger := GetHelperLogger().WithValues(
+		"statefulset", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+		"expectedAvailable", availableReplicas,
+		"expectedReady", readyReplicas,
+	)
+	logger.V(1).Info("Waiting for StatefulSet to reach expected replica count")
+
 	// Verify StatefulSet is running expected number of replicas
+	pollCount := 0
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		pollCount++
 		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
 			nbMeta.Name, metav1.GetOptions{})
 
 		if err1 != nil {
 			if errors.IsNotFound(err1) {
+				logger.V(1).Info("StatefulSet not found yet",
+					"poll", pollCount)
 				return false, nil
 			} else {
-				log.Printf("Failed to get %s statefulset", nbMeta.Name)
+				logger.V(1).Info("Error getting StatefulSet",
+					"poll", pollCount,
+					"error", err1)
 				return false, err1
 			}
 		}
+
+		logger.V(1).Info("StatefulSet status",
+			"poll", pollCount,
+			"availableReplicas", notebookStatefulSet.Status.AvailableReplicas,
+			"readyReplicas", notebookStatefulSet.Status.ReadyReplicas)
+
 		if notebookStatefulSet.Status.AvailableReplicas == availableReplicas &&
 			notebookStatefulSet.Status.ReadyReplicas == readyReplicas {
+			logger.V(1).Info("StatefulSet reached expected replica count",
+				"polls", pollCount)
 			return true, nil
 		}
 		return false, nil
 	})
+
+	if err != nil {
+		logger.V(1).Info("StatefulSet failed to reach expected replica count",
+			"polls", pollCount,
+			"error", err)
+	}
 	return err
 }
 
 func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depMeta metav1.ObjectMeta, nbMeta *metav1.ObjectMeta) {
+	logger := GetCullingLogger().WithValues(
+		"configMap", cmMeta.Name,
+		"deployment", depMeta.Name,
+		"notebook", nbMeta.Name,
+	)
+	logger.Info("Reverting culling configuration")
+
 	// Delete the culling configuration Configmap once the test is completed
 	err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Delete(tc.ctx,
 		cmMeta.Name, metav1.DeleteOptions{})
 	if err != nil {
-		log.Printf("error deleting configmap notebook-controller-culler-config: %v ", err)
+		logger.Error(err, "Error deleting culling configmap")
+	} else {
+		logger.V(1).Info("Successfully deleted culling configmap")
 	}
+
 	// Roll out the controller deployment
+	logger.V(1).Info("Rolling out controller deployment to revert culling configuration")
 	err = tc.rolloutDeployment(depMeta)
 	if err != nil {
-		log.Printf("error rolling out the deployment %v: %v ", depMeta.Name, err)
+		logger.Error(err, "Error rolling out deployment")
+	} else {
+		logger.V(1).Info("Successfully rolled out deployment")
 	}
 
 	// IMPORTANT: Culling affects ALL notebooks in the namespace, not just the test target
 	// The restartAllCulledNotebooks function will handle restarting this notebook and any others that were culled
+	logger.V(1).Info("Restarting all culled notebooks")
 	err = tc.restartAllCulledNotebooks()
 	if err != nil {
-		log.Printf("Warning: Failed to restart other culled notebooks: %v", err)
+		logger.Info("Warning: Failed to restart other culled notebooks",
+			"error", err)
+	} else {
+		logger.V(1).Info("Successfully restarted all culled notebooks")
 	}
 }
 
@@ -208,14 +365,19 @@ func (tc *testContext) restartAllCulledNotebooks() error {
 		}
 
 		if err := tc.customClient.Patch(tc.ctx, notebookForPatch, patch); err != nil {
-			log.Printf("Failed to patch notebook %s: %v", notebook.Name, err)
+			logger := GetCullingLogger()
+			logger.Error(err, "Failed to patch notebook",
+				"notebook", notebook.Name)
 			continue
 		}
 
 		// Wait for the notebook to become ready
 		nbMeta := &metav1.ObjectMeta{Name: notebook.Name, Namespace: notebook.Namespace}
 		if waitErr := tc.waitForStatefulSet(nbMeta, 1, 1); waitErr != nil {
-			log.Printf("Warning: Notebook %s didn't become ready within 2 minutes: %v", notebook.Name, waitErr)
+			logger := GetCullingLogger()
+			logger.Info("Warning: Notebook didn't become ready within timeout",
+				"notebook", notebook.Name,
+				"error", waitErr)
 		}
 	}
 

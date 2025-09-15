@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -82,6 +81,13 @@ func creationTestSuite(t *testing.T) {
 }
 
 func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
+	logger := GetCreationLogger().WithValues(
+		"notebook", nbContext.nbObjectMeta.Name,
+		"namespace", nbContext.nbObjectMeta.Namespace,
+	)
+	logger.Info("Starting notebook creation test")
+
+	startTime := time.Now()
 
 	testNotebook := &nbv1.Notebook{
 		ObjectMeta: *nbContext.nbObjectMeta,
@@ -92,26 +98,42 @@ func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
 	notebookLookupKey := types.NamespacedName{Name: testNotebook.Name, Namespace: testNotebook.Namespace}
 	createdNotebook := nbv1.Notebook{}
 
+	logger.V(1).Info("Checking if notebook already exists")
 	err := tc.customClient.Get(tc.ctx, notebookLookupKey, &createdNotebook)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			logger.Info("Notebook not found, creating new notebook")
+			pollCount := 0
 			nberr := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+				pollCount++
 				creationErr := tc.customClient.Create(ctx, testNotebook)
 				if creationErr != nil {
-					log.Printf("Error creating Notebook resource %v: %v, trying again",
-						testNotebook.Name, creationErr)
+					logger.V(1).Info("Error creating notebook resource, trying again",
+						"poll", pollCount,
+						"error", creationErr)
 					return false, nil
 				} else {
+					logger.V(1).Info("Successfully created notebook",
+						"poll", pollCount)
 					return true, nil
 				}
 			})
 			if nberr != nil {
+				logger.V(1).Info("Failed to create test notebook",
+					"attempts", pollCount,
+					"error", nberr)
 				return fmt.Errorf("error creating test Notebook %s: %v", testNotebook.Name, nberr)
 			}
 		} else {
+			logger.V(1).Info("Error getting test notebook", "error", err)
 			return fmt.Errorf("error getting test Notebook %s: %v", testNotebook.Name, err)
 		}
+	} else {
+		logger.Info("Notebook already exists")
 	}
+
+	logger.Info("Notebook creation test completed successfully",
+		"duration", time.Since(startTime))
 	return nil
 }
 
@@ -251,6 +273,14 @@ func (tc *testContext) testNotebookTraffic(nbMeta *metav1.ObjectMeta) error {
 }
 
 func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
+	logger := GetCullingLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+	)
+	logger.Info("Starting notebook culling test")
+
+	startTime := time.Now()
+
 	// Create Configmap with culling configuration
 	cullingConfigMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -264,35 +294,55 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		},
 	}
 
+	logger.Info("Creating culling ConfigMap",
+		"cullIdleTime", "2 minutes",
+		"idlenessCheckPeriod", "1 minute")
 	_, err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Create(tc.ctx, cullingConfigMap,
 		metav1.CreateOptions{})
 	if err != nil {
+		logger.V(1).Info("Failed to create culling ConfigMap", "error", err)
 		return fmt.Errorf("error creating configmapnotebook-controller-culler-config: %v", err)
 	}
+
 	// Restart the deployment to get changes from configmap
+	logger.V(1).Info("Getting controller deployment for restart")
 	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
 		"notebook-controller-deployment", metav1.GetOptions{})
 	if err != nil {
+		logger.V(1).Info("Failed to get controller deployment", "error", err)
 		return fmt.Errorf("error getting deployment %v: %v", controllerDeployment.Name, err)
 	}
 
 	defer tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta, nbMeta)
 
+	logger.Info("Rolling out controller deployment to apply culling configuration")
 	err = tc.rolloutDeployment(controllerDeployment.ObjectMeta)
 	if err != nil {
+		logger.V(1).Info("Failed to rollout deployment with culling configuration", "error", err)
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
 	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
+	logger.Info("Waiting for notebook to be culled due to inactivity",
+		"waitTime", "180 seconds")
 	time.Sleep(180 * time.Second)
+
 	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
+	logger.Info("Testing notebook endpoint - expecting 503 status after culling")
 	resp, err := tc.curlNotebookEndpoint(*nbMeta)
 	if err != nil {
+		logger.V(1).Info("Error accessing notebook endpoint", "error", err)
 		return fmt.Errorf("error accessing Notebook Endpoint with 503: %v ", err)
 	}
 	if resp.StatusCode != 503 {
+		logger.Info("Expected 503 but got different status code - culling may not have occurred",
+			"expectedStatus", 503,
+			"actualStatus", resp.StatusCode)
 		return errorWithBody(resp)
 	}
+	logger.Info("Successfully verified notebook was culled",
+		"statusCode", resp.StatusCode,
+		"duration", time.Since(startTime))
 	return nil
 }
 
