@@ -260,6 +260,11 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 	if err != nil {
 		return fmt.Errorf("error creating configmapnotebook-controller-culler-config: %v", err)
 	}
+
+	// Wait for ConfigMap to be fully propagated
+	log.Printf("Waiting for ConfigMap to be propagated...")
+	time.Sleep(5 * time.Second)
+
 	// Restart the deployment to get changes from configmap
 	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
 		"notebook-controller-deployment", metav1.GetOptions{})
@@ -274,16 +279,73 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
+	// Wait longer for the controller to fully restart and load new config
+	// Need to ensure new pods fully start and read the correct ConfigMap values
+	log.Printf("Waiting for controller to restart and load culling config...")
+	time.Sleep(60 * time.Second)
+
+	// Wait for culling to trigger. With improved fallback logic, unreachable notebooks
+	// should be handled gracefully within the configured timeframe
+	log.Printf("Waiting 180 seconds for culling to trigger...")
 	time.Sleep(180 * time.Second)
+
+	// Check if the notebook has been marked for culling, with retry logic
+	notebookLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}
+	cullingFound := false
+
+	// Retry for up to 30 seconds to catch the culling annotation
+	for attempt := 1; attempt <= 6; attempt++ {
+		notebook := &nbv1.Notebook{}
+		if err := tc.customClient.Get(tc.ctx, notebookLookupKey, notebook); err == nil {
+			log.Printf("Attempt %d - Notebook annotations: %+v", attempt, notebook.Annotations)
+
+			if _, exists := notebook.Annotations["kubeflow-resource-stopped"]; exists {
+				log.Printf("✓ Notebook is marked for culling (attempt %d)", attempt)
+				cullingFound = true
+				break
+			}
+
+			// Debug timing on first attempt
+			if attempt == 1 {
+				if lastActivityStr, exists := notebook.Annotations["notebooks.kubeflow.org/last-activity"]; exists {
+					if lastActivity, err := time.Parse(time.RFC3339, lastActivityStr); err == nil {
+						now := time.Now()
+						idleTime := now.Sub(lastActivity)
+						expectedCullTime := lastActivity.Add(2 * time.Minute)
+						log.Printf("Debug timing - Last activity: %v, Now: %v, Idle for: %v, Should cull at: %v",
+							lastActivity, now, idleTime, expectedCullTime)
+					}
+				}
+			}
+		}
+
+		if attempt < 6 {
+			log.Printf("Waiting 5 seconds before retry %d...", attempt+1)
+			time.Sleep(5 * time.Second)
+		}
+	}
+
+	if !cullingFound {
+		log.Printf("✗ Notebook was NOT marked for culling after 6 attempts over 30 seconds")
+	}
+
 	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
 	resp, err := tc.curlNotebookEndpoint(*nbMeta)
 	if err != nil {
-		return fmt.Errorf("error accessing Notebook Endpoint with 503: %v ", err)
+		return fmt.Errorf("error accessing Notebook Endpoint: %v ", err)
 	}
-	if resp.StatusCode != 503 {
-		return errorWithBody(resp)
+
+	// Only expect 503 if culling was actually found
+	if cullingFound {
+		if resp.StatusCode != 503 {
+			return errorWithBody(resp)
+		}
+		log.Printf("✓ Notebook endpoint correctly returns 503 (Service Unavailable)")
+	} else {
+		log.Printf("⚠️  Culling not detected, notebook endpoint status: %d", resp.StatusCode)
+		return fmt.Errorf("notebook was not culled as expected - culling functionality may be broken")
 	}
+
 	return nil
 }
 
