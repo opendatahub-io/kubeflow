@@ -326,9 +326,8 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 
 // Add spec and metadata for Notebook objects with custom OAuth proxy resources
 func setupThothOAuthCustomResourcesNotebook() notebookContext {
-	// Too long name - shall be resolved via https://issues.redhat.com/browse/RHOAIENG-33609
-	// testNotebookName := "thoth-oauth-custom-resources-notebook"
-	testNotebookName := "thoth-custom-resources-notebook"
+	// Let's use long name to test the generated route name https://issues.redhat.com/browse/RHOAIENG-33609
+	testNotebookName := "thoth-oauth-custom-resources-notebook"
 
 	testNotebook := &nbv1.Notebook{
 		TypeMeta: metav1.TypeMeta{},
