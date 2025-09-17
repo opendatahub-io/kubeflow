@@ -209,7 +209,7 @@ undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluste
 e2e-test-%:
 	$(eval deploymentMode:=$(subst e2e-test-,,$@))
 	# Default timeout is 10m but we need to increase it to 20m for the e2e tests
-	go test ./e2e/ -timeout=20m -run ^TestE2ENotebookController -v \
+	E2E_LOG_LEVEL=$(E2E_LOG_LEVEL) go test ./e2e/ -timeout=20m -run ^TestE2ENotebookController -v \
 		--nb-namespace=$(K8S_NAMESPACE) \
 		--deploymentMode=$(deploymentMode) \
 		${E2E_TEST_FLAGS}
