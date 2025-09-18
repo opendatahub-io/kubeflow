@@ -81,14 +81,15 @@ type OpenshiftNotebookReconciler struct {
 
 // ClusterRole permissions
 
-// +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/status,verbs=get
-// +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update;patch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups=oauth.openshift.io,resources=oauthclients,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies/finalizers,verbs=update;patch
+// +kubebuilder:rbac:groups=oauth.openshift.io,resources=oauthclients,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
@@ -182,6 +183,11 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	} else if err != nil {
 		log.Error(err, "Unable to fetch the Notebook")
 		return ctrl.Result{}, err
+	}
+
+	// Handle notebook deletion with finalizer cleanup
+	if notebook.DeletionTimestamp != nil {
+		return r.handleNotebookDeletion(notebook, ctx)
 	}
 
 	// Create Configmap with the ODH notebook certificate
@@ -573,4 +579,35 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	return nil
+}
+
+// handleNotebookDeletion handles the deletion of a notebook by cleaning up the OAuthClient
+// and removing the finalizer to allow the notebook to be deleted
+func (r *OpenshiftNotebookReconciler) handleNotebookDeletion(notebook *nbv1.Notebook, ctx context.Context) (ctrl.Result, error) {
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	// Check if we have the OAuth client finalizer
+	if r.hasOAuthClientFinalizer(notebook) {
+		log.Info("Cleaning up OAuthClient before notebook deletion")
+
+		// Delete the OAuthClient
+		err := r.deleteOAuthClient(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Failed to delete OAuthClient")
+			return ctrl.Result{}, err
+		}
+
+		// Remove the finalizer
+		err = r.removeOAuthClientFinalizer(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Failed to remove OAuth client finalizer")
+			return ctrl.Result{}, err
+		}
+
+		log.Info("Successfully cleaned up OAuthClient and removed finalizer")
+	}
+
+	// If no finalizers are present or we don't need to handle OAuth cleanup,
+	// the notebook will be deleted by Kubernetes
+	return ctrl.Result{}, nil
 }
