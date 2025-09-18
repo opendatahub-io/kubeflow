@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -983,6 +984,89 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
 		})
 
+		oauthClient := &oauthv1.OAuthClient{}
+		oauthClientName := Name + "-" + Namespace + "-oauth-client"
+
+		It("Should create an OAuthClient for OAuth authentication", func() {
+			By("By setting the route host to simulate OpenShift ingress controller")
+			// In test environments, we need to manually set the route host since
+			// the OpenShift ingress controller doesn't run in envtest
+			route.Spec.Host = Name + "-" + Namespace + ".apps.test.cluster"
+			Expect(cli.Update(ctx, route)).Should(Succeed())
+
+			By("By checking that the controller has created the OAuthClient")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: oauthClientName}
+				return cli.Get(ctx, key, oauthClient)
+			}, duration, interval).Should(Succeed())
+
+			By("By verifying OAuthClient properties")
+			Expect(oauthClient.Name).To(Equal(oauthClientName))
+			Expect(oauthClient.Labels["notebook-owner"]).To(Equal(Name))
+			Expect(oauthClient.RedirectURIs).To(HaveLen(1))
+			Expect(oauthClient.RedirectURIs[0]).To(ContainSubstring("https://"))
+			Expect(oauthClient.GrantMethod).To(Equal(oauthv1.GrantHandlerAuto))
+			Expect(oauthClient.Secret).NotTo(BeEmpty())
+		})
+
+		It("Should add OAuth client finalizer to the notebook", func() {
+			By("By checking that the finalizer is added to the notebook")
+			Eventually(func() []string {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return nil
+				}
+				return notebook.Finalizers
+			}, duration, interval).Should(ContainElement(NotebookOAuthClientFinalizer))
+		})
+
+		It("Should recreate the OAuthClient when deleted", func() {
+			By("By deleting the OAuthClient")
+			Expect(cli.Delete(ctx, oauthClient)).Should(Succeed())
+
+			By("By triggering a notebook reconciliation")
+			// Update notebook to trigger reconciliation
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			notebook.Spec.Template.Spec.Containers[0].Image = "registry.redhat.io/ubi9/ubi:reconcile-trigger"
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the controller has recreated the OAuthClient")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: oauthClientName}
+				return cli.Get(ctx, key, oauthClient)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it's the same OAuthClient with correct properties
+			Expect(oauthClient.Name).To(Equal(oauthClientName))
+			Expect(oauthClient.Labels["notebook-owner"]).To(Equal(Name))
+		})
+
+		It("Should update OAuthClient when it's modified", func() {
+			By("By manually modifying the OAuthClient")
+			originalSecret := oauthClient.Secret
+			oauthClient.Secret = "modified-secret"
+			Expect(cli.Update(ctx, oauthClient)).Should(Succeed())
+
+			By("By triggering a notebook reconciliation")
+			// Update notebook to trigger reconciliation
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			notebook.Spec.Template.Spec.Containers[0].Image = "registry.redhat.io/ubi9/ubi:patch-trigger"
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the OAuthClient is restored to original state")
+			Eventually(func() string {
+				key := types.NamespacedName{Name: oauthClientName}
+				err := cli.Get(ctx, key, oauthClient)
+				if err != nil {
+					return ""
+				}
+				return oauthClient.Secret
+			}, duration, interval).Should(Equal(originalSecret))
+		})
+
 		It("Should delete the OAuth proxy objects", func() {
 			// Testenv cluster does not implement Kubernetes GC:
 			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
@@ -1009,13 +1093,27 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By checking that the Notebook owns the Route object")
 			Expect(route.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
+			By("By verifying the OAuthClient exists before notebook deletion")
+			oauthClientKey := types.NamespacedName{Name: oauthClientName}
+			Expect(cli.Get(ctx, oauthClientKey, oauthClient)).Should(Succeed())
+
+			By("By verifying the finalizer is present before notebook deletion")
+			notebookKey := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, notebookKey, notebook)).Should(Succeed())
+			Expect(notebook.Finalizers).To(ContainElement(NotebookOAuthClientFinalizer))
+
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
 
+			By("By checking that the OAuthClient is deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, oauthClientKey, oauthClient)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue())
+
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, notebook)
+				return cli.Get(ctx, notebookKey, notebook)
 			}, duration, interval).Should(HaveOccurred())
 		})
 	})

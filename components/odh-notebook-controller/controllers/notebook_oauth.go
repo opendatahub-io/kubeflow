@@ -49,6 +49,9 @@ const (
 	// there is the possibility of creating a specific file to manage secrets, change the size of
 	// the complexity if required, etc. For now, a complexity of 16 will suffice.
 	SECRET_DEFAULT_COMPLEXITY = 16
+
+	// Finalizer to handle OAuthClient cleanup since it's cluster-scoped and can't use owner references
+	NotebookOAuthClientFinalizer = "notebook-oauth-client-finalizer.opendatahub.io"
 )
 
 type OAuthConfig struct {
@@ -308,6 +311,89 @@ func (r *OpenshiftNotebookReconciler) ReconcileOAuthClient(notebook *nbv1.Notebo
 	return nil
 }
 
+// addOAuthClientFinalizer adds the OAuth client finalizer to the notebook
+func (r *OpenshiftNotebookReconciler) addOAuthClientFinalizer(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := logf.FromContext(ctx)
+
+	// Check if finalizer already exists
+	if r.hasOAuthClientFinalizer(notebook) {
+		return nil
+	}
+
+	// Add the finalizer
+	base := notebook.DeepCopy()
+	notebook.Finalizers = append(notebook.Finalizers, NotebookOAuthClientFinalizer)
+	err := r.Patch(ctx, notebook, client.MergeFrom(base))
+	if err != nil {
+		log.Error(err, "Unable to add OAuth client finalizer to notebook")
+		return err
+	}
+
+	log.Info("Added OAuth client finalizer to notebook")
+	return nil
+}
+
+// removeOAuthClientFinalizer removes the OAuth client finalizer from the notebook
+func (r *OpenshiftNotebookReconciler) removeOAuthClientFinalizer(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := logf.FromContext(ctx)
+
+	// Remove the finalizer
+	base := notebook.DeepCopy()
+	var finalizers []string
+	for _, finalizer := range notebook.Finalizers {
+		if finalizer != NotebookOAuthClientFinalizer {
+			finalizers = append(finalizers, finalizer)
+		}
+	}
+
+	notebook.Finalizers = finalizers
+	err := r.Patch(ctx, notebook, client.MergeFrom(base))
+	if err != nil {
+		log.Error(err, "Unable to remove OAuth client finalizer from notebook")
+		return err
+	}
+
+	log.Info("Removed OAuth client finalizer from notebook")
+	return nil
+}
+
+// hasOAuthClientFinalizer checks if the notebook has the OAuth client finalizer
+func (r *OpenshiftNotebookReconciler) hasOAuthClientFinalizer(notebook *nbv1.Notebook) bool {
+	for _, finalizer := range notebook.Finalizers {
+		if finalizer == NotebookOAuthClientFinalizer {
+			return true
+		}
+	}
+	return false
+}
+
+// deleteOAuthClient deletes the OAuthClient associated with the notebook
+func (r *OpenshiftNotebookReconciler) deleteOAuthClient(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := logf.FromContext(ctx)
+
+	oauthClientName := notebook.Name + "-" + notebook.Namespace + "-oauth-client"
+	oauthClient := &oauthv1.OAuthClient{}
+
+	err := r.Get(ctx, types.NamespacedName{Name: oauthClientName}, oauthClient)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("OAuthClient not found, nothing to delete", "oauthClient", oauthClientName)
+			return nil
+		}
+		log.Error(err, "Unable to fetch OAuthClient for deletion", "oauthClient", oauthClientName)
+		return err
+	}
+
+	err = r.Delete(ctx, oauthClient)
+	if err != nil {
+		log.Error(err, "Unable to delete OAuthClient", "oauthClient", oauthClientName)
+		return err
+	}
+
+	log.Info("Successfully deleted OAuthClient", "oauthClient", oauthClientName)
+	return nil
+}
+
 func (r *OpenshiftNotebookReconciler) createSecret(notebook *nbv1.Notebook, ctx context.Context, desiredSecret *corev1.Secret) error {
 	log := logf.FromContext(ctx)
 
@@ -374,6 +460,12 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 		return err
 	}
 
+	// Check if the route host has been assigned by OpenShift ingress controller
+	if oauthClientRoute.Spec.Host == "" {
+		log.Info("Route host not yet assigned by ingress controller, retrying later", "route", notebook.Name)
+		return nil
+	}
+
 	// Get the secret that will be used in the OAuthClient
 	secret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{
@@ -414,9 +506,12 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 				client.ForceOwnership, client.FieldOwner("odh-notebook-controller")); err != nil {
 				return fmt.Errorf("failed to patch existing OAuthClient CR: %w", err)
 			}
-			return nil
+			// Add finalizer since OAuthClient was created/updated successfully
+			return r.addOAuthClientFinalizer(notebook, ctx)
 		}
+		return err
 	}
 
-	return nil
+	// Add finalizer since OAuthClient was created successfully
+	return r.addOAuthClientFinalizer(notebook, ctx)
 }
