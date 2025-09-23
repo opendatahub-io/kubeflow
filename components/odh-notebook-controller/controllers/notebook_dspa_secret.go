@@ -139,7 +139,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[st
 	// Construct Elyra-compatible config
 	metadata := map[string]interface{}{
 		"tags":          []string{},
-		"display_name":  "Data Science Pipeline",
+		"display_name":  "AI Pipeline",
 		"engine":        "Argo",
 		"runtime_type":  "KUBEFLOW_PIPELINES",
 		"auth_type":     "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
@@ -166,7 +166,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[st
 
 	// Return the full runtime config
 	return map[string]interface{}{
-		"display_name": "Data Science Pipeline",
+		"display_name": "AI Pipeline",
 		"schema_name":  "kfp",
 		"metadata":     metadata,
 	}, nil
