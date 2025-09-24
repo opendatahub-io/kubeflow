@@ -452,6 +452,56 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(HaveOccurred())
 		})
 
+		It("Should handle OAuth client creation with generated route names", func() {
+			By("Creating a new notebook with OAuth enabled and name that triggers route generateName")
+			// Use a name that triggers route generateName but doesn't exceed label limits
+			// Route threshold: name + namespace > 63 chars
+			// "test-notebook-with-a-very-long-name-thats-48char" (48) + "default" (7) = 55 < 63
+			// Adding "-0123456789" (11) = 66 > 63, triggers generateName for routes
+			longName := Name + "-0123456789"
+			oauthNotebook := createNotebook(longName, Namespace)
+			oauthNotebook.SetAnnotations(map[string]string{
+				"notebooks.opendatahub.io/inject-oauth": "true",
+			})
+			Expect(cli.Create(ctx, oauthNotebook)).Should(Succeed())
+			defer cli.Delete(ctx, oauthNotebook)
+
+			By("Waiting for the OAuth route to be created with generateName")
+			var oauthRoute *routev1.Route
+			Eventually(func() error {
+				foundRoute, err := getRouteFromList(&routev1.Route{}, oauthNotebook, longName, Namespace)
+				if foundRoute == nil {
+					return err
+				}
+				oauthRoute = foundRoute
+				return nil
+			}, duration, interval).Should(Succeed())
+
+			By("Waiting for the controller to create the OAuth client secret")
+			secret := &corev1.Secret{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: longName + "-oauth-client", Namespace: Namespace}
+				return cli.Get(ctx, key, secret)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying the route has a generated name but correct labels")
+			Expect(oauthRoute.Name).Should(HavePrefix("nb-"))
+			Expect(oauthRoute.Name).ShouldNot(Equal(longName))
+			Expect(oauthRoute.Labels["notebook-name"]).Should(Equal(longName))
+
+			By("Testing OAuth client creation with generated route name")
+			reconciler := &OpenshiftNotebookReconciler{
+				Client: cli,
+				Scheme: cli.Scheme(),
+				Log:    logr.Discard(),
+			}
+
+			err := reconciler.createOAuthClient(oauthNotebook, ctx)
+
+			By("Verifying OAuth client creation succeeds despite generated route name")
+			Expect(err).ShouldNot(HaveOccurred())
+		})
+
 	})
 
 	// New test case for notebook update
