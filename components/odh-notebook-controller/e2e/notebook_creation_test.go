@@ -431,8 +431,8 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 		elapsedSinceStart := time.Since(cullingStartTime)
 		elapsedSinceTestStart := time.Since(testStartTime)
 
-		// Check notebook CR for last activity annotation
-		lastActivity, annotationErr := tc.getNotebookLastActivity(nbMeta)
+		// Get all culling-related annotations for detailed logging
+		cullingAnnotations, cullingErr := tc.getCullingAnnotations(nbMeta)
 
 		// Check StatefulSet status (primary culling indicator)
 		isCulled, ssReplicas, podCount, err := tc.checkNotebookCullingStatus(nbMeta)
@@ -447,10 +447,21 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 			"podCount", podCount,
 		}
 
-		if annotationErr == nil && lastActivity != "" {
-			logFields = append(logFields, "lastActivity", lastActivity)
-		} else if annotationErr != nil {
-			logFields = append(logFields, "lastActivityError", annotationErr.Error())
+		// Add detailed culling annotations to the log
+		if cullingErr == nil {
+			for key, value := range cullingAnnotations {
+				logFields = append(logFields, "annotation_"+key, value)
+			}
+			// Calculate time since last activity if annotation exists
+			if lastActivityTime, exists := cullingAnnotations["notebooks.kubeflow.org/last-activity"]; exists {
+				if parsedTime, err := time.Parse(time.RFC3339, lastActivityTime); err == nil {
+					timeSinceLastActivity := time.Since(parsedTime)
+					logFields = append(logFields, "timeSinceLastActivity", timeSinceLastActivity.String())
+					logFields = append(logFields, "shouldBeCulledAfter", "2m0s") // From test config
+				}
+			}
+		} else {
+			logFields = append(logFields, "cullingAnnotationsError", cullingErr.Error())
 		}
 
 		if err != nil {
@@ -461,12 +472,17 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 
 		// If notebook has been culled (StatefulSet scaled to 0 or pods removed)
 		if isCulled {
+			lastActivityValue := ""
+			if cullingErr == nil {
+				lastActivityValue = cullingAnnotations["notebooks.kubeflow.org/last-activity"]
+			}
+
 			if elapsedSinceStart < minimumCullTime {
 				logger.Info("Notebook was culled too early - this may indicate a timing issue",
 					"actualCullTime", elapsedSinceStart,
 					"minimumExpectedTime", minimumCullTime,
 					"checks", checkCount,
-					"lastActivity", lastActivity)
+					"lastActivity", lastActivityValue)
 				return fmt.Errorf("notebook was culled too early: culled after %v, expected minimum %v",
 					elapsedSinceStart, minimumCullTime)
 			}
@@ -475,7 +491,7 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 				"actualCullTime", elapsedSinceStart,
 				"totalTestTime", elapsedSinceTestStart,
 				"checks", checkCount,
-				"lastActivity", lastActivity,
+				"lastActivity", lastActivityValue,
 				"finalStatefulSetReplicas", ssReplicas,
 				"finalPodCount", podCount)
 			return nil
@@ -483,11 +499,16 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 
 		// If we've exceeded maximum time and notebook is still active
 		if elapsedSinceStart >= maximumCullTime {
+			lastActivityValue := ""
+			if cullingErr == nil {
+				lastActivityValue = cullingAnnotations["notebooks.kubeflow.org/last-activity"]
+			}
+
 			logger.Info("Notebook was not culled within maximum expected time",
 				"actualTime", elapsedSinceStart,
 				"maximumExpectedTime", maximumCullTime,
 				"checks", checkCount,
-				"lastActivity", lastActivity,
+				"lastActivity", lastActivityValue,
 				"statefulSetReplicas", ssReplicas,
 				"podCount", podCount)
 			return fmt.Errorf("notebook was not culled within expected timeframe: still active after %v (replicas: %d, pods: %d)",
@@ -507,8 +528,8 @@ func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger 
 	}
 }
 
-// getNotebookLastActivity retrieves the last activity annotation from the Notebook CR
-func (tc *testContext) getNotebookLastActivity(nbMeta *metav1.ObjectMeta) (string, error) {
+// getCullingAnnotations retrieves all culling-related annotations from the Notebook CR
+func (tc *testContext) getCullingAnnotations(nbMeta *metav1.ObjectMeta) (map[string]string, error) {
 	notebook := &nbv1.Notebook{}
 	err := tc.customClient.Get(tc.ctx, types.NamespacedName{
 		Name:      nbMeta.Name,
@@ -516,23 +537,26 @@ func (tc *testContext) getNotebookLastActivity(nbMeta *metav1.ObjectMeta) (strin
 	}, notebook)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to get notebook CR: %v", err)
+		return nil, fmt.Errorf("failed to get notebook CR: %v", err)
 	}
 
-	// Look for common last activity annotation keys
-	lastActivityKeys := []string{
+	// Extract culling-related annotations
+	cullingAnnotations := make(map[string]string)
+	cullingKeys := []string{
 		"notebooks.kubeflow.org/last-activity",
+		"notebooks.kubeflow.org/last_activity_check_timestamp",
+		"kubeflow-resource-stopped",
 		"opendatahub.io/last-activity",
 		"last-activity",
 	}
 
-	for _, key := range lastActivityKeys {
+	for _, key := range cullingKeys {
 		if value, exists := notebook.Annotations[key]; exists {
-			return value, nil
+			cullingAnnotations[key] = value
 		}
 	}
 
-	return "", nil // No last activity annotation found
+	return cullingAnnotations, nil
 }
 
 // checkNotebookCullingStatus checks if the notebook has been culled by examining StatefulSet and Pod status
