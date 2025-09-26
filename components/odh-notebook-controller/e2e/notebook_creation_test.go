@@ -3,13 +3,13 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/require"
@@ -82,6 +82,13 @@ func creationTestSuite(t *testing.T) {
 }
 
 func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
+	logger := GetCreationLogger().WithValues(
+		"notebook", nbContext.nbObjectMeta.Name,
+		"namespace", nbContext.nbObjectMeta.Namespace,
+	)
+	logger.Info("Starting notebook creation test")
+
+	startTime := time.Now()
 
 	testNotebook := &nbv1.Notebook{
 		ObjectMeta: *nbContext.nbObjectMeta,
@@ -92,26 +99,42 @@ func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
 	notebookLookupKey := types.NamespacedName{Name: testNotebook.Name, Namespace: testNotebook.Namespace}
 	createdNotebook := nbv1.Notebook{}
 
+	logger.V(1).Info("Checking if notebook already exists")
 	err := tc.customClient.Get(tc.ctx, notebookLookupKey, &createdNotebook)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			logger.Info("Notebook not found, creating new notebook")
+			pollCount := 0
 			nberr := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+				pollCount++
 				creationErr := tc.customClient.Create(ctx, testNotebook)
 				if creationErr != nil {
-					log.Printf("Error creating Notebook resource %v: %v, trying again",
-						testNotebook.Name, creationErr)
+					logger.V(1).Info("Error creating notebook resource, trying again",
+						"poll", pollCount,
+						"error", creationErr)
 					return false, nil
 				} else {
+					logger.V(1).Info("Successfully created notebook",
+						"poll", pollCount)
 					return true, nil
 				}
 			})
 			if nberr != nil {
+				logger.V(1).Info("Failed to create test notebook",
+					"attempts", pollCount,
+					"error", nberr)
 				return fmt.Errorf("error creating test Notebook %s: %v", testNotebook.Name, nberr)
 			}
 		} else {
+			logger.V(1).Info("Error getting test notebook", "error", err)
 			return fmt.Errorf("error getting test Notebook %s: %v", testNotebook.Name, err)
 		}
+	} else {
+		logger.Info("Notebook already exists")
 	}
+
+	logger.Info("Notebook creation test completed successfully",
+		"duration", time.Since(startTime))
 	return nil
 }
 
@@ -216,6 +239,11 @@ func (tc *testContext) testNotebookValidation(nbMeta *metav1.ObjectMeta) error {
 }
 
 func (tc *testContext) testNotebookOAuthSidecar(nbMeta *metav1.ObjectMeta) error {
+	logger := GetHelperLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+		"test", "oauth-sidecar",
+	)
 
 	nbPods, err := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("statefulset=%s", nbMeta.Name)})
@@ -224,13 +252,80 @@ func (tc *testContext) testNotebookOAuthSidecar(nbMeta *metav1.ObjectMeta) error
 		return fmt.Errorf("error retrieving Notebook pods :%v", err)
 	}
 
+	logger.V(1).Info("Checking OAuth sidecar for notebook pods",
+		"podCount", len(nbPods.Items))
+
 	for _, nbpod := range nbPods.Items {
+		logger.V(1).Info("Checking pod status",
+			"podName", nbpod.Name,
+			"phase", nbpod.Status.Phase,
+			"message", nbpod.Status.Message,
+			"reason", nbpod.Status.Reason)
+
 		if nbpod.Status.Phase != v1.PodRunning {
-			return fmt.Errorf("notebook pod %v is not in Running phase", nbpod.Name)
+			// Enhanced logging for non-running pods
+			logger.Info("Pod is not in Running phase - logging detailed status",
+				"podName", nbpod.Name,
+				"currentPhase", nbpod.Status.Phase,
+				"message", nbpod.Status.Message,
+				"reason", nbpod.Status.Reason,
+				"startTime", nbpod.Status.StartTime)
+
+			// Log container statuses for debugging
+			for _, containerStatus := range nbpod.Status.ContainerStatuses {
+				logger.Info("Container status for non-running pod",
+					"podName", nbpod.Name,
+					"containerName", containerStatus.Name,
+					"ready", containerStatus.Ready,
+					"restartCount", containerStatus.RestartCount,
+					"image", containerStatus.Image)
+
+				if containerStatus.State.Waiting != nil {
+					logger.Info("Container waiting state",
+						"podName", nbpod.Name,
+						"containerName", containerStatus.Name,
+						"reason", containerStatus.State.Waiting.Reason,
+						"message", containerStatus.State.Waiting.Message)
+				}
+
+				if containerStatus.State.Terminated != nil {
+					logger.Info("Container terminated state",
+						"podName", nbpod.Name,
+						"containerName", containerStatus.Name,
+						"reason", containerStatus.State.Terminated.Reason,
+						"message", containerStatus.State.Terminated.Message,
+						"exitCode", containerStatus.State.Terminated.ExitCode)
+				}
+			}
+
+			// Log pod conditions
+			for _, condition := range nbpod.Status.Conditions {
+				logger.Info("Pod condition for non-running pod",
+					"podName", nbpod.Name,
+					"type", condition.Type,
+					"status", condition.Status,
+					"reason", condition.Reason,
+					"message", condition.Message)
+			}
+
+			return fmt.Errorf("notebook pod %v is not in Running phase (current: %s, reason: %s, message: %s)",
+				nbpod.Name, nbpod.Status.Phase, nbpod.Status.Reason, nbpod.Status.Message)
 		}
+
 		for _, containerStatus := range nbpod.Status.ContainerStatuses {
 			if containerStatus.Name == "oauth-proxy" {
 				if !containerStatus.Ready {
+					logger.Info("OAuth proxy container not ready",
+						"podName", nbpod.Name,
+						"ready", containerStatus.Ready,
+						"restartCount", containerStatus.RestartCount)
+
+					if containerStatus.State.Waiting != nil {
+						logger.Info("OAuth proxy container waiting",
+							"reason", containerStatus.State.Waiting.Reason,
+							"message", containerStatus.State.Waiting.Message)
+					}
+
 					return fmt.Errorf("oauth-proxy container is not in Ready state for pod %v", nbpod.Name)
 				}
 			}
@@ -251,6 +346,14 @@ func (tc *testContext) testNotebookTraffic(nbMeta *metav1.ObjectMeta) error {
 }
 
 func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
+	logger := GetCullingLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+	)
+	logger.Info("Starting notebook culling test")
+
+	startTime := time.Now()
+
 	// Create Configmap with culling configuration
 	cullingConfigMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -264,39 +367,243 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		},
 	}
 
+	logger.Info("Creating culling ConfigMap",
+		"cullIdleTime", "2 minutes",
+		"idlenessCheckPeriod", "1 minute")
 	_, err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Create(tc.ctx, cullingConfigMap,
 		metav1.CreateOptions{})
 	if err != nil {
+		logger.V(1).Info("Failed to create culling ConfigMap", "error", err)
 		return fmt.Errorf("error creating configmapnotebook-controller-culler-config: %v", err)
 	}
+
 	// Restart the deployment to get changes from configmap
+	logger.V(1).Info("Getting controller deployment for restart")
 	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
 		"notebook-controller-deployment", metav1.GetOptions{})
 	if err != nil {
+		logger.V(1).Info("Failed to get controller deployment", "error", err)
 		return fmt.Errorf("error getting deployment %v: %v", controllerDeployment.Name, err)
 	}
 
 	defer tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta, nbMeta)
 
+	logger.Info("Rolling out controller deployment to apply culling configuration")
 	err = tc.rolloutDeployment(controllerDeployment.ObjectMeta)
 	if err != nil {
+		logger.V(1).Info("Failed to rollout deployment with culling configuration", "error", err)
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
-	time.Sleep(180 * time.Second)
-	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
-	resp, err := tc.curlNotebookEndpoint(*nbMeta)
+	// Active monitoring of culling process with detailed timing validation
+	err = tc.monitorNotebookCulling(nbMeta, logger, startTime)
 	if err != nil {
-		return fmt.Errorf("error accessing Notebook Endpoint with 503: %v ", err)
+		return err
 	}
-	if resp.StatusCode != 503 {
-		return errorWithBody(resp)
-	}
+	logger.Info("Successfully verified notebook culling process",
+		"duration", time.Since(startTime))
 	return nil
 }
 
+// monitorNotebookCulling actively monitors the notebook culling process with detailed validation
+// It monitors StatefulSet/Pod status and last activity annotations instead of accessing the endpoint
+// to avoid interfering with the culling process
+func (tc *testContext) monitorNotebookCulling(nbMeta *metav1.ObjectMeta, logger logr.Logger, testStartTime time.Time) error {
+	// Configuration for culling monitoring
+	const (
+		minimumCullTime = 2 * time.Minute  // Notebook should NOT be culled before this
+		maximumCullTime = 4 * time.Minute  // Notebook SHOULD be culled by this time
+		checkInterval   = 10 * time.Second // Check every 10 seconds
+	)
+
+	logger.Info("Starting active notebook culling monitoring (non-intrusive)",
+		"minimumCullTime", minimumCullTime,
+		"maximumCullTime", maximumCullTime,
+		"checkInterval", checkInterval,
+		"method", "StatefulSet/Pod monitoring")
+
+	checkCount := 0
+	cullingStartTime := time.Now()
+
+	// Monitor until maximum timeout
+	for {
+		checkCount++
+		elapsedSinceStart := time.Since(cullingStartTime)
+		elapsedSinceTestStart := time.Since(testStartTime)
+
+		// Get all culling-related annotations for detailed logging
+		cullingAnnotations, cullingErr := tc.getCullingAnnotations(nbMeta)
+
+		// Check StatefulSet status (primary culling indicator)
+		isCulled, ssReplicas, podCount, err := tc.checkNotebookCullingStatus(nbMeta)
+
+		// Log comprehensive status
+		logFields := []interface{}{
+			"check", checkCount,
+			"elapsedTime", elapsedSinceStart,
+			"totalTestTime", elapsedSinceTestStart,
+			"isCulled", isCulled,
+			"statefulSetReplicas", ssReplicas,
+			"podCount", podCount,
+		}
+
+		// Add detailed culling annotations to the log
+		if cullingErr == nil {
+			for key, value := range cullingAnnotations {
+				logFields = append(logFields, "annotation_"+key, value)
+			}
+			// Calculate time since last activity if annotation exists
+			if lastActivityTime, exists := cullingAnnotations["notebooks.kubeflow.org/last-activity"]; exists {
+				if parsedTime, err := time.Parse(time.RFC3339, lastActivityTime); err == nil {
+					timeSinceLastActivity := time.Since(parsedTime)
+					logFields = append(logFields, "timeSinceLastActivity", timeSinceLastActivity.String())
+					logFields = append(logFields, "shouldBeCulledAfter", "2m0s") // From test config
+				}
+			}
+		} else {
+			logFields = append(logFields, "cullingAnnotationsError", cullingErr.Error())
+		}
+
+		if err != nil {
+			logFields = append(logFields, "statusCheckError", err.Error())
+		}
+
+		logger.V(1).Info("Notebook culling status check", logFields...)
+
+		// If notebook has been culled (StatefulSet scaled to 0 or pods removed)
+		if isCulled {
+			lastActivityValue := ""
+			if cullingErr == nil {
+				lastActivityValue = cullingAnnotations["notebooks.kubeflow.org/last-activity"]
+			}
+
+			if elapsedSinceStart < minimumCullTime {
+				logger.Info("Notebook was culled too early - this may indicate a timing issue",
+					"actualCullTime", elapsedSinceStart,
+					"minimumExpectedTime", minimumCullTime,
+					"checks", checkCount,
+					"lastActivity", lastActivityValue)
+				return fmt.Errorf("notebook was culled too early: culled after %v, expected minimum %v",
+					elapsedSinceStart, minimumCullTime)
+			}
+
+			logger.Info("Notebook successfully culled within expected timeframe",
+				"actualCullTime", elapsedSinceStart,
+				"totalTestTime", elapsedSinceTestStart,
+				"checks", checkCount,
+				"lastActivity", lastActivityValue,
+				"finalStatefulSetReplicas", ssReplicas,
+				"finalPodCount", podCount)
+			return nil
+		}
+
+		// If we've exceeded maximum time and notebook is still active
+		if elapsedSinceStart >= maximumCullTime {
+			lastActivityValue := ""
+			if cullingErr == nil {
+				lastActivityValue = cullingAnnotations["notebooks.kubeflow.org/last-activity"]
+			}
+
+			logger.Info("Notebook was not culled within maximum expected time",
+				"actualTime", elapsedSinceStart,
+				"maximumExpectedTime", maximumCullTime,
+				"checks", checkCount,
+				"lastActivity", lastActivityValue,
+				"statefulSetReplicas", ssReplicas,
+				"podCount", podCount)
+			return fmt.Errorf("notebook was not culled within expected timeframe: still active after %v (replicas: %d, pods: %d)",
+				elapsedSinceStart, ssReplicas, podCount)
+		}
+
+		// Break if we've exceeded absolute maximum time (safety check)
+		if elapsedSinceStart >= maximumCullTime+time.Minute {
+			logger.Info("Exceeded absolute maximum monitoring time",
+				"elapsedTime", elapsedSinceStart,
+				"checks", checkCount)
+			return fmt.Errorf("culling monitoring exceeded absolute maximum time: %v", elapsedSinceStart)
+		}
+
+		// Wait before next check
+		time.Sleep(checkInterval)
+	}
+}
+
+// getCullingAnnotations retrieves all culling-related annotations from the Notebook CR
+func (tc *testContext) getCullingAnnotations(nbMeta *metav1.ObjectMeta) (map[string]string, error) {
+	notebook := &nbv1.Notebook{}
+	err := tc.customClient.Get(tc.ctx, types.NamespacedName{
+		Name:      nbMeta.Name,
+		Namespace: nbMeta.Namespace,
+	}, notebook)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get notebook CR: %v", err)
+	}
+
+	// Extract culling-related annotations
+	cullingAnnotations := make(map[string]string)
+	cullingKeys := []string{
+		"notebooks.kubeflow.org/last-activity",
+		"notebooks.kubeflow.org/last_activity_check_timestamp",
+		"kubeflow-resource-stopped",
+		"opendatahub.io/last-activity",
+		"last-activity",
+	}
+
+	for _, key := range cullingKeys {
+		if value, exists := notebook.Annotations[key]; exists {
+			cullingAnnotations[key] = value
+		}
+	}
+
+	return cullingAnnotations, nil
+}
+
+// checkNotebookCullingStatus checks if the notebook has been culled by examining StatefulSet and Pod status
+func (tc *testContext) checkNotebookCullingStatus(nbMeta *metav1.ObjectMeta) (isCulled bool, ssReplicas int32, podCount int, err error) {
+	// Check StatefulSet replicas
+	ss, ssErr := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(tc.ctx, nbMeta.Name, metav1.GetOptions{})
+	if ssErr != nil {
+		if errors.IsNotFound(ssErr) {
+			// StatefulSet deleted = definitely culled
+			return true, 0, 0, nil
+		}
+		return false, 0, 0, fmt.Errorf("error getting StatefulSet: %v", ssErr)
+	}
+
+	ssReplicas = ss.Status.ReadyReplicas
+
+	// Check Pod count
+	pods, podErr := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("statefulset=%s", nbMeta.Name),
+	})
+	if podErr != nil {
+		return false, ssReplicas, 0, fmt.Errorf("error getting Pods: %v", podErr)
+	}
+
+	// Count only running/pending pods (not terminating)
+	activePodCount := 0
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp == nil {
+			activePodCount++
+		}
+	}
+
+	// Notebook is considered culled if:
+	// 1. StatefulSet has 0 ready replicas AND
+	// 2. No active pods are running
+	isCulled = ssReplicas == 0 && activePodCount == 0
+
+	return isCulled, ssReplicas, activePodCount, nil
+}
+
 func (tc *testContext) testNotebookOAuthSidecarResources(nbMeta *metav1.ObjectMeta) error {
+	logger := GetHelperLogger().WithValues(
+		"notebook", nbMeta.Name,
+		"namespace", nbMeta.Namespace,
+		"test", "oauth-sidecar-resources",
+	)
+
 	nbPods, err := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("statefulset=%s", nbMeta.Name)})
 
@@ -311,9 +618,42 @@ func (tc *testContext) testNotebookOAuthSidecarResources(nbMeta *metav1.ObjectMe
 		return fmt.Errorf("error getting notebook: %v", err)
 	}
 
+	logger.V(1).Info("Checking OAuth sidecar resources for notebook pods",
+		"podCount", len(nbPods.Items))
+
 	for _, nbpod := range nbPods.Items {
+		logger.V(1).Info("Checking pod status for resource validation",
+			"podName", nbpod.Name,
+			"phase", nbpod.Status.Phase)
+
 		if nbpod.Status.Phase != v1.PodRunning {
-			return fmt.Errorf("notebook pod %v is not in Running phase", nbpod.Name)
+			// Enhanced logging for non-running pods in resource validation
+			logger.Info("Pod is not in Running phase during resource validation - logging status",
+				"podName", nbpod.Name,
+				"currentPhase", nbpod.Status.Phase,
+				"message", nbpod.Status.Message,
+				"reason", nbpod.Status.Reason,
+				"startTime", nbpod.Status.StartTime)
+
+			// Log container statuses for debugging resource issues
+			for _, containerStatus := range nbpod.Status.ContainerStatuses {
+				logger.Info("Container status during resource validation",
+					"podName", nbpod.Name,
+					"containerName", containerStatus.Name,
+					"ready", containerStatus.Ready,
+					"restartCount", containerStatus.RestartCount)
+
+				if containerStatus.State.Waiting != nil {
+					logger.Info("Container waiting during resource validation",
+						"podName", nbpod.Name,
+						"containerName", containerStatus.Name,
+						"reason", containerStatus.State.Waiting.Reason,
+						"message", containerStatus.State.Waiting.Message)
+				}
+			}
+
+			return fmt.Errorf("notebook pod %v is not in Running phase (current: %s, reason: %s, message: %s)",
+				nbpod.Name, nbpod.Status.Phase, nbpod.Status.Reason, nbpod.Status.Message)
 		}
 
 		// Find oauth-proxy container
