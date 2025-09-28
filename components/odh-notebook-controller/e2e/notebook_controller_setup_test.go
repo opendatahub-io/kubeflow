@@ -11,7 +11,6 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +20,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntime "sigs.k8s.io/controller-runtime/pkg/client/config"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var (
@@ -82,8 +82,8 @@ func NewTestContext() (*testContext, error) {
 
 	// Setup all test Notebooks
 	testNotebooksContextList := []notebookContext{
-		setupThothMinimalOAuthNotebook(),
-		setupThothOAuthCustomResourcesNotebook(),
+		setupThothMinimalRbacNotebook(),
+		setupThothRbacCustomResourcesNotebook(),
 	}
 
 	return &testContext{
@@ -103,7 +103,7 @@ func TestE2ENotebookController(t *testing.T) {
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
-	utilruntime.Must(routev1.Install(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 
 	// individual test suites after the operator is running

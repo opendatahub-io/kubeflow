@@ -334,15 +334,9 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 	})
 })
 
-func toMetav1Time(timeString string) metav1.Time {
-	parsedTime, err := time.Parse(time.RFC3339, timeString)
-	Expect(err).ToNot(HaveOccurred())
-	return metav1.NewTime(parsedTime)
-}
-
-var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
-	Context("OAuth proxy injection with resource configuration", func() {
-		It("should inject complete OAuth proxy with default resources and all required components", func() {
+var _ = Describe("RBAC Proxy Resource Configuration Integration", func() {
+	Context("RBAC proxy injection with resource configuration", func() {
+		It("should inject complete RBAC proxy with default resources and all required components", func() {
 			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-notebook",
@@ -362,19 +356,19 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 				},
 			}
 
-			oauth := OAuthConfig{
-				ProxyImage: "test-oauth-image",
+			rbac := RbacConfig{
+				ProxyImage: "test-rbac-image",
 			}
 
-			err := InjectOAuthProxy(notebook, oauth)
+			err := InjectRbacProxy(notebook, rbac)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Verify OAuth proxy container injection
-			var oauthContainer corev1.Container
+			// Verify RBAC proxy container injection
+			var rbacContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "oauth-proxy" {
-					oauthContainer = container
+				if container.Name == "kube-rbac-proxy" {
+					rbacContainer = container
 					found = true
 					break
 				}
@@ -382,49 +376,47 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			Expect(found).To(BeTrue())
 
 			// Verify container configuration
-			Expect(oauthContainer.Image).To(Equal("test-oauth-image"))
-			Expect(oauthContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
+			Expect(rbacContainer.Image).To(Equal("test-rbac-image"))
+			Expect(rbacContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
 
 			// Verify default resources are applied
-			Expect(oauthContainer.Resources.Requests.Cpu().String()).To(Equal("100m"))
-			Expect(oauthContainer.Resources.Requests.Memory().String()).To(Equal("64Mi"))
-			Expect(oauthContainer.Resources.Limits.Cpu().String()).To(Equal("100m"))
-			Expect(oauthContainer.Resources.Limits.Memory().String()).To(Equal("64Mi"))
+			Expect(rbacContainer.Resources.Requests.Cpu().String()).To(Equal("100m"))
+			Expect(rbacContainer.Resources.Requests.Memory().String()).To(Equal("64Mi"))
+			Expect(rbacContainer.Resources.Limits.Cpu().String()).To(Equal("100m"))
+			Expect(rbacContainer.Resources.Limits.Memory().String()).To(Equal("64Mi"))
 
 			// Verify ports configuration
-			Expect(oauthContainer.Ports).To(HaveLen(1))
-			Expect(oauthContainer.Ports[0].Name).To(Equal("oauth-proxy"))
-			Expect(oauthContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
+			Expect(rbacContainer.Ports).To(HaveLen(1))
+			Expect(rbacContainer.Ports[0].Name).To(Equal("kube-rbac-proxy"))
+			Expect(rbacContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
 
 			// Verify volume mounts
-			Expect(oauthContainer.VolumeMounts).To(HaveLen(3))
+			Expect(rbacContainer.VolumeMounts).To(HaveLen(2))
 			mountNames := make(map[string]bool)
-			for _, mount := range oauthContainer.VolumeMounts {
+			for _, mount := range rbacContainer.VolumeMounts {
 				mountNames[mount.Name] = true
 			}
-			Expect(mountNames["oauth-client"]).To(BeTrue())
-			Expect(mountNames["oauth-config"]).To(BeTrue())
-			Expect(mountNames["tls-certificates"]).To(BeTrue())
+			Expect(mountNames["rbac-proxy-config"]).To(BeTrue())
+			Expect(mountNames["rbac-tls-certificates"]).To(BeTrue())
 
 			// Verify volumes were added
-			Expect(notebook.Spec.Template.Spec.Volumes).To(HaveLen(3))
+			Expect(notebook.Spec.Template.Spec.Volumes).To(HaveLen(2))
 			volumeNames := make(map[string]bool)
 			for _, volume := range notebook.Spec.Template.Spec.Volumes {
 				volumeNames[volume.Name] = true
 			}
-			Expect(volumeNames["oauth-client"]).To(BeTrue())
-			Expect(volumeNames["oauth-config"]).To(BeTrue())
-			Expect(volumeNames["tls-certificates"]).To(BeTrue())
+			Expect(volumeNames["rbac-proxy-config"]).To(BeTrue())
+			Expect(volumeNames["rbac-tls-certificates"]).To(BeTrue())
 
 			// Verify service account
 			Expect(notebook.Spec.Template.Spec.ServiceAccountName).To(Equal("test-notebook"))
 
 			// Verify probes are configured
-			Expect(oauthContainer.LivenessProbe).ToNot(BeNil())
-			Expect(oauthContainer.ReadinessProbe).ToNot(BeNil())
+			Expect(rbacContainer.LivenessProbe).ToNot(BeNil())
+			Expect(rbacContainer.ReadinessProbe).ToNot(BeNil())
 		})
 
-		It("should inject OAuth proxy with custom resources and maintain existing containers", func() {
+		It("should inject RBAC proxy with custom resources and maintain existing containers", func() {
 			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-notebook",
@@ -434,7 +426,6 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 						AnnotationAuthSidecarMemoryRequest: "128Mi",
 						AnnotationAuthSidecarCPULimit:      "500m",
 						AnnotationAuthSidecarMemoryLimit:   "256Mi",
-						AnnotationLogoutUrl:                "https://example.com/logout",
 					},
 				},
 				Spec: nbv1.NotebookSpec{
@@ -463,22 +454,22 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 				},
 			}
 
-			oauth := OAuthConfig{
-				ProxyImage: "test-oauth-image",
+			rbac := RbacConfig{
+				ProxyImage: "test-rbac-image",
 			}
 
-			err := InjectOAuthProxy(notebook, oauth)
+			err := InjectRbacProxy(notebook, rbac)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Verify total container count (2 original + 1 oauth-proxy)
+			// Verify total container count (2 original + 1 kube-rbac-proxy)
 			Expect(notebook.Spec.Template.Spec.Containers).To(HaveLen(3))
 
-			// Find OAuth proxy container
-			var oauthContainer corev1.Container
+			// Find RBAC proxy container
+			var rbacContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "oauth-proxy" {
-					oauthContainer = container
+				if container.Name == "kube-rbac-proxy" {
+					rbacContainer = container
 					found = true
 					break
 				}
@@ -486,20 +477,10 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			Expect(found).To(BeTrue())
 
 			// Verify custom resources are applied
-			Expect(oauthContainer.Resources.Requests.Cpu().String()).To(Equal("200m"))
-			Expect(oauthContainer.Resources.Requests.Memory().String()).To(Equal("128Mi"))
-			Expect(oauthContainer.Resources.Limits.Cpu().String()).To(Equal("500m"))
-			Expect(oauthContainer.Resources.Limits.Memory().String()).To(Equal("256Mi"))
-
-			// Verify logout URL was added to args
-			logoutArgFound := false
-			for _, arg := range oauthContainer.Args {
-				if arg == "--logout-url=https://example.com/logout" {
-					logoutArgFound = true
-					break
-				}
-			}
-			Expect(logoutArgFound).To(BeTrue())
+			Expect(rbacContainer.Resources.Requests.Cpu().String()).To(Equal("200m"))
+			Expect(rbacContainer.Resources.Requests.Memory().String()).To(Equal("128Mi"))
+			Expect(rbacContainer.Resources.Limits.Cpu().String()).To(Equal("500m"))
+			Expect(rbacContainer.Resources.Limits.Memory().String()).To(Equal("256Mi"))
 
 			// Verify original containers are preserved
 			originalContainerNames := make(map[string]bool)
@@ -509,16 +490,15 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			Expect(originalContainerNames["test-notebook"]).To(BeTrue())
 			Expect(originalContainerNames["sidecar"]).To(BeTrue())
 
-			// Verify volumes include both original and OAuth volumes
-			Expect(notebook.Spec.Template.Spec.Volumes).To(HaveLen(4)) // 1 original + 3 OAuth volumes
+			// Verify volumes include both original and RBAC volumes
+			Expect(notebook.Spec.Template.Spec.Volumes).To(HaveLen(3)) // 1 original + 2 RBAC volumes
 			volumeNames := make(map[string]bool)
 			for _, volume := range notebook.Spec.Template.Spec.Volumes {
 				volumeNames[volume.Name] = true
 			}
 			Expect(volumeNames["existing-volume"]).To(BeTrue())
-			Expect(volumeNames["oauth-client"]).To(BeTrue())
-			Expect(volumeNames["oauth-config"]).To(BeTrue())
-			Expect(volumeNames["tls-certificates"]).To(BeTrue())
+			Expect(volumeNames["rbac-proxy-config"]).To(BeTrue())
+			Expect(volumeNames["rbac-tls-certificates"]).To(BeTrue())
 		})
 
 		It("should fail injection early and preserve original notebook when resource validation fails", func() {
@@ -548,28 +528,27 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			// Create a deep copy to verify no mutations on failure
 			notebook := originalNotebook.DeepCopy()
 
-			oauth := OAuthConfig{
-				ProxyImage: "test-oauth-image",
+			rbac := RbacConfig{
+				ProxyImage: "test-rbac-image",
 			}
 
-			err := InjectOAuthProxy(notebook, oauth)
+			err := InjectRbacProxy(notebook, rbac)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("invalid OAuth proxy resource configuration"))
+			Expect(err.Error()).To(ContainSubstring("invalid RBAC proxy resource configuration"))
 
-			// Verify no OAuth proxy container was added on failure
-			oauthFound := false
+			// Verify no RBAC proxy container was added on failure
+			rbacFound := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "oauth-proxy" {
-					oauthFound = true
+				if container.Name == "kube-rbac-proxy" {
+					rbacFound = true
 					break
 				}
 			}
-			Expect(oauthFound).To(BeFalse())
+			Expect(rbacFound).To(BeFalse())
 
-			// Verify no OAuth volumes were added on failure
+			// Verify no RBAC volumes were added on failure
 			for _, volume := range notebook.Spec.Template.Spec.Volumes {
-				Expect(volume.Name).ToNot(ContainSubstring("oauth"))
-				Expect(volume.Name).ToNot(Equal("tls-certificates"))
+				Expect(volume.Name).ToNot(ContainSubstring("rbac"))
 			}
 
 			// Verify original containers remain unchanged
@@ -580,7 +559,7 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			Expect(notebook.Spec.Template.Spec.ServiceAccountName).To(Equal(""))
 		})
 
-		It("should update existing oauth-proxy container with new configuration while preserving container count", func() {
+		It("should update existing kube-rbac-proxy container with new configuration while preserving container count", func() {
 			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-notebook",
@@ -600,8 +579,8 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 									Image: "test-image",
 								},
 								{
-									Name:  "oauth-proxy",
-									Image: "old-oauth-image",
+									Name:  "kube-rbac-proxy",
+									Image: "old-rbac-image",
 									Args:  []string{"--old-arg=value"},
 									Resources: corev1.ResourceRequirements{
 										Requests: corev1.ResourceList{
@@ -619,10 +598,12 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 							},
 							Volumes: []corev1.Volume{
 								{
-									Name: "existing-oauth-config",
+									Name: "existing-rbac-config",
 									VolumeSource: corev1.VolumeSource{
-										Secret: &corev1.SecretVolumeSource{
-											SecretName: "old-secret",
+										ConfigMap: &corev1.ConfigMapVolumeSource{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "old-config",
+											},
 										},
 									},
 								},
@@ -632,22 +613,22 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 				},
 			}
 
-			oauth := OAuthConfig{
-				ProxyImage: "new-oauth-image",
+			rbac := RbacConfig{
+				ProxyImage: "new-rbac-image",
 			}
 
-			err := InjectOAuthProxy(notebook, oauth)
+			err := InjectRbacProxy(notebook, rbac)
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify container count remains the same (update, not add)
 			Expect(notebook.Spec.Template.Spec.Containers).To(HaveLen(2))
 
-			// Find the updated OAuth proxy container
-			var oauthContainer corev1.Container
+			// Find the updated RBAC proxy container
+			var rbacContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "oauth-proxy" {
-					oauthContainer = container
+				if container.Name == "kube-rbac-proxy" {
+					rbacContainer = container
 					found = true
 					break
 				}
@@ -655,33 +636,38 @@ var _ = Describe("OAuth Proxy Resource Configuration Integration", func() {
 			Expect(found).To(BeTrue())
 
 			// Verify complete container replacement with new configuration
-			Expect(oauthContainer.Image).To(Equal("new-oauth-image"))
-			Expect(oauthContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
+			Expect(rbacContainer.Image).To(Equal("new-rbac-image"))
+			Expect(rbacContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
 
 			// Verify resource updates (custom + defaults)
-			Expect(oauthContainer.Resources.Requests.Cpu().String()).To(Equal("300m"))
-			Expect(oauthContainer.Resources.Requests.Memory().String()).To(Equal("64Mi")) // default
-			Expect(oauthContainer.Resources.Limits.Cpu().String()).To(Equal("600m"))
-			Expect(oauthContainer.Resources.Limits.Memory().String()).To(Equal("512Mi")) // custom
+			Expect(rbacContainer.Resources.Requests.Cpu().String()).To(Equal("300m"))
+			Expect(rbacContainer.Resources.Requests.Memory().String()).To(Equal("64Mi")) // default
+			Expect(rbacContainer.Resources.Limits.Cpu().String()).To(Equal("600m"))
+			Expect(rbacContainer.Resources.Limits.Memory().String()).To(Equal("512Mi")) // custom
 
 			// Verify args were completely replaced (not appended)
-			Expect(oauthContainer.Args).ToNot(ContainElement("--old-arg=value"))
-			Expect(len(oauthContainer.Args)).To(BeNumerically(">", 10)) // Should have full OAuth arg set
+			Expect(rbacContainer.Args).ToNot(ContainElement("--old-arg=value"))
+			Expect(len(rbacContainer.Args)).To(BeNumerically(">", 5)) // Should have full RBAC arg set
 
-			// Verify ports were replaced with OAuth proxy port
-			Expect(oauthContainer.Ports).To(HaveLen(1))
-			Expect(oauthContainer.Ports[0].Name).To(Equal("oauth-proxy"))
-			Expect(oauthContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
+			// Verify ports were replaced with RBAC proxy port
+			Expect(rbacContainer.Ports).To(HaveLen(1))
+			Expect(rbacContainer.Ports[0].Name).To(Equal("kube-rbac-proxy"))
+			Expect(rbacContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
 
 			// Verify volumes were properly managed (existing volumes updated/replaced as needed)
 			volumeNames := make(map[string]bool)
 			for _, volume := range notebook.Spec.Template.Spec.Volumes {
 				volumeNames[volume.Name] = true
 			}
-			// Should have the 3 OAuth volumes (old oauth-config should be replaced/updated)
-			Expect(volumeNames["oauth-client"]).To(BeTrue())
-			Expect(volumeNames["oauth-config"]).To(BeTrue())
-			Expect(volumeNames["tls-certificates"]).To(BeTrue())
+			// Should have the RBAC volumes (old rbac-config should be replaced/updated)
+			Expect(volumeNames["rbac-proxy-config"]).To(BeTrue())
+			Expect(volumeNames["rbac-tls-certificates"]).To(BeTrue())
 		})
 	})
 })
+
+func toMetav1Time(timeString string) metav1.Time {
+	parsedTime, err := time.Parse(time.RFC3339, timeString)
+	Expect(err).ToNot(HaveOccurred())
+	return metav1.NewTime(parsedTime)
+}

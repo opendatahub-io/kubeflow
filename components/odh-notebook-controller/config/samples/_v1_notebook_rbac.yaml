@@ -2,14 +2,14 @@
 apiVersion: kubeflow.org/v1
 kind: Notebook
 metadata:
-  name: notebook-sample-oauth-v1
+  name: notebook-sample-rbac-v1
   annotations:
-    notebooks.opendatahub.io/inject-oauth: "true"
+    notebooks.opendatahub.io/inject-auth: "true"
 spec:
   template:
     spec:
       containers:
-        - name: notebook-sample-oauth-v1
+        - name: notebook-sample-rbac-v1
           image: quay.io/thoth-station/s2i-minimal-notebook:v0.2.2
           imagePullPolicy: Always
           workingDir: /opt/app-root/src
@@ -18,3 +18,4 @@ spec:
               value: "8888"
             - name: NOTEBOOK_ARGS
               value: "--NotebookApp.token='' --NotebookApp.password=''"
+

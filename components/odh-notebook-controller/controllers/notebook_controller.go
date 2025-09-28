@@ -32,11 +32,11 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
-	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,14 +45,14 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
-	AnnotationInjectOAuth              = "notebooks.opendatahub.io/inject-oauth"
+	AnnotationInjectRbac               = "notebooks.opendatahub.io/inject-auth"
 	AnnotationValueReconciliationLock  = "odh-notebook-controller-lock"
-	AnnotationLogoutUrl                = "notebooks.opendatahub.io/oauth-logout-url"
 	AnnotationAuthSidecarCPURequest    = "notebooks.opendatahub.io/auth-sidecar-cpu-request"
 	AnnotationAuthSidecarMemoryRequest = "notebooks.opendatahub.io/auth-sidecar-memory-request"
 	AnnotationAuthSidecarCPULimit      = "notebooks.opendatahub.io/auth-sidecar-cpu-limit"
@@ -79,18 +79,21 @@ type OpenshiftNotebookReconciler struct {
 }
 
 // ClusterRole permissions
-
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/status,verbs=get
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update;patch
-// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies/finalizers,verbs=update;patch
-// +kubebuilder:rbac:groups=oauth.openshift.io,resources=oauthclients,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// TODO kept here for the datascience pipelines application server - check whether this is final or not
+// +kubebuilder:rbac:groups="route.openshift.io",resources=routes,verbs=get
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups="components.platform.opendatahub.io",resources=dashboards,verbs=get;list;watch
@@ -102,11 +105,11 @@ func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
 		reflect.DeepEqual(nb1.Spec, nb2.Spec)
 }
 
-// OAuthInjectionIsEnabled returns true if the oauth sidecar injection
+// RbacInjectionIsEnabled returns true if the rbac sidecar injection
 // annotation is present in the notebook.
-func OAuthInjectionIsEnabled(meta metav1.ObjectMeta) bool {
-	if meta.Annotations[AnnotationInjectOAuth] != "" {
-		result, _ := strconv.ParseBool(meta.Annotations[AnnotationInjectOAuth])
+func RbacInjectionIsEnabled(meta metav1.ObjectMeta) bool {
+	if meta.Annotations[AnnotationInjectRbac] != "" {
+		result, _ := strconv.ParseBool(meta.Annotations[AnnotationInjectRbac])
 		return result
 	} else {
 		return false
@@ -173,9 +176,40 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// Handle notebook deletion with finalizer cleanup
+	// Handle deletion with finalizer
+	const finalizerName = "notebook.opendatahub.io/rbac-cleanup"
 	if notebook.DeletionTimestamp != nil {
-		return r.handleNotebookDeletion(notebook, ctx)
+		// Notebook is being deleted
+		if RbacInjectionIsEnabled(notebook.ObjectMeta) {
+			// Clean up ClusterRoleBinding before allowing deletion
+			err = r.CleanupRbacClusterRoleBinding(notebook, ctx)
+			if err != nil {
+				log.Error(err, "Failed to cleanup RBAC ClusterRoleBinding during deletion")
+				return ctrl.Result{}, err
+			}
+		}
+
+		// Remove our finalizer to allow deletion to proceed
+		if controllerutil.ContainsFinalizer(notebook, finalizerName) {
+			controllerutil.RemoveFinalizer(notebook, finalizerName)
+			err = r.Update(ctx, notebook)
+			if err != nil {
+				log.Error(err, "Failed to remove finalizer")
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if RBAC is enabled and finalizer is not present
+	if RbacInjectionIsEnabled(notebook.ObjectMeta) && !controllerutil.ContainsFinalizer(notebook, finalizerName) {
+		controllerutil.AddFinalizer(notebook, finalizerName)
+		err = r.Update(ctx, notebook)
+		if err != nil {
+			log.Error(err, "Failed to add finalizer")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Create Configmap with the ODH notebook certificate
@@ -229,45 +263,58 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	// Create the objects required by the OAuth proxy sidecar (see notebook_oauth.go file)
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		// Ensure any existing unauthenticated route is cleaned up before creating OAuth objects
-		err = r.EnsureUnauthenticatedRouteAbsent(notebook, ctx)
+	// Create the objects required by the RBAC proxy sidecar if annotation is present
+	if RbacInjectionIsEnabled(notebook.ObjectMeta) {
+		// Ensure any existing regular HTTPRoute is cleaned up before creating RBAC objects
+		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, true)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		err = r.ReconcileOAuthServiceAccount(notebook, ctx)
+		// Create the objects required by the RBAC proxy sidecar
+		err = r.ReconcileNotebookServiceAccount(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the OAuth Service reconciler
-		err = r.ReconcileOAuthService(notebook, ctx)
+		// Call the RBAC ClusterRoleBinding reconciler
+		err = r.ReconcileRbacClusterRoleBinding(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the OAuth Secret reconciler
-		err = r.ReconcileOAuthSecret(notebook, ctx)
+		// Call the RBAC ConfigMap reconciler
+		err = r.ReconcileRbacConfigMap(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the OAuth Route reconciler
-		err = r.ReconcileOAuthRoute(notebook, ctx)
+		// Call the RBAC Service reconciler
+		err = r.ReconcileRbacService(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the OAuthClient reconciler
-		err = r.ReconcileOAuthClient(notebook, ctx)
+		// Call the RBAC HTTPRoute reconciler
+		err = r.ReconcileRbacHTTPRoute(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 	} else {
-		// Call the route reconciler (see notebook_route.go file)
-		err = r.ReconcileRoute(notebook, ctx)
+		// Ensure any existing RBAC HTTPRoute is cleaned up before creating regular HTTPRoute
+		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, false)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		// Clean up any existing RBAC ClusterRoleBinding when switching away from RBAC mode
+		err = r.CleanupRbacClusterRoleBinding(notebook, ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		// Call the HTTPRoute reconciler (see notebook_route.go file)
+		err = r.ReconcileHTTPRoute(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -496,7 +543,7 @@ func (r *OpenshiftNotebookReconciler) UnsetNotebookCertConfig(notebook *nbv1.Not
 func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&nbv1.Notebook{}).
-		Owns(&routev1.Route{}).
+		Owns(&gatewayv1.HTTPRoute{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
@@ -570,35 +617,4 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	return nil
-}
-
-// handleNotebookDeletion handles the deletion of a notebook by cleaning up the OAuthClient
-// and removing the finalizer to allow the notebook to be deleted
-func (r *OpenshiftNotebookReconciler) handleNotebookDeletion(notebook *nbv1.Notebook, ctx context.Context) (ctrl.Result, error) {
-	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
-
-	// Check if we have the OAuth client finalizer
-	if r.hasOAuthClientFinalizer(notebook) {
-		log.Info("Cleaning up OAuthClient before notebook deletion")
-
-		// Delete the OAuthClient
-		err := r.deleteOAuthClient(notebook, ctx)
-		if err != nil {
-			log.Error(err, "Failed to delete OAuthClient")
-			return ctrl.Result{}, err
-		}
-
-		// Remove the finalizer
-		err = r.removeOAuthClientFinalizer(notebook, ctx)
-		if err != nil {
-			log.Error(err, "Failed to remove OAuth client finalizer")
-			return ctrl.Result{}, err
-		}
-
-		log.Info("Successfully cleaned up OAuthClient and removed finalizer")
-	}
-
-	// If no finalizers are present or we don't need to handle OAuth cleanup,
-	// the notebook will be deleted by Kubernetes
-	return ctrl.Result{}, nil
 }

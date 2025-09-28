@@ -9,7 +9,6 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/require"
 	apiext "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -102,22 +101,20 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
 
-	// Verify Notebook Route is deleted
-	nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
-	nbRoute := &routev1.Route{}
+	// Verify Notebook HTTPRoute is deleted
 	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		err = tc.customClient.Get(ctx, nbRouteLookupKey, nbRoute)
+		_, err = tc.getNotebookHTTPRoute(nbMeta)
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return true, nil
 			}
-			log.Printf("Failed to get %s Route", nbMeta.Name)
+			log.Printf("Failed to get %s HTTPRoute", nbMeta.Name)
 			return false, err
 		}
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
+		return fmt.Errorf("unable to delete HTTPRoute %s : %v", nbMeta.Name, err)
 	}
 
 	return nil
