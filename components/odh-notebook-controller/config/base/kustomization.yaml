@@ -26,7 +26,7 @@ replacements:
       namespace: system
       version: v1
 - source:
-    fieldPath: data.oauth-proxy-image
+    fieldPath: data.kube-rbac-proxy
     kind: ConfigMap
     name: odh-notebook-controller-image-parameters
     version: v1

@@ -54,11 +54,11 @@ import (
 
 // NotebookWebhook holds the webhook configuration.
 type NotebookWebhook struct {
-	Log         logr.Logger
-	Client      client.Client
-	Config      *rest.Config
-	Decoder     admission.Decoder
-	OAuthConfig OAuthConfig
+	Log        logr.Logger
+	Client     client.Client
+	Config     *rest.Config
+	Decoder    admission.Decoder
+	RbacConfig RbacConfig
 	// controller namespace
 	Namespace string
 }
@@ -72,6 +72,20 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 })
 
 const (
+	ContainerNameRbacProxy = "kube-rbac-proxy"
+
+	RbacProxyConfigVolumeName = "rbac-proxy-config"
+	RbacProxyConfigMountPath  = "/etc/kube-rbac-proxy"
+	RbacProxyConfigFileName   = "config-file.yaml"
+	RbacProxyConfigFilePath   = RbacProxyConfigMountPath + "/" + RbacProxyConfigFileName
+
+	RbacProxyTLSCertsVolumeName = "rbac-tls-certificates"
+	RbacProxyTLSCertsMountPath  = "/etc/tls/private"
+	RbacProxyTLSCertFileName    = "tls.crt"
+	RbacProxyTLSCertFilePath    = RbacProxyTLSCertsMountPath + "/" + RbacProxyTLSCertFileName
+	RbacProxyTLSKeyFileName     = "tls.key"
+	RbacProxyTLSKeyFilePath     = RbacProxyTLSCertsMountPath + "/" + RbacProxyTLSKeyFileName
+
 	IMAGE_STREAM_NOT_FOUND_EVENT     = "imagestream-not-found"
 	IMAGE_STREAM_TAG_NOT_FOUND_EVENT = "imagestream-tag-not-found"
 
@@ -156,13 +170,13 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 	return config, nil
 }
 
-// InjectOAuthProxy injects the OAuth proxy sidecar container in the Notebook
+// InjectRbacProxy injects the RBAC proxy sidecar container in the Notebook
 // spec
-func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
-	// Parse and validate OAuth proxy resource annotations
+func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
+	// Parse and validate RBAC proxy resource annotations
 	config, err := parseAndValidateAuthSidecarResources(notebook)
 	if err != nil {
-		return fmt.Errorf("invalid OAuth proxy resource configuration: %w", err)
+		return fmt.Errorf("invalid RBAC proxy resource configuration: %w", err)
 	}
 
 	// Convert config to ResourceRequirements
@@ -179,46 +193,32 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
-		Name:            "oauth-proxy",
-		Image:           oauth.ProxyImage,
+		Name:            ContainerNameRbacProxy,
+		Image:           rbac.ProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
-		Env: []corev1.EnvVar{{
-			Name: "NAMESPACE",
-			ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
-				},
-			},
-		}},
 		Args: []string{
-			"--provider=openshift",
-			"--https-address=:8443",
-			"--http-address=",
-			"--openshift-service-account=" + notebook.Name,
-			"--cookie-secret-file=/etc/oauth/config/cookie_secret",
-			"--cookie-expire=24h0m0s",
-			"--tls-cert=/etc/tls/private/tls.crt",
-			"--tls-key=/etc/tls/private/tls.key",
-			"--upstream=http://localhost:8888",
-			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-			"--email-domain=*",
-			"--skip-provider-button",
-			`--client-id=` + notebook.Name + `-` + notebook.Namespace + `-oauth-client`,
-			"--client-secret-file=/etc/oauth/client/secret",
-			"--scope=user:info user:check-access",
-			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
-				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
+			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookRbacPort),
+			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
+			"--logtostderr=true",
+			"--v=10", // TODO - TBD, this is too verbose
+			"--proxy-endpoints-port=" + strconv.Itoa(NotebookRbacHealthPort),
+			"--config-file=" + RbacProxyConfigFilePath,
+			"--tls-cert-file=" + RbacProxyTLSCertFilePath,
+			"--tls-private-key-file=" + RbacProxyTLSKeyFilePath,
+			"--auth-header-fields-enabled=true",
+			"--auth-header-user-field-name=X-Auth-Request-User",
+			"--auth-header-groups-field-name=X-Auth-Request-Groups",
 		},
 		Ports: []corev1.ContainerPort{{
-			Name:          OAuthServicePortName,
-			ContainerPort: 8443,
+			Name:          RbacServicePortName,
+			ContainerPort: NotebookRbacPort,
 			Protocol:      corev1.ProtocolTCP,
 		}},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Path:   "/healthz",
+					Port:   intstr.FromInt32(NotebookRbacHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -231,8 +231,8 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Path:   "/healthz",
+					Port:   intstr.FromInt32(NotebookRbacHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -245,31 +245,21 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		Resources: resourceRequirements,
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      "oauth-client",
-				MountPath: "/etc/oauth/client",
+				Name:      RbacProxyConfigVolumeName,
+				MountPath: RbacProxyConfigMountPath,
 			},
 			{
-				Name:      "oauth-config",
-				MountPath: "/etc/oauth/config",
-			},
-			{
-				Name:      "tls-certificates",
-				MountPath: "/etc/tls/private",
+				Name:      RbacProxyTLSCertsVolumeName,
+				MountPath: RbacProxyTLSCertsMountPath,
 			},
 		},
-	}
-
-	// Add logout url if logout annotation is present in the notebook
-	if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
-		proxyContainer.Args = append(proxyContainer.Args,
-			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
 	}
 
 	// Add the sidecar container to the notebook
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	proxyContainerExists := false
 	for index, container := range *notebookContainers {
-		if container.Name == "oauth-proxy" {
+		if container.Name == ContainerNameRbacProxy {
 			(*notebookContainers)[index] = proxyContainer
 			proxyContainerExists = true
 			break
@@ -279,67 +269,46 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		*notebookContainers = append(*notebookContainers, proxyContainer)
 	}
 
-	// Add the OAuth configuration volume:
+	// Add the RBAC configuration volume:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
-	oauthVolumeExists := false
-	oauthVolume := corev1.Volume{
-		Name: "oauth-config",
+	rbacVolumeExists := false
+	rbacVolume := corev1.Volume{
+		Name: RbacProxyConfigVolumeName,
 		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-oauth-config",
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: notebook.Name + "-rbac-config",
+				},
 				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == "oauth-config" {
-			(*notebookVolumes)[index] = oauthVolume
-			oauthVolumeExists = true
+		if volume.Name == RbacProxyConfigVolumeName {
+			(*notebookVolumes)[index] = rbacVolume
+			rbacVolumeExists = true
 			break
 		}
 	}
-	if !oauthVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, oauthVolume)
+	if !rbacVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, rbacVolume)
 	}
 
-	// Add the OAuth Client configuration volume:
-	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
-	clientVolumeExists := false
-	clientVolume := corev1.Volume{
-		Name: "oauth-client",
-		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-oauth-client",
-				DefaultMode: ptr.To[int32](420),
-			},
-		},
-	}
-	for index, volume := range *notebookVolumes {
-		if volume.Name == "oauth-client" {
-			(*notebookVolumes)[index] = clientVolume
-			clientVolumeExists = true
-			break
-		}
-	}
-	if !clientVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, clientVolume)
-	}
-
-	// Add the TLS certificates volume:
+	// Add the TLS certificates volume for RBAC proxy:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	tlsVolumeExists := false
 	tlsVolume := corev1.Volume{
-		Name: "tls-certificates",
+		Name: RbacProxyTLSCertsVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-tls",
+				SecretName:  notebook.Name + "-rbac-tls",
 				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == "tls-certificates" {
+		if volume.Name == RbacProxyTLSCertsVolumeName {
 			(*notebookVolumes)[index] = tlsVolume
 			tlsVolumeExists = true
 			break
@@ -441,10 +410,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	}
 
-	// Inject the OAuth proxy if the annotation is present
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		// Inject OAuth proxy
-		err = InjectOAuthProxy(notebook, w.OAuthConfig)
+	// Inject the RBAC proxy if the annotation is present
+	if RbacInjectionIsEnabled(notebook.ObjectMeta) {
+		// Inject RBAC proxy
+		err = InjectRbacProxy(notebook, w.RbacConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -470,7 +439,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// RHOAIENG-14552: Running notebook cannot be updated carelessly, or we may end up restarting the pod when
-	// the webhook runs after e.g. the oauth-proxy image has been updated
+	// the webhook runs after e.g. the rbac-proxy image has been updated
 	mutatedNotebook, needsRestart, err := w.maybeRestartRunningNotebook(ctx, req, notebook)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
