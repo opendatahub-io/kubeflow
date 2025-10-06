@@ -5,7 +5,8 @@ go 1.25.3
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
-	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
+	// use a dummy version as we replace the dependency with our own at the end of the file
+	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0
 	github.com/opendatahub-io/data-science-pipelines-operator v1.1.1-0.20250318214030-560cbc1d827a
 	// https://github.com/openshift/api/tree/release-4.19
 	github.com/openshift/api v0.0.0-20231118005202-0f638a8a4705
@@ -90,3 +91,6 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+// use sibling kubeflow packages from this repo
+replace github.com/kubeflow/kubeflow/components/notebook-controller => ../notebook-controller
