@@ -7,14 +7,17 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
 	github.com/opendatahub-io/data-science-pipelines-operator v1.1.1-0.20250318214030-560cbc1d827a
+	// https://github.com/openshift/api/tree/release-4.19
 	github.com/openshift/api v0.0.0-20231118005202-0f638a8a4705
 	github.com/pkg/errors v0.9.1
-	go.uber.org/zap v1.27.0
-	k8s.io/api v0.33.0
-	k8s.io/apiextensions-apiserver v0.33.0
-	k8s.io/apimachinery v0.33.0
-	k8s.io/client-go v0.33.0
-	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
+	go.uber.org/zap v1.27.1
+
+	// Used versions of Kubernetes API that are compatible with what OpenShift 4.19 is based on.
+	k8s.io/api v0.33.7
+	k8s.io/apiextensions-apiserver v0.33.7
+	k8s.io/apimachinery v0.33.7
+	k8s.io/client-go v0.33.7
+	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.21.0
 	// Used version that OpenShift 4.19 uses as the oldest supported OCP version.
 	// Keep in sync with what we have in config/crd/external/*.yaml files.
@@ -24,11 +27,11 @@ require (
 // test dependencies
 require (
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.36.1
-	github.com/stretchr/testify v1.10.0
-	go.opentelemetry.io/otel v1.37.0
-	go.opentelemetry.io/otel/sdk v1.37.0
-	go.opentelemetry.io/otel/trace v1.37.0
+	github.com/onsi/gomega v1.38.3
+	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/otel v1.39.0
+	go.opentelemetry.io/otel/sdk v1.39.0
+	go.opentelemetry.io/otel/trace v1.39.0
 )
 
 require (
@@ -63,18 +66,19 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/otel/metric v1.37.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel/metric v1.39.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/protobuf v1.36.5 // indirect
+	google.golang.org/protobuf v1.36.7 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
