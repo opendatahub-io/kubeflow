@@ -162,8 +162,8 @@ func NewNotebookRbacHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gat
 	httpRoute := NewNotebookHTTPRoute(notebook, isGenerateName)
 
 	// Update the backend to point to the RBAC service instead of the main service
-	httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name = gatewayv1.ObjectName(notebook.Name + "-rbac")
-	httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port = (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0])
+	httpRoute.Spec.Rules[0].BackendRefs[0].BackendObjectReference.Name = gatewayv1.ObjectName(notebook.Name + "-rbac")
+	httpRoute.Spec.Rules[0].BackendRefs[0].BackendObjectReference.Port = (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0])
 
 	return httpRoute
 }

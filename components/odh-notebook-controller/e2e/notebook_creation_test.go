@@ -402,17 +402,6 @@ func (tc *testContext) validateHTTPRouteConfiguration(nbMeta *metav1.ObjectMeta)
 	return nil
 }
 
-// isNetworkConnectivityError checks if the error is related to network connectivity
-// that should cause the test to be skipped rather than failed
-func isNetworkConnectivityError(err error) bool {
-	errStr := err.Error()
-	// Common network connectivity issues that indicate Gateway/infrastructure problems
-	return strings.Contains(errStr, "EOF") ||
-		strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "no hostname available") ||
-		strings.Contains(errStr, "unable to get Gateway")
-}
-
 func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 	// Create Configmap with culling configuration
 	cullingConfigMap := &v1.ConfigMap{

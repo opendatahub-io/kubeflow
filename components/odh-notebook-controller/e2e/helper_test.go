@@ -12,7 +12,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +29,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 		controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(ctx, name, metav1.GetOptions{})
 
 		if err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				return false, nil
 			}
 			log.Printf("Failed to get %s controller deployment", name)
@@ -171,7 +170,7 @@ func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableRe
 			nbMeta.Name, metav1.GetOptions{})
 
 		if err1 != nil {
-			if errors.IsNotFound(err1) {
+			if apierrors.IsNotFound(err1) {
 				return false, nil
 			} else {
 				log.Printf("Failed to get %s statefulset", nbMeta.Name)
