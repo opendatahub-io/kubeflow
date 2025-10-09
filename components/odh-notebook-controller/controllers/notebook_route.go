@@ -17,34 +17,36 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"reflect"
-	"strings"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	routev1 "github.com/openshift/api/route/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// Route Url are defined with combination of Route.name and Route.namespace
-// The max sub-domain length is 63 characters, to keep the bound is place
-// we are using the generateName for the Route object. The const used for this
-// would be max 48 chars for route.name and 15 chars for route.namespace
+// HTTPRoute hostname generation constants
 const (
-	// RouteSubDomainMaxLen is the max length of the route subdomain
-	RouteSubDomainMaxLen = 63
+	// HTTPRouteSubDomainMaxLen is the max length of the HTTPRoute subdomain
+	HTTPRouteSubDomainMaxLen = 63
+	// DefaultGatewayName is the default Gateway name to use for HTTPRoutes prepared by the opendatahub-operator
+	DefaultGatewayName = "data-science-gateway"
+	// DefaultGatewayNamespace is the default Gateway namespace prepared by the opendatahub-operator
+	DefaultGatewayNamespace = "openshift-ingress"
 )
 
-// NewNotebookRoute defines the desired route object
-func NewNotebookRoute(notebook *nbv1.Notebook, isgenerateName bool) *routev1.Route {
+// Environment variables for configuration:
+// - NOTEBOOK_GATEWAY_NAME: Override the Gateway name (default: "data-science-gateway")
+// - NOTEBOOK_GATEWAY_NAMESPACE: Override the Gateway namespace (default: "openshift-ingress")
 
+// NewNotebookHTTPRoute defines the desired HTTPRoute object
+func NewNotebookHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gatewayv1.HTTPRoute {
 	routeMetadata := metav1.ObjectMeta{
 		Name:      notebook.Name,
 		Namespace: notebook.Namespace,
@@ -53,9 +55,8 @@ func NewNotebookRoute(notebook *nbv1.Notebook, isgenerateName bool) *routev1.Rou
 		},
 	}
 
-	// If the route name + namespace is greater than 63 characters, the route name would be created by generateName
-	// ex: notebook-name 48 + namespace(rhods-notebooks) 15 = 63
-	if isgenerateName {
+	// If the route name + namespace is greater than 63 characters, use generateName
+	if isGenerateName {
 		routeMetadata = metav1.ObjectMeta{
 			GenerateName: "nb-",
 			Namespace:    notebook.Namespace,
@@ -64,213 +65,218 @@ func NewNotebookRoute(notebook *nbv1.Notebook, isgenerateName bool) *routev1.Rou
 			},
 		}
 	}
-	return &routev1.Route{
+
+	// Get Gateway configuration from environment or use defaults
+	gatewayName := os.Getenv("NOTEBOOK_GATEWAY_NAME")
+	if gatewayName == "" {
+		gatewayName = DefaultGatewayName
+	}
+
+	gatewayNamespace := os.Getenv("NOTEBOOK_GATEWAY_NAMESPACE")
+	if gatewayNamespace == "" {
+		gatewayNamespace = DefaultGatewayNamespace
+	}
+
+	// Generate notebook path: /notebook/{namespace}/{notebook-name}
+	notebookPath := fmt.Sprintf("/notebook/%s/%s", notebook.Namespace, notebook.Name)
+
+	pathPrefix := gatewayv1.PathMatchPathPrefix
+	httpRoute := &gatewayv1.HTTPRoute{
 		ObjectMeta: routeMetadata,
-		Spec: routev1.RouteSpec{
-			To: routev1.RouteTargetReference{
-				Kind:   "Service",
-				Name:   notebook.Name,
-				Weight: ptr.To[int32](100),
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{
+				ParentRefs: []gatewayv1.ParentReference{
+					{
+						Name:      gatewayv1.ObjectName(gatewayName),
+						Namespace: (*gatewayv1.Namespace)(&gatewayNamespace),
+					},
+				},
 			},
-			Port: &routev1.RoutePort{
-				TargetPort: intstr.FromString("http-" + notebook.Name),
+			Rules: []gatewayv1.HTTPRouteRule{
+				{
+					Matches: []gatewayv1.HTTPRouteMatch{
+						{
+							Path: &gatewayv1.HTTPPathMatch{
+								Type:  &pathPrefix,
+								Value: &notebookPath,
+							},
+						},
+					},
+					BackendRefs: []gatewayv1.HTTPBackendRef{
+						{
+							BackendRef: gatewayv1.BackendRef{
+								BackendObjectReference: gatewayv1.BackendObjectReference{
+									Name: gatewayv1.ObjectName(notebook.Name),
+									Port: (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+								},
+							},
+						},
+					},
+				},
 			},
-			TLS: &routev1.TLSConfig{
-				Termination:                   routev1.TLSTerminationEdge,
-				InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
-			},
-			WildcardPolicy: routev1.WildcardPolicyNone,
-		},
-		Status: routev1.RouteStatus{
-			Ingress: []routev1.RouteIngress{},
 		},
 	}
+
+	return httpRoute
 }
 
-// CompareNotebookRoutes checks if two routes are equal, if not return false
-func CompareNotebookRoutes(r1 routev1.Route, r2 routev1.Route) bool {
-	// Omit the host field since it is reconciled by the ingress controller
-	r1.Spec.Host, r2.Spec.Host = "", ""
-
-	// Two routes will be equal if the labels and spec are identical
+// CompareNotebookHTTPRoutes checks if two HTTPRoutes are equal, if not return false
+func CompareNotebookHTTPRoutes(r1 gatewayv1.HTTPRoute, r2 gatewayv1.HTTPRoute) bool {
+	// Two HTTPRoutes will be equal if the labels and spec are identical
 	return reflect.DeepEqual(r1.ObjectMeta.Labels, r2.ObjectMeta.Labels) &&
 		reflect.DeepEqual(r1.Spec, r2.Spec)
 }
 
-// Reconcile will manage the creation, update and deletion of the route returned
-// by the newRoute function
-func (r *OpenshiftNotebookReconciler) reconcileRoute(notebook *nbv1.Notebook,
-	ctx context.Context, newRoute func(*nbv1.Notebook, bool) *routev1.Route) error {
+// reconcileHTTPRoute will manage the creation, update and deletion of the HTTPRoute returned
+// by the newHTTPRoute function
+func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook,
+	ctx context.Context, newHTTPRoute func(*nbv1.Notebook, bool) *gatewayv1.HTTPRoute) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
 	var isGenerateName = false
-	// If the route name + namespace is greater than 63 characters, the route name would be created by generateName
-	// ex: notebook-name 48 + namespace(rhods-notebooks) 15 = 63
-	if len(notebook.Name)+len(notebook.Namespace) > RouteSubDomainMaxLen {
-		log.Info("Route name is too long, using generateName")
+	// If the HTTPRoute name + namespace is greater than 63 characters, use generateName
+	if len(notebook.Name)+len(notebook.Namespace) > HTTPRouteSubDomainMaxLen {
+		log.Info("HTTPRoute name is too long, using generateName")
 		isGenerateName = true
-		// Note: Also update service account redirect reference once route is created.
 	}
 
-	// Generate the desired route
-	desiredRoute := newRoute(notebook, isGenerateName)
+	// Generate the desired HTTPRoute
+	desiredHTTPRoute := newHTTPRoute(notebook, isGenerateName)
 
-	// Create the route if it does not already exist
-	foundRoute := &routev1.Route{}
-	routeList := &routev1.RouteList{}
+	// Create the HTTPRoute if it does not already exist
+	foundHTTPRoute := &gatewayv1.HTTPRoute{}
+	httpRouteList := &gatewayv1.HTTPRouteList{}
 	justCreated := false
 
-	// List the routes in the notebook namespace with the notebook name label
+	// List the HTTPRoutes in the notebook namespace with the notebook name label
 	opts := []client.ListOption{
 		client.InNamespace(notebook.Namespace),
 		client.MatchingLabels{"notebook-name": notebook.Name},
 	}
 
-	err := r.List(ctx, routeList, opts...)
+	err := r.List(ctx, httpRouteList, opts...)
 	if err != nil {
-		log.Error(err, "Unable to list the Route")
+		log.Error(err, "Unable to list the HTTPRoute")
+		return err
 	}
 
-	// Get the route from the list
-	for _, nRoute := range routeList.Items {
-		if metav1.IsControlledBy(&nRoute, notebook) {
-			foundRoute = &nRoute
+	// Get the HTTPRoute from the list
+	for _, nHTTPRoute := range httpRouteList.Items {
+		if metav1.IsControlledBy(&nHTTPRoute, notebook) {
+			foundHTTPRoute = &nHTTPRoute
 			break
 		}
 	}
-	// If the route is not found, create it
-	if foundRoute.Name == "" && foundRoute.Namespace == "" {
-		log.Info("Creating Route")
-		// Add .metatada.ownerReferences to the route to be deleted by the
+
+	// If the HTTPRoute is not found, create it
+	if foundHTTPRoute.Name == "" && foundHTTPRoute.Namespace == "" {
+		log.Info("Creating HTTPRoute")
+		// Add .metadata.ownerReferences to the HTTPRoute to be deleted by the
 		// Kubernetes garbage collector if the notebook is deleted
-		err = ctrl.SetControllerReference(notebook, desiredRoute, r.Scheme)
+		err = ctrl.SetControllerReference(notebook, desiredHTTPRoute, r.Scheme)
 		if err != nil {
-			log.Error(err, "Unable to add OwnerReference to the Route")
+			log.Error(err, "Unable to add OwnerReference to the HTTPRoute")
 			return err
 		}
-		// Create the route in the Openshift cluster
-		err = r.Create(ctx, desiredRoute)
+		// Create the HTTPRoute in the cluster
+		err = r.Create(ctx, desiredHTTPRoute)
 		if err != nil && !apierrs.IsAlreadyExists(err) {
-			log.Error(err, "Unable to create the Route")
+			log.Error(err, "Unable to create the HTTPRoute")
 			return err
 		}
 		justCreated = true
 	}
 
-	// Reconcile the route spec if it has been manually modified
-	if !justCreated && !CompareNotebookRoutes(*desiredRoute, *foundRoute) {
-		log.Info("Reconciling Route")
-		// Retry the update operation when the ingress controller eventually
-		// updates the resource version field
+	// Reconcile the HTTPRoute spec if it has been manually modified
+	if !justCreated && !CompareNotebookHTTPRoutes(*desiredHTTPRoute, *foundHTTPRoute) {
+		log.Info("Reconciling HTTPRoute")
+		// Retry the update operation when there are conflicts
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			// Get the last route revision
+			// Get the last HTTPRoute revision
 			if err := r.Get(ctx, types.NamespacedName{
-				Name:      foundRoute.Name,
+				Name:      foundHTTPRoute.Name,
 				Namespace: notebook.Namespace,
-			}, foundRoute); err != nil {
+			}, foundHTTPRoute); err != nil {
 				return err
 			}
 			// Reconcile labels and spec field
-			foundRoute.Spec = desiredRoute.Spec
-			foundRoute.ObjectMeta.Labels = desiredRoute.ObjectMeta.Labels
-			return r.Update(ctx, foundRoute)
+			foundHTTPRoute.Spec = desiredHTTPRoute.Spec
+			foundHTTPRoute.Labels = desiredHTTPRoute.Labels
+			return r.Update(ctx, foundHTTPRoute)
 		})
 		if err != nil {
-			log.Error(err, "Unable to reconcile the Route")
+			log.Error(err, "Unable to reconcile the HTTPRoute")
 			return err
 		}
 	}
 
-	// Update service account redirect reference if justCreated and isGenerateName
+	// For generateName case, we might need to update hostname after creation
 	if justCreated && isGenerateName {
-		// get the generated route name
-		findRoute := &routev1.Route{}
-		routeList := &routev1.RouteList{}
-		opts := []client.ListOption{
-			client.InNamespace(notebook.Namespace),
-			client.MatchingLabels{"notebook-name": notebook.Name},
-		}
-
-		err := r.List(ctx, routeList, opts...)
-		if err != nil {
-			log.Error(err, "Unable to list the Route")
-		}
-
-		// Get the route from the list
-		for _, nRoute := range routeList.Items {
-			if metav1.IsControlledBy(&nRoute, notebook) {
-				findRoute = &nRoute
-				break
-			}
-		}
-		// Update the service account if already exist
-		foundSA := &corev1.ServiceAccount{}
-		err = r.Get(ctx, types.NamespacedName{
-			Name:      notebook.Name,
-			Namespace: notebook.Namespace,
-		}, foundSA)
-		if err == nil && foundSA.Name != "" {
-			log.Info("Updating Service Account")
-			foundSA = InsertSecondRedirectReference(foundSA, findRoute.Name)
-			err = r.Update(ctx, foundSA)
-			if err != nil {
-				log.Error(err, "Unable to update the Service Account")
-				return err
-			}
-		}
-
+		log.Info("HTTPRoute created with generateName, hostname pattern applied")
+		// The hostname is already set in the HTTPRoute spec, no additional action needed
+		// Unlike OpenShift Routes, HTTPRoute hostnames are explicit, not auto-generated
 	}
 
 	return nil
 }
 
-// ReconcileRoute will manage the creation, update and deletion of the
-// TLS route when the notebook is reconciled
-func (r *OpenshiftNotebookReconciler) ReconcileRoute(
+// ReconcileHTTPRoute will manage the creation, update and deletion of the
+// HTTPRoute when the notebook is reconciled
+func (r *OpenshiftNotebookReconciler) ReconcileHTTPRoute(
 	notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.reconcileRoute(notebook, ctx, NewNotebookRoute)
+	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookHTTPRoute)
 }
 
-// InsertSecondRedirectReference inserts the second redirect reference into the ServiceAccount
-func InsertSecondRedirectReference(sa *corev1.ServiceAccount, routeName string) *corev1.ServiceAccount {
-	sa.Annotations["serviceaccounts.openshift.io/oauth-redirectreference.second"] = "" +
-		`{"kind":"OAuthRedirectReference","apiVersion":"v1",` +
-		`"reference":{"kind":"Route","name":"` + routeName + `"}}`
-	return sa
-}
-
-// EnsureUnauthenticatedRouteAbsent deletes any existing unauthenticated route for the notebook
-// to prevent security bypasses when switching to OAuth mode. This function locates routes
-// owned by the notebook that are NOT OAuth routes and deletes them.
-func (r *OpenshiftNotebookReconciler) EnsureUnauthenticatedRouteAbsent(
-	notebook *nbv1.Notebook, ctx context.Context) error {
+// EnsureConflictingHTTPRouteAbsent deletes any existing conflicting HTTPRoute for the notebook
+// to prevent conflicts when switching between RBAC and non-RBAC modes.
+func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
+	notebook *nbv1.Notebook, ctx context.Context, isRbacMode bool) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// List all routes for this notebook
-	routeList := &routev1.RouteList{}
+	// List all HTTPRoutes for this notebook
+	httpRouteList := &gatewayv1.HTTPRouteList{}
 	opts := []client.ListOption{
 		client.InNamespace(notebook.Namespace),
 		client.MatchingLabels{"notebook-name": notebook.Name},
 	}
 
-	err := r.List(ctx, routeList, opts...)
+	err := r.List(ctx, httpRouteList, opts...)
 	if err != nil {
-		log.Error(err, "Unable to list routes for unauthenticated route cleanup")
+		log.Error(err, "Unable to list HTTPRoutes for conflicting route cleanup")
 		return err
 	}
 
-	// Check each route owned by this notebook
-	for _, route := range routeList.Items {
-		if metav1.IsControlledBy(&route, notebook) {
-			// Check if this is an unauthenticated route (not OAuth)
-			// OAuth routes have TLS termination set to "reencrypt" and target the OAuth service
-			if isUnauthenticatedRoute(&route) {
-				log.Info("Deleting unauthenticated route to prevent security bypass", "route", route.Name)
-				err = r.Delete(ctx, &route)
+	// Check each HTTPRoute owned by this notebook
+	for _, httpRoute := range httpRouteList.Items {
+		if metav1.IsControlledBy(&httpRoute, notebook) {
+			// Determine if this HTTPRoute conflicts with the current mode
+			shouldDelete := false
+
+			if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
+				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
+				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
+
+				isRbacRoute := (backendName == notebook.Name+"-rbac") || (backendPort != nil && *backendPort == 8443)
+				isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
+
+				// Delete conflicting routes:
+				// - If switching TO RBAC mode, delete regular routes
+				// - If switching FROM RBAC mode, delete RBAC routes
+				if isRbacMode && isRegularRoute {
+					shouldDelete = true
+					log.Info("Deleting regular HTTPRoute to switch to RBAC mode", "httpRoute", httpRoute.Name)
+				} else if !isRbacMode && isRbacRoute {
+					shouldDelete = true
+					log.Info("Deleting RBAC HTTPRoute to switch to regular mode", "httpRoute", httpRoute.Name)
+				}
+			}
+
+			if shouldDelete {
+				err = r.Delete(ctx, &httpRoute)
 				if err != nil && !apierrs.IsNotFound(err) {
-					log.Error(err, "Unable to delete unauthenticated route", "route", route.Name)
+					log.Error(err, "Unable to delete conflicting HTTPRoute", "httpRoute", httpRoute.Name)
 					return err
 				}
 			}
@@ -278,21 +284,4 @@ func (r *OpenshiftNotebookReconciler) EnsureUnauthenticatedRouteAbsent(
 	}
 
 	return nil
-}
-
-// isUnauthenticatedRoute determines if a route is an unauthenticated route (vs OAuth route)
-// OAuth routes have specific characteristics: reencrypt termination and target the OAuth service
-func isUnauthenticatedRoute(route *routev1.Route) bool {
-	// OAuth routes use reencrypt termination and target the OAuth service (notebook-name-tls)
-	// Unauthenticated routes use edge termination and target the main service (notebook-name)
-	if route.Spec.TLS != nil && route.Spec.TLS.Termination == routev1.TLSTerminationReencrypt {
-		return false // This is an OAuth route
-	}
-
-	// Check if the target service name indicates this is an OAuth route
-	if route.Spec.To.Name != "" && strings.HasSuffix(route.Spec.To.Name, "-tls") {
-		return false // This is an OAuth route
-	}
-
-	return true // This is an unauthenticated route
 }

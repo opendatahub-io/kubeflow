@@ -5,7 +5,7 @@ extend the Kubeflow notebook controller behavior with the following
 capabilities:
 
 - Openshift ingress controller integration.
-- Openshift OAuth sidecar injection.
+- Kubernetes RBAC proxy sidecar injection.
 
 It has been developed using **Golang** and
 **[Kubebuilder](https://book.kubebuilder.io/quick-start.html)**.
@@ -13,12 +13,12 @@ It has been developed using **Golang** and
 ## Implementation detail
 
 By default, when the ODH notebook controller is deployed along with the
-Kubeflow notebook controller, it will expose the notebook in the Openshift
-ingress by creating a TLS `Route` object.
+Kubeflow notebook controller, it will expose the notebook through the Gateway API
+by creating an `HTTPRoute` object that routes traffic to the notebook service.
 
-If the notebook annotation `notebooks.opendatahub.io/inject-oauth` is set to
-true, the OAuth proxy will be injected as a sidecar proxy in the notebook
-deployment to provide authN and authZ capabilities:
+If the notebook annotation `notebooks.opendatahub.io/inject-auth` is set to
+true, the kube-rbac-proxy will be injected as a sidecar proxy in the notebook
+deployment to provide RBAC-based authorization:
 
 ```yaml
 apiVersion: kubeflow.org/v1
@@ -26,7 +26,7 @@ kind: Notebook
 metadata:
   name: example
   annotations:
-    notebooks.opendatahub.io/inject-oauth: "true"
+    notebooks.opendatahub.io/inject-auth: "true"
 ```
 
 A [mutating webhook](./controllers/notebook_webhook.go) is part of the ODH
@@ -34,29 +34,33 @@ notebook controller, it will add the sidecar to the notebook deployment. The
 controller will create all the objects needed by the proxy as explained in the
 following diagram:
 
-![ODH Notebook Controller OAuth injection
-diagram](./assets/odh-notebook-controller-oauth-diagram.png)
+![ODH Notebook Controller RBAC injection
+diagram](./assets/odh-notebook-controller-auth-diagram.png)
 
 When accessing the notebook, you will have to authenticate with your Openshift
 user, and you will only be able to access it if you have the necessary
 permissions.
 
-The authorization is delegated to Openshift RBAC through the `--openshfit-sar`
-flag in the OAuth proxy:
+### RBAC Proxy Authorization
 
-```json
---openshift-sar=
-{
-    "verb":"get",
-    "resource":"notebooks",
-    "resourceAPIGroup":"kubeflow.org",
-    "resourceName":"example",
-    "namespace":"opendatahub"
-}
+For RBAC proxy injection, the authorization is delegated to Kubernetes RBAC through
+the kube-rbac-proxy configuration. The proxy performs `SubjectAccessReview` checks
+against the Kubernetes API to verify that the user has the necessary permissions.
+
+The RBAC proxy is configured with the following authorization rules:
+
+```yaml
+authorization:
+  resourceAttributes:
+    verb: get
+    resource: notebooks
+    apiGroup: kubeflow.org
+    resourceName: example
+    namespace: opendatahub
 ```
 
-That is, you will only be able to access the notebook if you can perform a `GET`
-notebook operation on the cluster:
+This means users will only be able to access the notebook if they have the `get`
+permission on the specific notebook resource in the specified namespace:
 
 ```shell
 oc get notebook example -n <YOUR_NAMESPACE>

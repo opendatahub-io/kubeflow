@@ -1,14 +1,14 @@
 # ODH Notebook Controller
 
-The ODH Notebook Controller will watch the **Kubeflow Notebook** custom resource
-events to extend the Kubeflow notebook controller behavior with the following
+The controller will watch the **Kubeflow Notebook** custom resource events to
+extend the Kubeflow notebook controller behavior with the following
 capabilities:
 
 - Openshift ingress controller integration.
-- Openshift OAuth sidecar injection.
+- Kubernetes RBAC proxy sidecar injection.
 
-![ODH Notebook Controller OAuth injection
-diagram](../odh-notebook-controller/assets/odh-notebook-controller-oauth-diagram.png)
+![ODH Notebook Controller RBAC injection
+diagram](../odh-notebook-controller/assets/odh-notebook-controller-auth-diagram.png)
 
 
 ## Directory Base
@@ -44,7 +44,7 @@ kind: Notebook
 metadata:
   name: minimal-notebook
   annotations:
-    notebooks.opendatahub.io/inject-oauth: "true"
+    notebooks.opendatahub.io/inject-auth: "true"
 spec:
   template:
     spec:
@@ -87,7 +87,14 @@ EOF
 Open the notebook URL in your browser:
 
 ```shell
-firefox "$(oc get route thoth-minimal-oauth-notebook -o jsonpath='{.spec.host}')/notebook/${notebook_namespace}/minimal-notebook"
+NOTEBOOK_NAMESPACE="test_notebook"
+NOTEBOOK_NAME="foo"
+
+GATEWAY_URL=$(oc get gateway -n openshift-ingress data-science-gateway -o jsonpath='{.spec.listeners[0].hostname}')
+
+NOTEBOOK_PATH=$(oc get httproute -n "${NOTEBOOK_NAMESPACE}" "${NOTEBOOK_NAME}" -o jsonpath='{.spec.rules[0].matches[0].path.value}')
+
+firefox "https://${GATEWAY_URL}/${NOTEBOOK_PATH}"
 ```
 
 Find more examples in the [notebook tests folder](../tests/resources/notebook-controller/).
