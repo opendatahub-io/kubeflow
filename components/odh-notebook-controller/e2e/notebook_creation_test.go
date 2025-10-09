@@ -126,11 +126,11 @@ func (tc *testContext) testNotebookHTTPRouteCreation(nbMeta *metav1.ObjectMeta) 
 	expectedBackendName := nbMeta.Name
 	if strings.Contains(nbHTTPRoute.Name, "rbac") ||
 		(len(nbHTTPRoute.Spec.Rules[0].BackendRefs) > 0 &&
-			string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name) == nbMeta.Name+"-rbac") {
+			string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].Name) == nbMeta.Name+"-rbac") {
 		expectedBackendName = nbMeta.Name + "-rbac"
 	}
 
-	actualBackendName := string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)
+	actualBackendName := string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].Name)
 	if actualBackendName != expectedBackendName {
 		return fmt.Errorf("HTTPRoute %s backend name mismatch: expected %s, got %s",
 			nbHTTPRoute.Name, expectedBackendName, actualBackendName)
@@ -387,15 +387,15 @@ func (tc *testContext) validateHTTPRouteConfiguration(nbMeta *metav1.ObjectMeta)
 	expectedBackendName := nbMeta.Name + "-rbac"
 	expectedPort := int32(8443)
 
-	if string(backendRef.BackendRef.BackendObjectReference.Name) != expectedBackendName {
+	if string(backendRef.Name) != expectedBackendName {
 		return fmt.Errorf("HTTPRoute backend name mismatch: expected %s, got %s",
-			expectedBackendName, string(backendRef.BackendRef.BackendObjectReference.Name))
+			expectedBackendName, string(backendRef.Name))
 	}
 
-	if backendRef.BackendRef.BackendObjectReference.Port == nil ||
-		int32(*backendRef.BackendRef.BackendObjectReference.Port) != expectedPort {
+	if backendRef.Port == nil ||
+		int32(*backendRef.Port) != expectedPort {
 		return fmt.Errorf("HTTPRoute backend port mismatch: expected %d, got %v",
-			expectedPort, backendRef.BackendRef.BackendObjectReference.Port)
+			expectedPort, backendRef.Port)
 	}
 
 	log.Printf("HTTPRoute configuration validated successfully for notebook %s", nbMeta.Name)

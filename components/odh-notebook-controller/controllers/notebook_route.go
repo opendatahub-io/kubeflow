@@ -202,7 +202,7 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 			}
 			// Reconcile labels and spec field
 			foundHTTPRoute.Spec = desiredHTTPRoute.Spec
-			foundHTTPRoute.Labels = desiredHTTPRoute.ObjectMeta.Labels
+			foundHTTPRoute.Labels = desiredHTTPRoute.Labels
 			return r.Update(ctx, foundHTTPRoute)
 		})
 		if err != nil {
@@ -255,8 +255,8 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 			shouldDelete := false
 
 			if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
-				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendObjectReference.Name)
-				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].BackendObjectReference.Port
+				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
+				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
 				isRbacRoute := (backendName == notebook.Name+"-rbac") || (backendPort != nil && *backendPort == 8443)
 				isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
