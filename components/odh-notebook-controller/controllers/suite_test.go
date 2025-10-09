@@ -73,7 +73,7 @@ var (
 	testNamespaces = []string{}
 
 	// RBAC proxy image hardcoded placeholder value for tests
-	rbacProxyImage string = "quay.io/brancz/kube-rbac-proxy:v0.15.0"
+	rbacProxyImage string = "quay.io/brancz/kube-rbac-proxy:v0.20.0"
 )
 
 const (
