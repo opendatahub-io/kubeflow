@@ -668,11 +668,12 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	configMapMountKey := "ca-bundle.crt"
 	configMapMountValue := "ca-bundle.crt"
 	configEnvVars := map[string]string{
-		"PIP_CERT":               configMapMountPath,
-		"REQUESTS_CA_BUNDLE":     configMapMountPath,
-		"SSL_CERT_FILE":          configMapMountPath,
-		"PIPELINES_SSL_SA_CERTS": configMapMountPath,
-		"GIT_SSL_CAINFO":         configMapMountPath,
+		"PIP_CERT":                  configMapMountPath,
+		"REQUESTS_CA_BUNDLE":        configMapMountPath,
+		"SSL_CERT_FILE":             configMapMountPath,
+		"PIPELINES_SSL_SA_CERTS":    configMapMountPath,
+		"KF_PIPELINES_SSL_SA_CERTS": configMapMountPath,
+		"GIT_SSL_CAINFO":            configMapMountPath,
 	}
 
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
