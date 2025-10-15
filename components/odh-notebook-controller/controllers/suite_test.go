@@ -72,8 +72,8 @@ var (
 
 	testNamespaces = []string{}
 
-	// RBAC proxy image hardcoded placeholder value for tests
-	rbacProxyImage string = "quay.io/brancz/kube-rbac-proxy:v0.20.0"
+	// kube-rbac-proxy image hardcoded placeholder value for tests
+	kubeRbacProxyImage string = "quay.io/brancz/kube-rbac-proxy:v0.20.0"
 )
 
 const (
@@ -206,8 +206,8 @@ var _ = BeforeSuite(func() {
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
-			RbacConfig: RbacConfig{
-				ProxyImage: rbacProxyImage,
+			KubeRbacProxyConfig: KubeRbacProxyConfig{
+				ProxyImage: kubeRbacProxyImage,
 			},
 			Decoder: admission.NewDecoder(mgr.GetScheme()),
 		},

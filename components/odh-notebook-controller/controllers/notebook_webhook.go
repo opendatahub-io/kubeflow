@@ -54,11 +54,11 @@ import (
 
 // NotebookWebhook holds the webhook configuration.
 type NotebookWebhook struct {
-	Log        logr.Logger
-	Client     client.Client
-	Config     *rest.Config
-	Decoder    admission.Decoder
-	RbacConfig RbacConfig
+	Log                 logr.Logger
+	Client              client.Client
+	Config              *rest.Config
+	Decoder             admission.Decoder
+	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
 	Namespace string
 }
@@ -72,19 +72,19 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 })
 
 const (
-	ContainerNameRbacProxy = "kube-rbac-proxy"
+	ContainerNameKubeRbacProxy = "kube-rbac-proxy"
 
-	RbacProxyConfigVolumeName = "rbac-proxy-config"
-	RbacProxyConfigMountPath  = "/etc/kube-rbac-proxy"
-	RbacProxyConfigFileName   = "config-file.yaml"
-	RbacProxyConfigFilePath   = RbacProxyConfigMountPath + "/" + RbacProxyConfigFileName
+	KubeRbacProxyConfigVolumeName = "kube-rbac-proxy-config"
+	KubeRbacProxyConfigMountPath  = "/etc/kube-rbac-proxy"
+	KubeRbacProxyConfigFileName   = "config-file.yaml"
+	KubeRbacProxyConfigFilePath   = KubeRbacProxyConfigMountPath + "/" + KubeRbacProxyConfigFileName
 
-	RbacProxyTLSCertsVolumeName = "rbac-tls-certificates"
-	RbacProxyTLSCertsMountPath  = "/etc/tls/private"
-	RbacProxyTLSCertFileName    = "tls.crt"
-	RbacProxyTLSCertFilePath    = RbacProxyTLSCertsMountPath + "/" + RbacProxyTLSCertFileName
-	RbacProxyTLSKeyFileName     = "tls.key"
-	RbacProxyTLSKeyFilePath     = RbacProxyTLSCertsMountPath + "/" + RbacProxyTLSKeyFileName
+	KubeRbacProxyTLSCertsVolumeName = "kube-rbac-proxy-tls-certificates"
+	KubeRbacProxyTLSCertsMountPath  = "/etc/tls/private"
+	KubeRbacProxyTLSCertFileName    = "tls.crt"
+	KubeRbacProxyTLSCertFilePath    = KubeRbacProxyTLSCertsMountPath + "/" + KubeRbacProxyTLSCertFileName
+	KubeRbacProxyTLSKeyFileName     = "tls.key"
+	KubeRbacProxyTLSKeyFilePath     = KubeRbacProxyTLSCertsMountPath + "/" + KubeRbacProxyTLSKeyFileName
 
 	IMAGE_STREAM_NOT_FOUND_EVENT     = "imagestream-not-found"
 	IMAGE_STREAM_TAG_NOT_FOUND_EVENT = "imagestream-tag-not-found"
@@ -170,13 +170,13 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 	return config, nil
 }
 
-// InjectRbacProxy injects the RBAC proxy sidecar container in the Notebook
+// InjectKubeRbacProxy injects the kube-rbac-proxy proxy sidecar container in the Notebook
 // spec
-func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
-	// Parse and validate RBAC proxy resource annotations
+func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacProxyConfig) error {
+	// Parse and validate kube-rbac-proxy resource annotations
 	config, err := parseAndValidateAuthSidecarResources(notebook)
 	if err != nil {
-		return fmt.Errorf("invalid RBAC proxy resource configuration: %w", err)
+		return fmt.Errorf("invalid kube-rbac-proxy resource configuration: %w", err)
 	}
 
 	// Convert config to ResourceRequirements
@@ -193,32 +193,32 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
-		Name:            ContainerNameRbacProxy,
-		Image:           rbac.ProxyImage,
+		Name:            ContainerNameKubeRbacProxy,
+		Image:           kubeRbacProxyConfig.ProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
 		Args: []string{
-			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookRbacPort),
+			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
 			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
 			"--logtostderr=true",
 			"--v=10", // TODO - TBD, this is too verbose
-			"--proxy-endpoints-port=" + strconv.Itoa(NotebookRbacHealthPort),
-			"--config-file=" + RbacProxyConfigFilePath,
-			"--tls-cert-file=" + RbacProxyTLSCertFilePath,
-			"--tls-private-key-file=" + RbacProxyTLSKeyFilePath,
+			"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
+			"--config-file=" + KubeRbacProxyConfigFilePath,
+			"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
+			"--tls-private-key-file=" + KubeRbacProxyTLSKeyFilePath,
 			"--auth-header-fields-enabled=true",
 			"--auth-header-user-field-name=X-Auth-Request-User",
 			"--auth-header-groups-field-name=X-Auth-Request-Groups",
 		},
 		Ports: []corev1.ContainerPort{{
-			Name:          RbacServicePortName,
-			ContainerPort: NotebookRbacPort,
+			Name:          KubeRbacProxyServicePortName,
+			ContainerPort: NotebookKubeRbacProxyPort,
 			Protocol:      corev1.ProtocolTCP,
 		}},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path:   "/healthz",
-					Port:   intstr.FromInt32(NotebookRbacHealthPort),
+					Port:   intstr.FromInt32(NotebookKubeRbacProxyHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -232,7 +232,7 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path:   "/healthz",
-					Port:   intstr.FromInt32(NotebookRbacHealthPort),
+					Port:   intstr.FromInt32(NotebookKubeRbacProxyHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -245,12 +245,12 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 		Resources: resourceRequirements,
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      RbacProxyConfigVolumeName,
-				MountPath: RbacProxyConfigMountPath,
+				Name:      KubeRbacProxyConfigVolumeName,
+				MountPath: KubeRbacProxyConfigMountPath,
 			},
 			{
-				Name:      RbacProxyTLSCertsVolumeName,
-				MountPath: RbacProxyTLSCertsMountPath,
+				Name:      KubeRbacProxyTLSCertsVolumeName,
+				MountPath: KubeRbacProxyTLSCertsMountPath,
 			},
 		},
 	}
@@ -259,7 +259,7 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	proxyContainerExists := false
 	for index, container := range *notebookContainers {
-		if container.Name == ContainerNameRbacProxy {
+		if container.Name == ContainerNameKubeRbacProxy {
 			(*notebookContainers)[index] = proxyContainer
 			proxyContainerExists = true
 			break
@@ -269,37 +269,37 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 		*notebookContainers = append(*notebookContainers, proxyContainer)
 	}
 
-	// Add the RBAC configuration volume:
+	// Add the kube-rbac-proxy configuration volume:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
-	rbacVolumeExists := false
-	rbacVolume := corev1.Volume{
-		Name: RbacProxyConfigVolumeName,
+	kubeRbacProxyVolumeExists := false
+	kubeRbacProxyVolume := corev1.Volume{
+		Name: KubeRbacProxyConfigVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: notebook.Name + "-rbac-config",
+					Name: notebook.Name + KubeRbacProxyConfigSuffix,
 				},
 				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == RbacProxyConfigVolumeName {
-			(*notebookVolumes)[index] = rbacVolume
-			rbacVolumeExists = true
+		if volume.Name == KubeRbacProxyConfigVolumeName {
+			(*notebookVolumes)[index] = kubeRbacProxyVolume
+			kubeRbacProxyVolumeExists = true
 			break
 		}
 	}
-	if !rbacVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, rbacVolume)
+	if !kubeRbacProxyVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, kubeRbacProxyVolume)
 	}
 
-	// Add the TLS certificates volume for RBAC proxy:
+	// Add the TLS certificates volume for kube-rbac-proxy:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	tlsVolumeExists := false
 	tlsVolume := corev1.Volume{
-		Name: RbacProxyTLSCertsVolumeName,
+		Name: KubeRbacProxyTLSCertsVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-rbac-tls",
@@ -308,7 +308,7 @@ func InjectRbacProxy(notebook *nbv1.Notebook, rbac RbacConfig) error {
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == RbacProxyTLSCertsVolumeName {
+		if volume.Name == KubeRbacProxyTLSCertsVolumeName {
 			(*notebookVolumes)[index] = tlsVolume
 			tlsVolumeExists = true
 			break
@@ -410,10 +410,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	}
 
-	// Inject the RBAC proxy if the annotation is present
-	if RbacInjectionIsEnabled(notebook.ObjectMeta) {
-		// Inject RBAC proxy
-		err = InjectRbacProxy(notebook, w.RbacConfig)
+	// Inject the kube-rbac-proxy if the annotation is present
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
+		// Inject kube-rbac-proxy
+		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -439,7 +439,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// RHOAIENG-14552: Running notebook cannot be updated carelessly, or we may end up restarting the pod when
-	// the webhook runs after e.g. the rbac-proxy image has been updated
+	// the webhook runs after e.g. the kube-rbac-proxy image has been updated
 	mutatedNotebook, needsRestart, err := w.maybeRestartRunningNotebook(ctx, req, notebook)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)

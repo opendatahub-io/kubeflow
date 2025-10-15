@@ -51,7 +51,7 @@ import (
 )
 
 const (
-	AnnotationInjectRbac               = "notebooks.opendatahub.io/inject-auth"
+	AnnotationInjectAuth               = "notebooks.opendatahub.io/inject-auth"
 	AnnotationValueReconciliationLock  = "odh-notebook-controller-lock"
 	AnnotationAuthSidecarCPURequest    = "notebooks.opendatahub.io/auth-sidecar-cpu-request"
 	AnnotationAuthSidecarMemoryRequest = "notebooks.opendatahub.io/auth-sidecar-memory-request"
@@ -105,11 +105,11 @@ func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
 		reflect.DeepEqual(nb1.Spec, nb2.Spec)
 }
 
-// RbacInjectionIsEnabled returns true if the rbac sidecar injection
+// KubeRbacProxyInjectionIsEnabled returns true if the kube-rbac-proxy sidecar injection
 // annotation is present in the notebook.
-func RbacInjectionIsEnabled(meta metav1.ObjectMeta) bool {
-	if meta.Annotations[AnnotationInjectRbac] != "" {
-		result, _ := strconv.ParseBool(meta.Annotations[AnnotationInjectRbac])
+func KubeRbacProxyInjectionIsEnabled(meta metav1.ObjectMeta) bool {
+	if meta.Annotations[AnnotationInjectAuth] != "" {
+		result, _ := strconv.ParseBool(meta.Annotations[AnnotationInjectAuth])
 		return result
 	} else {
 		return false
@@ -177,14 +177,14 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Handle deletion with finalizer
-	const finalizerName = "notebook.opendatahub.io/rbac-cleanup"
+	const finalizerName = "notebook.opendatahub.io/kube-rbac-proxy-cleanup"
 	if notebook.DeletionTimestamp != nil {
 		// Notebook is being deleted
-		if RbacInjectionIsEnabled(notebook.ObjectMeta) {
+		if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
 			// Clean up ClusterRoleBinding before allowing deletion
-			err = r.CleanupRbacClusterRoleBinding(notebook, ctx)
+			err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
 			if err != nil {
-				log.Error(err, "Failed to cleanup RBAC ClusterRoleBinding during deletion")
+				log.Error(err, "Failed to cleanup kube-rbac-proxy ClusterRoleBinding during deletion")
 				return ctrl.Result{}, err
 			}
 		}
@@ -201,8 +201,8 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, nil
 	}
 
-	// Add finalizer if RBAC is enabled and finalizer is not present
-	if RbacInjectionIsEnabled(notebook.ObjectMeta) && !controllerutil.ContainsFinalizer(notebook, finalizerName) {
+	// Add finalizer if kube-rbac-proxy is enabled and finalizer is not present
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) && !controllerutil.ContainsFinalizer(notebook, finalizerName) {
 		controllerutil.AddFinalizer(notebook, finalizerName)
 		err = r.Update(ctx, notebook)
 		if err != nil {
@@ -263,57 +263,57 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	// Create the objects required by the RBAC proxy sidecar if annotation is present
-	if RbacInjectionIsEnabled(notebook.ObjectMeta) {
-		// Ensure any existing regular HTTPRoute is cleaned up before creating RBAC objects
+	// Create the objects required by the kube-rbac-proxy sidecar if annotation is present
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
+		// Ensure any existing regular HTTPRoute is cleaned up before creating kube-rbac-proxy objects
 		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, true)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Create the objects required by the RBAC proxy sidecar
+		// Create the objects required by the kube-rbac-proxy sidecar
 		err = r.ReconcileNotebookServiceAccount(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the RBAC ClusterRoleBinding reconciler
-		err = r.ReconcileRbacClusterRoleBinding(notebook, ctx)
+		// Call the kube-rbac-proxy ClusterRoleBinding reconciler
+		err = r.ReconcileKubeRbacProxyClusterRoleBinding(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the RBAC ConfigMap reconciler
-		err = r.ReconcileRbacConfigMap(notebook, ctx)
+		// Call the kube-rbac-proxy ConfigMap reconciler
+		err = r.ReconcileKubeRbacProxyConfigMap(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the RBAC Service reconciler
-		err = r.ReconcileRbacService(notebook, ctx)
+		// Call the kube-rbac-proxy Service reconciler
+		err = r.ReconcileKubeRbacProxyService(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the RBAC HTTPRoute reconciler
-		err = r.ReconcileRbacHTTPRoute(notebook, ctx)
+		// Call the kube-rbac-proxy HTTPRoute reconciler
+		err = r.ReconcileKubeRbacProxyHTTPRoute(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 	} else {
-		// Ensure any existing RBAC HTTPRoute is cleaned up before creating regular HTTPRoute
+		// Ensure any existing kube-rbac-proxy HTTPRoute is cleaned up before creating regular HTTPRoute
 		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, false)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Clean up any existing RBAC ClusterRoleBinding when switching away from RBAC mode
-		err = r.CleanupRbacClusterRoleBinding(notebook, ctx)
+		// Clean up any existing kube-rbac-proxy ClusterRoleBinding when switching away from auth mode
+		err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
-		// Call the HTTPRoute reconciler (see notebook_route.go file)
+		// Call the regular HTTPRoute reconciler (see notebook_route.go file)
 		err = r.ReconcileHTTPRoute(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err

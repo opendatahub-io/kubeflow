@@ -663,7 +663,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		expectedNotebookKubeRbacNetworkPolicy := &netv1.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      notebook.Name + "-rbac-np",
+				Name:      notebook.Name + NotebookKubeRbacProxyNetworkPolicySuffix,
 				Namespace: notebook.Namespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
@@ -690,7 +690,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Ports: []netv1.NetworkPolicyPort{
 							{
 								Protocol: &npProtocol,
-								Port:     &[]intstr.IntOrString{intstr.FromInt(int(NotebookRbacPort))}[0],
+								Port:     &[]intstr.IntOrString{intstr.FromInt(int(NotebookKubeRbacProxyPort))}[0],
 							},
 						},
 					},
@@ -714,7 +714,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has created Network policy to allow all requests on OAuth port")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-rbac-np", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + NotebookKubeRbacProxyNetworkPolicySuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
 			}, duration, interval).Should(Succeed())
 			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
@@ -743,7 +743,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has recreated the OAuth Network policy")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-rbac-np", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + NotebookKubeRbacProxyNetworkPolicySuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
 			}, duration, interval).Should(Succeed())
 			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
@@ -777,17 +777,17 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	})
 
-	When("Creating a Notebook with RBAC proxy injection", func() {
+	When("Creating a Notebook with kube-rbac-proxy injection", func() {
 		const (
-			Name      = "test-notebook-rbac"
+			Name      = "test-notebook-kube-rbac-proxy"
 			Namespace = "default"
 		)
 
-		notebook := createNotebookWithRBAC(Name, Namespace)
+		notebook := createNotebookWithKubeRbacProxy(Name, Namespace)
 
 		expectedService := &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name + "-rbac",
+				Name:      Name + KubeRbacProxyServiceSuffix,
 				Namespace: Namespace,
 				Labels: map[string]string{
 					"notebook-name": Name,
@@ -879,7 +879,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		expectedConfigMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name + "-rbac-config",
+				Name:      Name + KubeRbacProxyConfigSuffix,
 				Namespace: Namespace,
 				Labels: map[string]string{
 					"notebook-name": Name,
@@ -906,8 +906,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 		}
 
-		It("Should create a Notebook with RBAC annotation", func() {
-			By("By creating a new Notebook with RBAC annotation")
+		It("Should create a Notebook with inject-auth annotation to contain kube-rbac-proxy sidecar", func() {
+			By("By creating a new Notebook with inject-auth annotation")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the notebook was created successfully")
@@ -916,11 +916,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, key, notebook)
 			}, duration, interval).Should(Succeed())
 
-			// Verify the notebook has the RBAC annotation
-			Expect(notebook.Annotations[AnnotationInjectRbac]).To(Equal("true"))
+			// Verify the notebook has the inject-auth annotation
+			Expect(notebook.Annotations[AnnotationInjectAuth]).To(Equal("true"))
 		})
 
-		It("Should inject the RBAC proxy as a sidecar container", func() {
+		It("Should inject the kube-rbac-proxy as a sidecar container", func() {
 			By("By checking that the webhook has injected the sidecar container")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
 			Eventually(func() error {
@@ -929,50 +929,50 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					return err
 				}
 
-				// Verify we have exactly 2 containers (original + RBAC proxy)
+				// Verify we have exactly 2 containers (original + kube-rbac-proxy)
 				if len(notebook.Spec.Template.Spec.Containers) != 2 {
 					return fmt.Errorf("expected 2 containers, got %d", len(notebook.Spec.Template.Spec.Containers))
 				}
 
-				// Verify the second container is the RBAC proxy
-				rbacContainer := notebook.Spec.Template.Spec.Containers[1]
-				if rbacContainer.Name != "kube-rbac-proxy" {
-					return fmt.Errorf("expected RBAC proxy container name 'kube-rbac-proxy', got '%s'", rbacContainer.Name)
+				// Verify the second container is the kube-rbac-proxy
+				kubeRbacProxyContainer := notebook.Spec.Template.Spec.Containers[1]
+				if kubeRbacProxyContainer.Name != "kube-rbac-proxy" {
+					return fmt.Errorf("expected kube-rbac-proxy container name 'kube-rbac-proxy', got '%s'", kubeRbacProxyContainer.Name)
 				}
 
-				// Verify RBAC proxy container has the correct image
-				expectedImagePrefix := rbacProxyImage
-				if !strings.HasPrefix(rbacContainer.Image, expectedImagePrefix) {
-					return fmt.Errorf("expected RBAC proxy image to start with '%s', got '%s'", expectedImagePrefix, rbacContainer.Image)
+				// Verify kube-rbac-proxy container has the correct image
+				expectedImagePrefix := kubeRbacProxyImage
+				if !strings.HasPrefix(kubeRbacProxyContainer.Image, expectedImagePrefix) {
+					return fmt.Errorf("expected kube-rbac-proxy image to start with '%s', got '%s'", expectedImagePrefix, kubeRbacProxyContainer.Image)
 				}
 
-				// Verify RBAC proxy container has the correct port
+				// Verify kube-rbac-proxy container has the correct port
 				foundPort := false
-				for _, port := range rbacContainer.Ports {
+				for _, port := range kubeRbacProxyContainer.Ports {
 					if port.Name == "kube-rbac-proxy" && port.ContainerPort == 8443 {
 						foundPort = true
 						break
 					}
 				}
 				if !foundPort {
-					return fmt.Errorf("RBAC proxy container missing port 'kube-rbac-proxy' on 8443")
+					return fmt.Errorf("kube-rbac-proxy container missing port 'kube-rbac-proxy' on 8443")
 				}
 
 				return nil
 			}, duration, interval).Should(Succeed())
 		})
 
-		It("Should create a Service for the RBAC proxy", func() {
+		It("Should create a Service for the kube-rbac-proxy", func() {
 			By("By checking that the controller has created the Service")
 			service := &corev1.Service{}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-rbac", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + KubeRbacProxyServiceSuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, service)
 			}, duration, interval).Should(Succeed())
 			Expect(*service).To(BeMatchingK8sResource(*expectedService, CompareNotebookServices))
 		})
 
-		It("Should create an HTTPRoute for the RBAC proxy", func() {
+		It("Should create an HTTPRoute for the kube-rbac-proxy", func() {
 			By("By checking that the controller has created the HTTPRoute")
 			httpRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
@@ -1041,7 +1041,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			var originalContainerImage string
 			var originalVolumeSource corev1.VolumeSource
 
-			// Store original container image if there's a second container (RBAC proxy)
+			// Store original container image if there's a second container (kube-rbac-proxy)
 			if len(notebook.Spec.Template.Spec.Containers) > 1 {
 				originalContainerImage = notebook.Spec.Template.Spec.Containers[1].Image
 			}
@@ -1093,11 +1093,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(Succeed())
 		})
 
-		It("Should create a ConfigMap for RBAC configuration", func() {
+		It("Should create a ConfigMap for kube-rbac-proxy configuration", func() {
 			By("By checking that the controller has created the ConfigMap")
 			configMap := &corev1.ConfigMap{}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-rbac-config", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, configMap)
 			}, duration, interval).Should(Succeed())
 			Expect(*configMap).To(BeMatchingK8sResource(*expectedConfigMap, CompareNotebookConfigMaps))
@@ -1106,7 +1106,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the ConfigMap when deleted", func() {
 			By("By deleting the notebook ConfigMap")
 			configMap := &corev1.ConfigMap{}
-			key := types.NamespacedName{Name: Name + "-rbac-config", Namespace: Namespace}
+			key := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
 			Expect(cli.Get(ctx, key, configMap)).Should(Succeed())
 			Expect(cli.Delete(ctx, configMap)).Should(Succeed())
 
@@ -1143,7 +1143,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*serviceAccount).To(BeMatchingK8sResource(expectedServiceAccount, CompareNotebookServiceAccounts))
 		})
 
-		It("Should delete all RBAC resources when the notebook is deleted", func() {
+		It("Should delete all kube-rbac-proxy related resources when the notebook is deleted", func() {
 			// Testenv cluster does not implement Kubernetes GC:
 			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
 			// To test that the deletion lifecycle works, test the ownership
@@ -1157,23 +1157,23 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				BlockOwnerDeletion: ptr.To(true),
 			}
 
-			By("By checking that the Notebook owns the RBAC Service object")
-			rbacService := &corev1.Service{}
-			serviceKey := types.NamespacedName{Name: Name + "-rbac", Namespace: Namespace}
-			Expect(cli.Get(ctx, serviceKey, rbacService)).Should(Succeed())
-			Expect(rbacService.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			By("By checking that the Notebook owns the kube-rbac-proxy Service object")
+			kubeRbacProxyService := &corev1.Service{}
+			serviceKey := types.NamespacedName{Name: Name + KubeRbacProxyServiceSuffix, Namespace: Namespace}
+			Expect(cli.Get(ctx, serviceKey, kubeRbacProxyService)).Should(Succeed())
+			Expect(kubeRbacProxyService.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
-			By("By checking that the Notebook owns the RBAC HTTPRoute object")
-			rbacHTTPRoute := &gatewayv1.HTTPRoute{}
+			By("By checking that the Notebook owns the kube-rbac-proxy HTTPRoute object")
+			kubeRbacProxyHTTPRoute := &gatewayv1.HTTPRoute{}
 			routeKey := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, routeKey, rbacHTTPRoute)).Should(Succeed())
-			Expect(rbacHTTPRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			Expect(cli.Get(ctx, routeKey, kubeRbacProxyHTTPRoute)).Should(Succeed())
+			Expect(kubeRbacProxyHTTPRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
-			By("By checking that the Notebook owns the RBAC ConfigMap object")
-			rbacConfigMap := &corev1.ConfigMap{}
-			configMapKey := types.NamespacedName{Name: Name + "-rbac-config", Namespace: Namespace}
-			Expect(cli.Get(ctx, configMapKey, rbacConfigMap)).Should(Succeed())
-			Expect(rbacConfigMap.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			By("By checking that the Notebook owns the kube-rbac-proxy ConfigMap object")
+			kubeRbacProxyConfigMap := &corev1.ConfigMap{}
+			configMapKey := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
+			Expect(cli.Get(ctx, configMapKey, kubeRbacProxyConfigMap)).Should(Succeed())
+			Expect(kubeRbacProxyConfigMap.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -1192,8 +1192,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Namespace = "default"
 		)
 
-		It("Should clean up unauthenticated HTTPRoutes when enabling RBAC", func() {
-			By("Creating a notebook without RBAC initially")
+		It("Should clean up unauthenticated HTTPRoutes when enabling kube-rbac-proxy", func() {
+			By("Creating a notebook without kube-rbac-proxy initially")
 			notebook := createNotebook(Name, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
@@ -1210,13 +1210,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name))
 			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
 
-			By("Updating the notebook to enable RBAC")
+			By("Updating the notebook to add kube-rbac-proxy sidecar container")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
 			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
 			if notebook.Annotations == nil {
 				notebook.Annotations = make(map[string]string)
 			}
-			notebook.Annotations[AnnotationInjectRbac] = "true"
+			notebook.Annotations[AnnotationInjectAuth] = "true"
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
 			By("Verifying the unauthenticated HTTPRoute is cleaned up")
@@ -1236,57 +1236,57 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return nil
 			}, duration, interval).Should(Succeed())
 
-			By("Verifying an RBAC HTTPRoute is created")
-			rbacRoute := &gatewayv1.HTTPRoute{}
+			By("Verifying an kube-rbac-proxy HTTPRoute is created")
+			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				return cli.Get(ctx, key, rbacRoute)
+				return cli.Get(ctx, key, kubeRbacProxyRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the RBAC service (port 8443)
-			Expect(len(rbacRoute.Spec.Rules)).To(BeNumerically(">", 0))
-			Expect(len(rbacRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
-			Expect(string(rbacRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac"))
-			Expect(*rbacRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
+			// Verify it points to the kube-rbac-proxy service (port 8443)
+			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac"))
+			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
 
 			By("Cleaning up the test notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
 		})
 
-		It("Should clean up RBAC HTTPRoutes when disabling RBAC", func() {
-			By("Creating a notebook with RBAC initially")
-			notebook := createNotebookWithRBAC(Name+"-rbac-to-regular", Namespace)
+		It("Should clean up kube-rbac-proxy HTTPRoutes when disabling kube-rbac-proxy authentication", func() {
+			By("Creating a notebook with kube-rbac-proxy initially")
+			notebook := createNotebookWithKubeRbacProxy(Name+"-rbac-to-regular", Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			By("Verifying an RBAC HTTPRoute is created")
-			rbacRoute := &gatewayv1.HTTPRoute{}
+			By("Verifying an kube-rbac-proxy HTTPRoute is created")
+			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
 			key := types.NamespacedName{Name: Name + "-rbac-to-regular", Namespace: Namespace}
 			Eventually(func() error {
-				return cli.Get(ctx, key, rbacRoute)
+				return cli.Get(ctx, key, kubeRbacProxyRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the RBAC service (port 8443)
-			Expect(len(rbacRoute.Spec.Rules)).To(BeNumerically(">", 0))
-			Expect(len(rbacRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
-			Expect(string(rbacRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular-rbac"))
-			Expect(*rbacRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
+			// Verify it points to the kube-rbac-proxy service (port 8443)
+			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular-rbac"))
+			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
 
-			By("Updating the notebook to disable RBAC")
+			By("Updating the notebook to disable kube-rbac-proxy authentication")
 			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-			delete(notebook.Annotations, AnnotationInjectRbac)
+			delete(notebook.Annotations, AnnotationInjectAuth)
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
-			By("Verifying the RBAC HTTPRoute is cleaned up")
+			By("Verifying the kube-rbac-proxy HTTPRoute is cleaned up")
 			Eventually(func() error {
-				err := cli.Get(ctx, key, rbacRoute)
+				err := cli.Get(ctx, key, kubeRbacProxyRoute)
 				if err != nil {
 					return err
 				}
-				// Check if it still points to RBAC service (should be gone or changed)
-				if len(rbacRoute.Spec.Rules) > 0 && len(rbacRoute.Spec.Rules[0].BackendRefs) > 0 {
-					backendName := string(rbacRoute.Spec.Rules[0].BackendRefs[0].Name)
-					backendPort := rbacRoute.Spec.Rules[0].BackendRefs[0].Port
+				// Check if it still points to kube-rbac-proxy service (should be gone or changed)
+				if len(kubeRbacProxyRoute.Spec.Rules) > 0 && len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs) > 0 {
+					backendName := string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)
+					backendPort := kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port
 					if backendName == Name+"-rbac-to-regular-rbac" && backendPort != nil && *backendPort == 8443 {
-						return fmt.Errorf("RBAC HTTPRoute still exists")
+						return fmt.Errorf("kube-rbac-proxy HTTPRoute still exists")
 					}
 				}
 				return nil
@@ -1309,19 +1309,19 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 	})
 
-	When("Creating a Notebook without RBAC proxy injection", func() {
+	When("Creating a Notebook without kube-rbac-proxy proxy injection", func() {
 		const (
-			Name      = "test-notebook-no-rbac"
+			Name      = "test-notebook-no-kube-rbac-proxy"
 			Namespace = "default"
 		)
 
 		notebook := createNotebook(Name, Namespace)
 
-		It("Should create a Notebook without RBAC proxy", func() {
-			By("By creating a new Notebook without RBAC annotation")
+		It("Should create a Notebook without kube-rbac-proxy proxy", func() {
+			By("By creating a new Notebook without inject-auth annotation")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			By("By checking that no RBAC proxy container was injected")
+			By("By checking that no kube-rbac-proxy proxy container was injected")
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
@@ -1331,13 +1331,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(notebook.Spec.Template.Spec.Containers).To(HaveLen(1))
 			Expect(notebook.Spec.Template.Spec.Containers[0].Name).To(Equal(Name))
 
-			// Verify no RBAC volumes were added
+			// Verify no kube-rbac-proxy volumes were added
 			volumeNames := make(map[string]bool)
 			for _, volume := range notebook.Spec.Template.Spec.Volumes {
 				volumeNames[volume.Name] = true
 			}
-			Expect(volumeNames["rbac-proxy-config"]).To(BeFalse())
-			Expect(volumeNames["rbac-tls-certificates"]).To(BeFalse())
+			Expect(volumeNames[KubeRbacProxyConfigVolumeName]).To(BeFalse())
+			Expect(volumeNames[KubeRbacProxyTLSCertsVolumeName]).To(BeFalse())
 		})
 
 		It("Should create an unauthenticated HTTPRoute", func() {
@@ -1348,7 +1348,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it's an unauthenticated HTTPRoute (points to the notebook service, not RBAC service)
+			// Verify it's an unauthenticated HTTPRoute (points to the notebook service, not kube-rbac-proxy service)
 			Expect(len(httpRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(httpRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)).To(Equal(Name))
@@ -1635,13 +1635,13 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 	}
 }
 
-func createNotebookWithRBAC(name, namespace string) *nbv1.Notebook {
+func createNotebookWithKubeRbacProxy(name, namespace string) *nbv1.Notebook {
 	return &nbv1.Notebook{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			Annotations: map[string]string{
-				AnnotationInjectRbac: "true",
+				AnnotationInjectAuth: "true",
 			},
 		},
 		Spec: nbv1.NotebookSpec{
@@ -1654,7 +1654,7 @@ func createNotebookWithRBAC(name, namespace string) *nbv1.Notebook {
 	}
 }
 
-// createExpectedServiceAccount creates the expected ServiceAccount for RBAC notebooks
+// createExpectedServiceAccount creates the expected ServiceAccount for notebooks
 func createExpectedServiceAccount(name, namespace string) corev1.ServiceAccount {
 	return corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{

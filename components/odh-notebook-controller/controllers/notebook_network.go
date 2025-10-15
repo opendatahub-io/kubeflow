@@ -33,9 +33,10 @@ import (
 )
 
 const (
-	NotebookPort           = 8888
-	NotebookRbacPort       = 8443
-	NotebookRbacHealthPort = 8444
+	NotebookPort                             = 8888
+	NotebookKubeRbacProxyPort                = 8443
+	NotebookKubeRbacProxyHealthPort          = 8444
+	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
 )
 
 // ReconcileAllNetworkPolicies will manage the network policies reconciliation
@@ -54,10 +55,10 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 		return err
 	}
 
-	desiredRbacNetworkPolicy := NewRbacNetworkPolicy(notebook)
-	err = r.reconcileNetworkPolicy(desiredRbacNetworkPolicy, ctx, notebook)
+	desiredKubeRbacProxyNetworkPolicy := NewKubeRbacProxyNetworkPolicy(notebook)
+	err = r.reconcileNetworkPolicy(desiredKubeRbacProxyNetworkPolicy, ctx, notebook)
 	if err != nil {
-		log.Error(err, "error creating Notebook rbac-proxy network policy")
+		log.Error(err, "error creating Notebook kube-rbac-proxy network policy")
 		return err
 	}
 
@@ -172,15 +173,15 @@ func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespac
 	}
 }
 
-// NewRbacNetworkPolicy defines the desired rbac-proxy Network Policy
-func NewRbacNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
+// NewKubeRbacProxyNetworkPolicy defines the desired kube-rbac-proxy Network Policy
+func NewKubeRbacProxyNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 
 	npProtocol := corev1.ProtocolTCP
-	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the rbac-proxy port of a notebook
-	// Note: This policy needs to update if there is a change in rbac-proxy Port or Webhook Port.
+	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the kube-rbac-proxy port of a notebook
+	// Note: This policy needs to update if there is a change in kube-rbac-proxy Port or Webhook Port.
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      notebook.Name + "-rbac-np",
+			Name:      notebook.Name + NotebookKubeRbacProxyNetworkPolicySuffix,
 			Namespace: notebook.Namespace,
 		},
 		Spec: netv1.NetworkPolicySpec{
@@ -195,7 +196,7 @@ func NewRbacNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 						{
 							Protocol: &npProtocol,
 							Port: &intstr.IntOrString{
-								IntVal: NotebookRbacPort,
+								IntVal: NotebookKubeRbacProxyPort,
 							},
 						},
 					},

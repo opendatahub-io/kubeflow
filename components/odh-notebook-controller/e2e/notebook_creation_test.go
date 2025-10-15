@@ -21,6 +21,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+const (
+	// mimics definition in notebook_kube_rbac_auth.go
+	KubeRbacProxyServiceSuffix = "-kube-rbac-proxy"
+	// mimics definition in notebook_network.go
+	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
+)
+
 func creationTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
@@ -152,7 +159,7 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 
 func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {
 	// Test Notebook Network policy that allows all requests on Notebook kube-rbac-proxy port
-	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+"-rbac-np")
+	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+NotebookKubeRbacProxyNetworkPolicySuffix)
 	if err != nil {
 		return fmt.Errorf("error getting network policy for Notebook kube-rbac-proxy port %v: %v", notebookOAuthNetworkPolicy.Name, err)
 	}
@@ -267,7 +274,7 @@ func (tc *testContext) testNotebookServiceConnectivity(nbMeta *metav1.ObjectMeta
 	}
 
 	// Test connectivity to the RBAC service
-	serviceName := nbMeta.Name + "-rbac"
+	serviceName := nbMeta.Name + KubeRbacProxyServiceSuffix
 	service, err := tc.kubeClient.CoreV1().Services(tc.testNamespace).Get(tc.ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get RBAC service %s: %v", serviceName, err)

@@ -34,20 +34,20 @@ notebook controller, it will add the sidecar to the notebook deployment. The
 controller will create all the objects needed by the proxy as explained in the
 following diagram:
 
-![ODH Notebook Controller RBAC injection
+![ODH Notebook Controller kube-rbac-proxy injection
 diagram](./assets/odh-notebook-controller-auth-diagram.png)
 
 When accessing the notebook, you will have to authenticate with your Openshift
 user, and you will only be able to access it if you have the necessary
 permissions.
 
-### RBAC Proxy Authorization
+### kube-rbac-proxy Authorization
 
-For RBAC proxy injection, the authorization is delegated to Kubernetes RBAC through
+For kube-rbac-proxy injection, the authorization is delegated to Kubernetes RBAC through
 the kube-rbac-proxy configuration. The proxy performs `SubjectAccessReview` checks
 against the Kubernetes API to verify that the user has the necessary permissions.
 
-The RBAC proxy is configured with the following authorization rules:
+The kube-rbac-proxy is configured with the following authorization rules:
 
 ```yaml
 authorization:

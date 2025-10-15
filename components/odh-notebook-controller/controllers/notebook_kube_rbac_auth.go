@@ -33,17 +33,19 @@ import (
 )
 
 const (
-	// RBAC proxy configuration
-	RbacServicePort     = 8443
-	RbacServicePortName = "kube-rbac-proxy"
+	// kube-rbac-proxy configuration
+	KubeRbacProxyServicePort     = 8443
+	KubeRbacProxyServicePortName = "kube-rbac-proxy"
+	KubeRbacProxyConfigSuffix    = "-kube-rbac-proxy-config"
+	KubeRbacProxyServiceSuffix   = "-rbac"
 )
 
-type RbacConfig struct {
+type KubeRbacProxyConfig struct {
 	ProxyImage string
 }
 
 // ReconcileNotebookServiceAccount will manage the service account reconciliation
-// required by the notebook for RBAC proxy
+// required by the notebook for kube-rbac-proxy
 func (r *OpenshiftNotebookReconciler) ReconcileNotebookServiceAccount(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
@@ -90,11 +92,11 @@ func (r *OpenshiftNotebookReconciler) ReconcileNotebookServiceAccount(notebook *
 	return nil
 }
 
-// NewNotebookRbacService defines the desired RBAC service object for kube-rbac-proxy
-func NewNotebookRbacService(notebook *nbv1.Notebook) *corev1.Service {
+// NewNotebookKubeRbacProxyService defines the desired service object for kube-rbac-proxy
+func NewNotebookKubeRbacProxyService(notebook *nbv1.Notebook) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      notebook.Name + "-rbac",
+			Name:      notebook.Name + KubeRbacProxyServiceSuffix,
 			Namespace: notebook.Namespace,
 			Labels: map[string]string{
 				"notebook-name": notebook.Name,
@@ -105,9 +107,9 @@ func NewNotebookRbacService(notebook *nbv1.Notebook) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{{
-				Name:       RbacServicePortName,
-				Port:       RbacServicePort,
-				TargetPort: intstr.FromString(RbacServicePortName),
+				Name:       KubeRbacProxyServicePortName,
+				Port:       KubeRbacProxyServicePort,
+				TargetPort: intstr.FromString(KubeRbacProxyServicePortName),
 				Protocol:   corev1.ProtocolTCP,
 			}},
 			Selector: map[string]string{
@@ -117,16 +119,16 @@ func NewNotebookRbacService(notebook *nbv1.Notebook) *corev1.Service {
 	}
 }
 
-// ReconcileRbacService will manage the RBAC service reconciliation required
-// by the notebook RBAC proxy
-func (r *OpenshiftNotebookReconciler) ReconcileRbacService(notebook *nbv1.Notebook, ctx context.Context) error {
+// ReconcileKubeRbacProxyService will manage the service reconciliation required
+// by the notebook kube-rbac-proxy
+func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyService(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// Generate the desired RBAC service
-	desiredService := NewNotebookRbacService(notebook)
+	// Generate the desired kube-rbac-proxy service
+	desiredService := NewNotebookKubeRbacProxyService(notebook)
 
-	// Create the RBAC service if it does not already exist
+	// Create the kube-rbac-proxy service if it does not already exist
 	foundService := &corev1.Service{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      desiredService.GetName(),
@@ -134,22 +136,22 @@ func (r *OpenshiftNotebookReconciler) ReconcileRbacService(notebook *nbv1.Notebo
 	}, foundService)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Creating RBAC Service")
-			// Add .metatada.ownerReferences to the RBAC service to be deleted by
+			log.Info("Creating kube-rbac-proxy Service")
+			// Add .metatada.ownerReferences to the kube-rbac-proxy service to be deleted by
 			// the Kubernetes garbage collector if the notebook is deleted
 			err = ctrl.SetControllerReference(notebook, desiredService, r.Scheme)
 			if err != nil {
-				log.Error(err, "Unable to add OwnerReference to the RBAC Service")
+				log.Error(err, "Unable to add OwnerReference to the kube-rbac-proxy Service")
 				return err
 			}
-			// Create the RBAC service in the Openshift cluster
+			// Create the kube-rbac-proxy service in the Openshift cluster
 			err = r.Create(ctx, desiredService)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
-				log.Error(err, "Unable to create the RBAC Service")
+				log.Error(err, "Unable to create the kube-rbac-proxy Service")
 				return err
 			}
 		} else {
-			log.Error(err, "Unable to fetch the RBAC Service")
+			log.Error(err, "Unable to fetch the kube-rbac-proxy Service")
 			return err
 		}
 	}
@@ -157,27 +159,27 @@ func (r *OpenshiftNotebookReconciler) ReconcileRbacService(notebook *nbv1.Notebo
 	return nil
 }
 
-// NewNotebookRbacHTTPRoute defines the desired RBAC HTTPRoute object for kube-rbac-proxy
-func NewNotebookRbacHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gatewayv1.HTTPRoute {
+// NewNotebookKubeRbacProxyHTTPRoute defines the desired HTTPRoute object for kube-rbac-proxy
+func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gatewayv1.HTTPRoute {
 	httpRoute := NewNotebookHTTPRoute(notebook, isGenerateName)
 
-	// Update the backend to point to the RBAC service instead of the main service
-	httpRoute.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(notebook.Name + "-rbac")
+	// Update the backend to point to the kube-rbac-proxy service instead of the main service
+	httpRoute.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(notebook.Name + KubeRbacProxyServiceSuffix)
 	httpRoute.Spec.Rules[0].BackendRefs[0].Port = (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0])
 
 	return httpRoute
 }
 
-// ReconcileRbacHTTPRoute will manage the creation, update and deletion of the RBAC HTTPRoute
+// ReconcileKubeRbacProxyHTTPRoute will manage the creation, update and deletion of the kube-rbac-proxy HTTPRoute
 // when the notebook is reconciled.
-func (r *OpenshiftNotebookReconciler) ReconcileRbacHTTPRoute(
+func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyHTTPRoute(
 	notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookRbacHTTPRoute)
+	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookKubeRbacProxyHTTPRoute)
 }
 
-// NewNotebookRbacConfigMap defines the desired RBAC ConfigMap object for kube-rbac-proxy
-func NewNotebookRbacConfigMap(notebook *nbv1.Notebook) *corev1.ConfigMap {
-	rbacConfig := fmt.Sprintf(`authorization:
+// NewNotebookKubeRbacProxyConfigMap defines the desired ConfigMap object for kube-rbac-proxy
+func NewNotebookKubeRbacProxyConfigMap(notebook *nbv1.Notebook) *corev1.ConfigMap {
+	kubeRbacProxyConfig := fmt.Sprintf(`authorization:
   resourceAttributes:
     verb: get
     resource: notebooks
@@ -187,28 +189,28 @@ func NewNotebookRbacConfigMap(notebook *nbv1.Notebook) *corev1.ConfigMap {
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      notebook.Name + "-rbac-config",
+			Name:      notebook.Name + KubeRbacProxyConfigSuffix,
 			Namespace: notebook.Namespace,
 			Labels: map[string]string{
 				"notebook-name": notebook.Name,
 			},
 		},
 		Data: map[string]string{
-			RbacProxyConfigFileName: rbacConfig,
+			KubeRbacProxyConfigFileName: kubeRbacProxyConfig,
 		},
 	}
 }
 
-// ReconcileRbacConfigMap will manage the RBAC ConfigMap reconciliation required
-// by the notebook RBAC proxy
-func (r *OpenshiftNotebookReconciler) ReconcileRbacConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
+// ReconcileKubeRbacProxyConfigMap will manage the ConfigMap reconciliation required
+// by the notebook kube-rbac-proxy
+func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// Generate the desired RBAC ConfigMap
-	desiredConfigMap := NewNotebookRbacConfigMap(notebook)
+	// Generate the desired kube-rbac-proxy ConfigMap
+	desiredConfigMap := NewNotebookKubeRbacProxyConfigMap(notebook)
 
-	// Create the RBAC ConfigMap if it does not already exist
+	// Create the kube-rbac-proxy ConfigMap if it does not already exist
 	foundConfigMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      desiredConfigMap.GetName(),
@@ -216,32 +218,74 @@ func (r *OpenshiftNotebookReconciler) ReconcileRbacConfigMap(notebook *nbv1.Note
 	}, foundConfigMap)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Creating RBAC ConfigMap")
-			// Add .metatada.ownerReferences to the RBAC ConfigMap to be deleted by
+			log.Info("Creating kube-rbac-proxy ConfigMap")
+			// Add .metatada.ownerReferences to the kube-rbac-proxy ConfigMap to be deleted by
 			// the Kubernetes garbage collector if the notebook is deleted
 			err = ctrl.SetControllerReference(notebook, desiredConfigMap, r.Scheme)
 			if err != nil {
-				log.Error(err, "Unable to add OwnerReference to the RBAC ConfigMap")
+				log.Error(err, "Unable to add OwnerReference to the kube-rbac-proxy ConfigMap")
 				return err
 			}
-			// Create the RBAC ConfigMap in the cluster
+			// Create the kube-rbac-proxy ConfigMap in the cluster
 			err = r.Create(ctx, desiredConfigMap)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
-				log.Error(err, "Unable to create the RBAC ConfigMap")
+				log.Error(err, "Unable to create the kube-rbac-proxy ConfigMap")
 				return err
 			}
 		} else {
-			log.Error(err, "Unable to fetch the RBAC ConfigMap")
+			log.Error(err, "Unable to fetch the kube-rbac-proxy ConfigMap")
 			return err
+		}
+	} else {
+		// ConfigMap exists, check if it needs to be updated
+		needsUpdate := false
+
+		// Check if data differs
+		if len(foundConfigMap.Data) != len(desiredConfigMap.Data) {
+			needsUpdate = true
+		} else {
+			for key, value := range desiredConfigMap.Data {
+				if foundConfigMap.Data[key] != value {
+					needsUpdate = true
+					break
+				}
+			}
+		}
+
+		// Check if labels differ
+		if !needsUpdate {
+			if len(foundConfigMap.Labels) != len(desiredConfigMap.Labels) {
+				needsUpdate = true
+			} else {
+				for key, value := range desiredConfigMap.Labels {
+					if foundConfigMap.Labels[key] != value {
+						needsUpdate = true
+						break
+					}
+				}
+			}
+		}
+
+		if needsUpdate {
+			log.Info("Reconciling kube-rbac-proxy ConfigMap")
+			// Update the existing ConfigMap with desired values
+			foundConfigMap.Data = desiredConfigMap.Data
+			foundConfigMap.Labels = desiredConfigMap.Labels
+			err = r.Update(ctx, foundConfigMap)
+			if err != nil {
+				log.Error(err, "Unable to reconcile the kube-rbac-proxy ConfigMap")
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-// NewNotebookRbacClusterRoleBinding defines the desired ClusterRoleBinding object for kube-rbac-proxy authentication
+// TODO: We need to revisit in favor of https://issues.redhat.com/browse/RHOAIENG-36109
+// NewNotebookKubeRbacProxyClusterRoleBinding defines the desired ClusterRoleBinding object for kube-rbac-proxy authentication
 // This creates one ClusterRoleBinding per namespace that grants auth-delegator permissions to all ServiceAccounts in that namespace
-func NewNotebookRbacClusterRoleBinding(notebook *nbv1.Notebook) *rbacv1.ClusterRoleBinding {
+func NewNotebookKubeRbacProxyClusterRoleBinding(notebook *nbv1.Notebook) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fmt.Sprintf("odh-notebooks-%s-auth-delegator", notebook.Namespace),
@@ -265,14 +309,14 @@ func NewNotebookRbacClusterRoleBinding(notebook *nbv1.Notebook) *rbacv1.ClusterR
 	}
 }
 
-// ReconcileRbacClusterRoleBinding will manage the ClusterRoleBinding reconciliation required
-// by the notebook RBAC proxy for authentication (tokenreviews and subjectaccessreviews)
-func (r *OpenshiftNotebookReconciler) ReconcileRbacClusterRoleBinding(notebook *nbv1.Notebook, ctx context.Context) error {
+// ReconcileKubeRbacProxyClusterRoleBinding will manage the ClusterRoleBinding reconciliation required
+// by the notebook kube-rbac-proxy for authentication (tokenreviews and subjectaccessreviews)
+func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyClusterRoleBinding(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
 	// Generate the desired ClusterRoleBinding
-	desiredClusterRoleBinding := NewNotebookRbacClusterRoleBinding(notebook)
+	desiredClusterRoleBinding := NewNotebookKubeRbacProxyClusterRoleBinding(notebook)
 
 	// Create the ClusterRoleBinding if it does not already exist
 	foundClusterRoleBinding := &rbacv1.ClusterRoleBinding{}
@@ -281,16 +325,16 @@ func (r *OpenshiftNotebookReconciler) ReconcileRbacClusterRoleBinding(notebook *
 	}, foundClusterRoleBinding)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			log.Info("Creating RBAC ClusterRoleBinding")
+			log.Info("Creating kube-rbac-proxy ClusterRoleBinding")
 			// Note: ClusterRoleBindings cannot have ownerReferences to namespaced resources
 			// so we'll need to clean them up manually when the notebook is deleted
 			err = r.Create(ctx, desiredClusterRoleBinding)
 			if err != nil && !apierrs.IsAlreadyExists(err) {
-				log.Error(err, "Unable to create the RBAC ClusterRoleBinding")
+				log.Error(err, "Unable to create the kube-rbac-proxy ClusterRoleBinding")
 				return err
 			}
 		} else {
-			log.Error(err, "Unable to fetch the RBAC ClusterRoleBinding")
+			log.Error(err, "Unable to fetch the kube-rbac-proxy ClusterRoleBinding")
 			return err
 		}
 	}
@@ -298,13 +342,13 @@ func (r *OpenshiftNotebookReconciler) ReconcileRbacClusterRoleBinding(notebook *
 	return nil
 }
 
-// CleanupRbacClusterRoleBinding removes the ClusterRoleBinding associated with the namespace
-// if this is the last RBAC-enabled notebook in the namespace
-func (r *OpenshiftNotebookReconciler) CleanupRbacClusterRoleBinding(notebook *nbv1.Notebook, ctx context.Context) error {
+// CleanupKubeRbacProxyClusterRoleBinding removes the ClusterRoleBinding associated with the namespace
+// if this is the last auth-enabled notebook in the namespace
+func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyClusterRoleBinding(notebook *nbv1.Notebook, ctx context.Context) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// Check if there are other RBAC-enabled notebooks in this namespace
+	// Check if there are other auth-enabled notebooks in this namespace
 	notebookList := &nbv1.NotebookList{}
 	err := r.List(ctx, notebookList, client.InNamespace(notebook.Namespace))
 	if err != nil {
@@ -312,20 +356,20 @@ func (r *OpenshiftNotebookReconciler) CleanupRbacClusterRoleBinding(notebook *nb
 		return err
 	}
 
-	// Count RBAC-enabled notebooks (excluding the current one being deleted/disabled)
-	rbacNotebookCount := 0
+	// Count auth-enabled notebooks (excluding the current one being deleted/disabled)
+	authNotebookCount := 0
 	for _, nb := range notebookList.Items {
 		// Skip the current notebook if it's being deleted or if it's the same notebook
 		if nb.Name == notebook.Name {
 			continue
 		}
-		if RbacInjectionIsEnabled(nb.ObjectMeta) {
-			rbacNotebookCount++
+		if KubeRbacProxyInjectionIsEnabled(nb.ObjectMeta) {
+			authNotebookCount++
 		}
 	}
 
-	// Only delete the ClusterRoleBinding if this is the last RBAC-enabled notebook in the namespace
-	if rbacNotebookCount == 0 {
+	// Only delete the ClusterRoleBinding if this is the last auth-enabled notebook in the namespace
+	if authNotebookCount == 0 {
 		clusterRoleBindingName := fmt.Sprintf("odh-notebooks-%s-auth-delegator", notebook.Namespace)
 
 		clusterRoleBinding := &rbacv1.ClusterRoleBinding{
@@ -336,15 +380,15 @@ func (r *OpenshiftNotebookReconciler) CleanupRbacClusterRoleBinding(notebook *nb
 
 		err := r.Delete(ctx, clusterRoleBinding)
 		if err != nil && !apierrs.IsNotFound(err) {
-			log.Error(err, "Unable to delete RBAC ClusterRoleBinding")
+			log.Error(err, "Unable to delete kube-rbac-proxy ClusterRoleBinding")
 			return err
 		}
 
 		if err == nil {
-			log.Info("Deleted RBAC ClusterRoleBinding for namespace", "clusterRoleBinding", clusterRoleBindingName)
+			log.Info("Deleted kube-rbac-proxy ClusterRoleBinding for namespace", "clusterRoleBinding", clusterRoleBindingName)
 		}
 	} else {
-		log.Info("Keeping RBAC ClusterRoleBinding as other RBAC-enabled notebooks exist in namespace", "count", rbacNotebookCount)
+		log.Info("Keeping kube-rbac-proxy ClusterRoleBinding as other auth-enabled notebooks exist in namespace", "count", authNotebookCount)
 	}
 
 	return nil

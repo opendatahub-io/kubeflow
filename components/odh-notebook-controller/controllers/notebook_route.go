@@ -229,9 +229,9 @@ func (r *OpenshiftNotebookReconciler) ReconcileHTTPRoute(
 }
 
 // EnsureConflictingHTTPRouteAbsent deletes any existing conflicting HTTPRoute for the notebook
-// to prevent conflicts when switching between RBAC and non-RBAC modes.
+// to prevent conflicts when switching between auth and non-auth modes.
 func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
-	notebook *nbv1.Notebook, ctx context.Context, isRbacMode bool) error {
+	notebook *nbv1.Notebook, ctx context.Context, isAuthMode bool) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
@@ -258,18 +258,18 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
 				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
-				isRbacRoute := (backendName == notebook.Name+"-rbac") || (backendPort != nil && *backendPort == 8443)
+				isKubeRbacProxyRoute := (backendName == notebook.Name+"-rbac") || (backendPort != nil && *backendPort == 8443)
 				isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
 
 				// Delete conflicting routes:
-				// - If switching TO RBAC mode, delete regular routes
-				// - If switching FROM RBAC mode, delete RBAC routes
-				if isRbacMode && isRegularRoute {
+				// - If switching TO auth mode, delete regular routes
+				// - If switching FROM auth mode, delete kube-rbac-proxy routes
+				if isAuthMode && isRegularRoute {
 					shouldDelete = true
-					log.Info("Deleting regular HTTPRoute to switch to RBAC mode", "httpRoute", httpRoute.Name)
-				} else if !isRbacMode && isRbacRoute {
+					log.Info("Deleting regular HTTPRoute to switch to auth mode", "httpRoute", httpRoute.Name)
+				} else if !isAuthMode && isKubeRbacProxyRoute {
 					shouldDelete = true
-					log.Info("Deleting RBAC HTTPRoute to switch to regular mode", "httpRoute", httpRoute.Name)
+					log.Info("Deleting kube-rbac-proxy HTTPRoute to switch to non-auth mode", "httpRoute", httpRoute.Name)
 				}
 			}
 

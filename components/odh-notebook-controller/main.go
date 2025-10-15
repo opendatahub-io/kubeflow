@@ -80,15 +80,15 @@ func getControllerNamespace() (string, error) {
 }
 
 func main() {
-	var metricsAddr, probeAddr, rbacProxyImage, webhookCertDir string
+	var metricsAddr, probeAddr, kubeRbacProxyImage, webhookCertDir string
 	var webhookPort int
 	var enableLeaderElection, enableDebugLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
-	flag.StringVar(&rbacProxyImage, "kube-rbac-proxy-image", "",
-		"Image of the RBAC proxy sidecar container. (required)")
+	flag.StringVar(&kubeRbacProxyImage, "kube-rbac-proxy-image", "",
+		"Image of the kube-rbac-proxy sidecar container. (required)")
 	// specified explicitly, since on macOS the default temporary directory often resolves to a path under /var/folders/...
 	// this default path in /tmp/ is already hardcoded in the Makefile and manifests used for ktunnel deployment
 	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
@@ -110,7 +110,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// Validate required flags
-	if rbacProxyImage == "" {
+	if kubeRbacProxyImage == "" {
 		setupLog.Error(fmt.Errorf("missing required flag"), "kube-rbac-proxy-image flag must be set")
 		flag.Usage()
 		os.Exit(1)
@@ -162,8 +162,8 @@ func main() {
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: namespace,
-			RbacConfig: controllers.RbacConfig{
-				ProxyImage: rbacProxyImage,
+			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
+				ProxyImage: kubeRbacProxyImage,
 			},
 			Decoder: admission.NewDecoder(mgr.GetScheme()),
 		},
