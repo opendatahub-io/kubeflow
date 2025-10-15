@@ -547,6 +547,7 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
 		Owns(&netv1.NetworkPolicy{}).
 		Owns(&rbacv1.RoleBinding{}).
 
@@ -609,6 +610,7 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					}
 					return reconcileRequests
 				}
+
 				return []reconcile.Request{}
 			}),
 		)
