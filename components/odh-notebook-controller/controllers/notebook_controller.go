@@ -97,7 +97,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications/api,verbs=get;create;update;patch;delete
-// +kubebuilder:rbac:groups="components.platform.opendatahub.io",resources=dashboards,verbs=get;list;watch
+// +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=gateways,verbs=get;list;watch
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {

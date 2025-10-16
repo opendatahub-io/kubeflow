@@ -31,14 +31,6 @@ rules:
   verbs:
   - create
 - apiGroups:
-  - components.platform.opendatahub.io
-  resources:
-  - dashboards
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - config.openshift.io
   resources:
   - proxies
@@ -64,6 +56,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

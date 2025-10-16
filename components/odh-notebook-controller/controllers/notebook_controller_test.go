@@ -1358,13 +1358,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	When("Checking ds-pipeline-config secret lifecycle", func() {
 		const (
-			notebookName          = "dspa-notebook"
-			dsSecretName          = "ds-pipeline-config"
-			Namespace             = "dspa-test-namespace"
-			accessKeyKey          = "accesskey"
-			secretKeyKey          = "secretkey"
-			secretName            = "cos-secret"
-			dashboardInstanceName = "default-dashboard"
+			notebookName = "dspa-notebook"
+			dsSecretName = "ds-pipeline-config"
+			Namespace    = "dspa-test-namespace"
+			accessKeyKey = "accesskey"
+			secretKeyKey = "secretkey"
+			secretName   = "cos-secret"
+			gatewayName  = "data-science-gateway"
 		)
 
 		testNamespaces = append(testNamespaces, Namespace)
@@ -1372,7 +1372,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		var (
 			dspaObj      *dspav1.DataSciencePipelinesApplication
 			s3CredSecret *corev1.Secret
-			dashboard    *unstructured.Unstructured
+			gateway      *unstructured.Unstructured
 		)
 		BeforeEach(func() {
 			//Pass env to be visible within test suite
@@ -1385,8 +1385,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("should create a ds-pipeline-config secret if a DSPA is present", func() {
-			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Dashboard CR, and Dashboard Secret.
-			// These components require the 'ds-pipeline-config' secret to be generated beforehand.
+			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Gateway CR, and COS Secret.
+			// These components are required for the 'ds-pipeline-config' secret to be generated.
 			By("Creating a DSPA object")
 			dspaObj = &dspav1.DataSciencePipelinesApplication{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1432,42 +1432,44 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 			Expect(cli.Create(ctx, s3CredSecret)).To(Succeed())
 
-			By("Creating a Dashboard CR")
-			dashboard = &unstructured.Unstructured{
+			By("Creating openshift-ingress namespace for Gateway")
+			openshiftIngressNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "openshift-ingress",
+				},
+			}
+			Expect(cli.Create(ctx, openshiftIngressNS)).To(Succeed())
+
+			By("Creating a Gateway CR")
+			gateway = &unstructured.Unstructured{
 				Object: map[string]interface{}{
-					"apiVersion": "components.platform.opendatahub.io/v1alpha1",
-					"kind":       "Dashboard",
+					"apiVersion": "gateway.networking.k8s.io/v1",
+					"kind":       "Gateway",
 					"metadata": map[string]interface{}{
-						"name":      dashboardInstanceName,
-						"namespace": Namespace,
+						"name":      gatewayName,
+						"namespace": "openshift-ingress",
+					},
+					"spec": map[string]interface{}{
+						"gatewayClassName": "openshift-default",
+						"listeners": []interface{}{
+							map[string]interface{}{
+								"hostname": "gateway.example.com",
+								"name":     "https",
+								"port":     int64(443),
+								"protocol": "HTTPS",
+							},
+						},
 					},
 				},
 			}
-			dashboard.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   "components.platform.opendatahub.io",
-				Version: "v1alpha1",
-				Kind:    "Dashboard",
+			gateway.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "gateway.networking.k8s.io",
+				Version: "v1",
+				Kind:    "Gateway",
 			})
-			Expect(cli.Create(ctx, dashboard)).To(Succeed())
+			Expect(cli.Create(ctx, gateway)).To(Succeed())
 
-			By("Patching the Dashboard status.url and Ready condition to simulate readiness")
-			// Fetch the Dashboard to get a valid resourceVersion
-			Expect(cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)).To(Succeed())
-			// Create a patch with updated status.url and conditions
-			dashboardPatch := dashboard.DeepCopy()
-			err := unstructured.SetNestedField(dashboardPatch.Object, "https://dashboard.example.com", "status", "url")
-			Expect(err).ToNot(HaveOccurred())
-			readyCondition := map[string]interface{}{
-				"type":   "Ready",
-				"status": "True",
-				"reason": "ComponentsAvailable",
-			}
-			err = unstructured.SetNestedSlice(dashboardPatch.Object, []interface{}{readyCondition}, "status", "conditions")
-			Expect(err).ToNot(HaveOccurred())
-			patch := client.MergeFrom(dashboard)
-			Expect(cli.Status().Patch(ctx, dashboardPatch, patch)).To(Succeed())
-
-			By("Waiting the Dashboard object is present and Ready")
+			By("Waiting for the Gateway object to be created")
 			time.Sleep(10 * time.Millisecond)
 
 			By("Creating Notebook")
@@ -1512,7 +1514,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Check notebook status")
 			notebook = &nbv1.Notebook{}
-			err = cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
+			err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Validating the content of the ds-pipeline-config Secret")
@@ -1599,13 +1601,21 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				_ = cli.Delete(ctx, s3CredSecret)
 			}
 
-			// Delete Dashboard
-			if dashboard != nil {
-				_ = cli.Delete(ctx, dashboard)
+			// Delete Gateway
+			if gateway != nil {
+				_ = cli.Delete(ctx, gateway)
 				Eventually(func() error {
-					return cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)
+					return cli.Get(ctx, client.ObjectKeyFromObject(gateway), gateway)
 				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
 			}
+
+			// Delete openshift-ingress namespace
+			openshiftIngressNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "openshift-ingress",
+				},
+			}
+			_ = cli.Delete(ctx, openshiftIngressNS)
 
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
