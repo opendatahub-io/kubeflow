@@ -37,7 +37,7 @@ const (
 	KubeRbacProxyServicePort     = 8443
 	KubeRbacProxyServicePortName = "kube-rbac-proxy"
 	KubeRbacProxyConfigSuffix    = "-kube-rbac-proxy-config"
-	KubeRbacProxyServiceSuffix   = "-rbac" // TODO
+	KubeRbacProxyServiceSuffix   = "-kube-rbac-proxy"
 )
 
 type KubeRbacProxyConfig struct {

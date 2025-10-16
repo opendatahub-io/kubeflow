@@ -133,8 +133,8 @@ func (tc *testContext) testNotebookHTTPRouteCreation(nbMeta *metav1.ObjectMeta) 
 	expectedBackendName := nbMeta.Name
 	if strings.Contains(nbHTTPRoute.Name, "rbac") ||
 		(len(nbHTTPRoute.Spec.Rules[0].BackendRefs) > 0 &&
-			string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].Name) == nbMeta.Name+"-rbac") {
-		expectedBackendName = nbMeta.Name + "-rbac"
+			string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].Name) == nbMeta.Name+KubeRbacProxyServiceSuffix) {
+		expectedBackendName = nbMeta.Name + KubeRbacProxyServiceSuffix
 	}
 
 	actualBackendName := string(nbHTTPRoute.Spec.Rules[0].BackendRefs[0].Name)
@@ -391,7 +391,7 @@ func (tc *testContext) validateHTTPRouteConfiguration(nbMeta *metav1.ObjectMeta)
 	}
 
 	backendRef := rule.BackendRefs[0]
-	expectedBackendName := nbMeta.Name + "-rbac"
+	expectedBackendName := nbMeta.Name + KubeRbacProxyServiceSuffix
 	expectedPort := int32(8443)
 
 	if string(backendRef.Name) != expectedBackendName {

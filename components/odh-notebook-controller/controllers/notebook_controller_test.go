@@ -865,7 +865,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 									BackendObjectReference: gatewayv1.BackendObjectReference{
 										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
 										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
-										Name:  gatewayv1.ObjectName(Name + "-rbac"),
+										Name:  gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
 										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
@@ -1001,7 +1001,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					return string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name), nil
 				}
 				return "", nil
-			}, duration, interval).Should(Equal(Name + "-rbac"))
+			}, duration, interval).Should(Equal(Name + KubeRbacProxyServiceSuffix))
 			Expect(*httpRoute).To(BeMatchingK8sResource(*expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
@@ -1245,7 +1245,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Verify it points to the kube-rbac-proxy service (port 8443)
 			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
-			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac"))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + KubeRbacProxyServiceSuffix))
 			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
 
 			By("Cleaning up the test notebook")
@@ -1267,7 +1267,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// Verify it points to the kube-rbac-proxy service (port 8443)
 			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
-			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular-rbac"))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular" + KubeRbacProxyServiceSuffix))
 			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
 
 			By("Updating the notebook to disable kube-rbac-proxy authentication")
@@ -1285,7 +1285,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				if len(kubeRbacProxyRoute.Spec.Rules) > 0 && len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs) > 0 {
 					backendName := string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)
 					backendPort := kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port
-					if backendName == Name+"-rbac-to-regular-rbac" && backendPort != nil && *backendPort == 8443 {
+					if backendName == Name+"-rbac-to-regular"+KubeRbacProxyServiceSuffix && backendPort != nil && *backendPort == 8443 {
 						return fmt.Errorf("kube-rbac-proxy HTTPRoute still exists")
 					}
 				}

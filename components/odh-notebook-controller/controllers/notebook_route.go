@@ -258,7 +258,7 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
 				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
-				isKubeRbacProxyRoute := (backendName == notebook.Name+"-rbac") || (backendPort != nil && *backendPort == 8443)
+				isKubeRbacProxyRoute := (backendName == notebook.Name+KubeRbacProxyServiceSuffix) || (backendPort != nil && *backendPort == 8443)
 				isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
 
 				// Delete conflicting routes:
