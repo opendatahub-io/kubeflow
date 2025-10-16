@@ -92,7 +92,7 @@ const (
 	WorkbenchImageNamespaceAnnotation = "opendatahub.io/workbench-image-namespace"
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 
-	KubeRbacProxyTLSCertVolumeSecretSuffix = "kube-rbac-proxy-tls"
+	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling

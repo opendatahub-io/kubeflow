@@ -200,7 +200,7 @@ jobs:
           kubectl create secret tls -n opendatahub odh-notebook-controller-webhook-cert --cert=server-cert.pem --key=server-key.pem
 
           # deploy certificate for the kube-rbac-proxy (needed when notebooks.opendatahub.io/inject-auth: "true")
-          kubectl create secret tls minimal-notebook-rbac-tls --cert=server-cert.pem --key=server-key.pem
+          kubectl create secret tls minimal-notebook-kube-rbac-proxy-tls --cert=server-cert.pem --key=server-key.pem
 
           # deploy odh-notebook-controller manifests
           kustomize build . | \
