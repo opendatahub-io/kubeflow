@@ -91,6 +91,8 @@ const (
 
 	WorkbenchImageNamespaceAnnotation = "opendatahub.io/workbench-image-namespace"
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
+
+	KubeRbacProxyTLSCertVolumeSecretSuffix = "kube-rbac-proxy-tls"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -302,7 +304,7 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 		Name: KubeRbacProxyTLSCertsVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-rbac-tls",
+				SecretName:  notebook.Name + KubeRbacProxyTLSCertVolumeSecretSuffix,
 				DefaultMode: ptr.To[int32](420),
 			},
 		},

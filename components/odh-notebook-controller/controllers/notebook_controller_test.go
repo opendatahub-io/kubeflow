@@ -793,7 +793,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					"notebook-name": Name,
 				},
 				Annotations: map[string]string{
-					"service.beta.openshift.io/serving-cert-secret-name": Name + "-rbac-tls",
+					"service.beta.openshift.io/serving-cert-secret-name": Name + KubeRbacProxyTLSCertVolumeSecretSuffix,
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					{

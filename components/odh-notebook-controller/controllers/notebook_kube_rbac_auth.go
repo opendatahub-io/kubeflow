@@ -37,7 +37,7 @@ const (
 	KubeRbacProxyServicePort     = 8443
 	KubeRbacProxyServicePortName = "kube-rbac-proxy"
 	KubeRbacProxyConfigSuffix    = "-kube-rbac-proxy-config"
-	KubeRbacProxyServiceSuffix   = "-rbac"
+	KubeRbacProxyServiceSuffix   = "-rbac" // TODO
 )
 
 type KubeRbacProxyConfig struct {
@@ -102,7 +102,7 @@ func NewNotebookKubeRbacProxyService(notebook *nbv1.Notebook) *corev1.Service {
 				"notebook-name": notebook.Name,
 			},
 			Annotations: map[string]string{
-				"service.beta.openshift.io/serving-cert-secret-name": notebook.Name + "-rbac-tls",
+				"service.beta.openshift.io/serving-cert-secret-name": notebook.Name + KubeRbacProxyTLSCertVolumeSecretSuffix,
 			},
 		},
 		Spec: corev1.ServiceSpec{
