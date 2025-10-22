@@ -41,36 +41,12 @@ const (
 	elyraRuntimeSecretName = "ds-pipeline-config"
 	elyraRuntimeMountPath  = "/opt/app-root/runtimes"
 	elyraRuntimeVolumeName = "elyra-dsp-details"
-	dashboardInstanceName  = "default-dashboard"
 	dspaInstanceName       = "dspa"
+	gatewayName            = "data-science-gateway"
+	gatewayNamespace       = "openshift-ingress"
 	managedByKey           = "opendatahub.io/managed-by"
 	managedByValue         = "workbenches"
 )
-
-func getDashboardInstance(ctx context.Context, dynamicClient dynamic.Interface, log logr.Logger) (map[string]interface{}, error) {
-	dashboardGVR := schema.GroupVersionResource{
-		Group:    "components.platform.opendatahub.io",
-		Version:  "v1alpha1",
-		Resource: "dashboards",
-	}
-
-	obj, err := dynamicClient.Resource(dashboardGVR).Get(ctx, dashboardInstanceName, metav1.GetOptions{})
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			// Skipping as Dashboard CR not found (optional CR)
-			return nil, nil
-		}
-		// Catch "no matches for kind" when CRD is missing
-		if meta.IsNoMatchError(err) {
-			log.Info("Dashboard CRD is not installed in the cluster - skipping")
-			return nil, nil
-		}
-		log.Error(err, "Failed to retrieve Dashboard CR", "name", dashboardInstanceName)
-		return nil, err
-	}
-
-	return obj.UnstructuredContent(), nil
-}
 
 func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace string, log logr.Logger) (*dspav1.DataSciencePipelinesApplication, error) {
 	dspa := &dspav1.DataSciencePipelinesApplication{}
@@ -91,8 +67,33 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 	return dspa, nil
 }
 
-// extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and dashboard CRs used for pipeline execution.
-func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, log logr.Logger) (map[string]interface{}, error) {
+	gatewayGVR := schema.GroupVersionResource{
+		Group:    "gateway.networking.k8s.io",
+		Version:  "v1",
+		Resource: "gateways",
+	}
+
+	obj, err := dynamicClient.Resource(gatewayGVR).Namespace(gatewayNamespace).Get(ctx, gatewayName, metav1.GetOptions{})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			// Skipping as Gateway CR not found (optional CR)
+			return nil, nil
+		}
+		// Catch "no matches for kind" when CRD is missing
+		if meta.IsNoMatchError(err) {
+			log.Info("Gateway CRD is not installed in the cluster - skipping")
+			return nil, nil
+		}
+		log.Error(err, "Failed to retrieve Gateway CR", "name", gatewayName, "namespace", gatewayNamespace)
+		return nil, err
+	}
+
+	return obj.UnstructuredContent(), nil
+}
+
+// extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and gateway CRs used for pipeline execution.
+func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
 
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
@@ -152,16 +153,32 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[st
 		"cos_secret":    cosSecret,
 	}
 
-	// Extract optional Dashboard public API URL if exists and append it on the metadata
-	if len(dashboardInstance) == 0 {
-		log.Info("Dashboard CR: not present or empty")
-	} else if status, ok := dashboardInstance["status"].(map[string]interface{}); !ok {
-		log.Info("Dashboard CR: 'status' field is missing or invalid")
-	} else if dashboardURL, ok := status["url"].(string); !ok || dashboardURL == "" {
-		log.Info("Dashboard CR: 'url' field is missing or empty")
+	// Extract hostname for public API endpoint from Gateway CR only
+	var hostname string
+
+	if len(gatewayInstance) == 0 {
+		log.Info("Gateway CR: not present or empty - public API endpoint will not be set")
+	} else if spec, ok := gatewayInstance["spec"].(map[string]interface{}); !ok {
+		log.Info("Gateway CR: 'spec' field is missing or invalid - public API endpoint will not be set")
+	} else if listeners, ok := spec["listeners"].([]interface{}); !ok || len(listeners) == 0 {
+		log.Info("Gateway CR: 'listeners' field is missing, invalid, or empty - public API endpoint will not be set")
 	} else {
-		publicAPIEndpoint := fmt.Sprintf("https://%s/external/elyra/%s", dashboardURL, notebook.Namespace)
+		// Extract hostname from the first listener
+		if listener, ok := listeners[0].(map[string]interface{}); ok {
+			if gatewayHostname, ok := listener["hostname"].(string); ok && gatewayHostname != "" {
+				hostname = gatewayHostname
+				log.Info("Using hostname from Gateway CR", "hostname", hostname)
+			} else {
+				log.Info("Gateway CR: 'hostname' field is missing or empty in listener - public API endpoint will not be set")
+			}
+		}
+	}
+
+	// Set public API endpoint if we have a hostname from Gateway
+	if hostname != "" {
+		publicAPIEndpoint := fmt.Sprintf("https://%s/external/elyra/%s", hostname, notebook.Namespace)
 		metadata["public_api_endpoint"] = publicAPIEndpoint
+		log.Info("Set public API endpoint", "endpoint", publicAPIEndpoint)
 	}
 
 	// Return the full runtime config
@@ -180,31 +197,27 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 		return err
 	}
 
-	// Dashboard is optional: retrieve it, but continue even when it's absent.
-	dashboardInstance, err := getDashboardInstance(ctx, dynamicClient, log)
+	// Gateway is optional: retrieve it, but continue even when it's absent.
+	gatewayInstance, err := getGatewayInstance(ctx, dynamicClient, log)
 	if err != nil {
 		return err
 	}
-	// Dashboard CR not found (optional cr)
-	if dashboardInstance == nil {
-		dashboardInstance = map[string]interface{}{}
+	// Gateway CR not found (optional cr)
+	if gatewayInstance == nil {
+		gatewayInstance = map[string]interface{}{}
 	}
 
 	dspaInstance, err := getDSPAInstance(ctx, c, notebook.Namespace, log)
 	if err != nil {
 		return err
 	}
-	// Neither DSPA nor Dashboard CRs are present - skipping Elyra secret creation
-	if dspaInstance == nil && len(dashboardInstance) == 0 {
-		return nil
-	}
-	// Skipping Elyra secret creation; DSPA CR not found (optional cr but madatory for secret creation)
+	// DSPA CR not present - skipping Elyra secret creation
 	if dspaInstance == nil {
 		return nil
 	}
 
 	// Generate DSPA-based Elyra config
-	dspData, err := extractElyraRuntimeConfigInfo(ctx, dashboardInstance, dspaInstance, c, notebook, log)
+	dspData, err := extractElyraRuntimeConfigInfo(ctx, gatewayInstance, dspaInstance, c, notebook, log)
 	if err != nil {
 		log.Error(err, "Failed to extract Elyra runtime config info")
 		return err

@@ -77,7 +77,7 @@ jobs:
         run: ./components/testing/gh-actions/install_kind.sh
 
       - name: Create KinD Cluster
-        run: kind create cluster --config components/testing/gh-actions/kind-1-25.yaml
+        run: kind create cluster --config components/testing/gh-actions/kind-1-32.yaml
 
       - name: Load image into KinD Cluster
         run: |
@@ -108,29 +108,6 @@ jobs:
           metadata:
             annotations:
               crd/fake: "true"
-            name: routes.route.openshift.io
-          spec:
-            group: route.openshift.io
-            names:
-              kind: Route
-              listKind: RouteList
-              singular: route
-              plural: routes
-            scope: Namespaced
-            versions:
-              - name: v1
-                schema:
-                  openAPIV3Schema:
-                    type: object
-                    x-kubernetes-preserve-unknown-fields: true
-                served: true
-                storage: true
-          ---
-          apiVersion: apiextensions.k8s.io/v1
-          kind: CustomResourceDefinition
-          metadata:
-            annotations:
-              crd/fake: "true"
             name: imagestreams.image.openshift.io
           spec:
             group: image.openshift.io
@@ -149,6 +126,8 @@ jobs:
                 served: true
                 storage: true
           EOF
+          # install gateway-api
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
 
       - name: Build & Apply manifests
         run: |
@@ -220,14 +199,13 @@ jobs:
           openssl x509 -noout -text -in server-cert.pem
           kubectl create secret tls -n opendatahub odh-notebook-controller-webhook-cert --cert=server-cert.pem --key=server-key.pem
 
-          # deploy certificate for the notebook we'll start later
-          kubectl create secret tls minimal-notebook-tls --cert=server-cert.pem --key=server-key.pem
+          # deploy certificate for the kube-rbac-proxy (needed when notebooks.opendatahub.io/inject-auth: "true")
+          kubectl create secret tls minimal-notebook-kube-rbac-proxy-tls --cert=server-cert.pem --key=server-key.pem
 
           # deploy odh-notebook-controller manifests
-          # switching to unauthenticated oauth-proxy image, c.f. https://github.com/opendatahub-io/opendatahub-community/issues/100
           kustomize build . | \
             sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | \
-            sed 's|registry.redhat.io/openshift4/ose-oauth-proxy.*|quay.io/openshift/origin-oauth-proxy:4.19|g' | \
+            sed 's|registry.redhat.io/openshift4/ose-kube-rbac-proxy.*|quay.io/brancz/kube-rbac-proxy:v0.20.0|g' | \
             kubectl apply -f -
 
           # patch the webhook with our self-signed CA
@@ -258,7 +236,7 @@ jobs:
           metadata:
             name: minimal-notebook
             annotations:
-              notebooks.opendatahub.io/inject-oauth: "true"
+              notebooks.opendatahub.io/inject-auth: "true"
           spec:
             template:
               spec:
@@ -312,7 +290,7 @@ jobs:
           kubectl describe statefulsets
           kubectl describe pods
           kubectl logs minimal-notebook-0
-          kubectl describe routes
+          kubectl describe httproutes
 
       - name: Print logs (again, at the end)
         if: "!cancelled()"

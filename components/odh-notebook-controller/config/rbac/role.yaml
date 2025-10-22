@@ -19,13 +19,17 @@ rules:
   - update
   - watch
 - apiGroups:
-  - components.platform.opendatahub.io
+  - authentication.k8s.io
   resources:
-  - dashboards
+  - tokenreviews
   verbs:
-  - get
-  - list
-  - watch
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
 - apiGroups:
   - config.openshift.io
   resources:
@@ -41,6 +45,36 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - datasciencepipelinesapplications.opendatahub.io
+  resources:
+  - datasciencepipelinesapplications/api
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - image.openshift.io
@@ -96,7 +130,6 @@ rules:
   resources:
   - oauthclients
   verbs:
-  - create
   - delete
   - get
   - list
@@ -106,6 +139,7 @@ rules:
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
+  - clusterrolebindings
   - rolebindings
   verbs:
   - create
@@ -131,9 +165,4 @@ rules:
   resources:
   - routes
   verbs:
-  - create
   - get
-  - list
-  - patch
-  - update
-  - watch

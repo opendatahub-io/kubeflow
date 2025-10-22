@@ -7,11 +7,8 @@ import (
 	"testing"
 
 	netv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/require"
 	apiext "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -24,8 +21,7 @@ import (
 func deletionTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Notebook Deletion", func(t *testing.T) {
@@ -77,7 +73,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 
 	// Verify Notebook Network Policies are deleted
 	nbNetworkPolicyList := netv1.NetworkPolicyList{}
-	opts := filterServiceMeshManagedPolicies(nbMeta)
+	opts := []client.ListOption{client.InNamespace(nbMeta.Namespace)}
 	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		nperr := tc.customClient.List(ctx, &nbNetworkPolicyList, opts...)
 		if nperr != nil {
@@ -105,42 +101,23 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
 
-	if deploymentMode == OAuthProxy {
-		// Verify Notebook Route is deleted
-		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
-		nbRoute := &routev1.Route{}
-		err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-			err = tc.customClient.Get(ctx, nbRouteLookupKey, nbRoute)
-			if err != nil {
-				if errors.IsNotFound(err) {
-					return true, nil
-				}
-				log.Printf("Failed to get %s Route", nbMeta.Name)
-				return false, err
-			}
-			return false, nil
-		})
+	// Verify Notebook HTTPRoute is deleted
+	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		_, err = tc.getNotebookHTTPRoute(nbMeta)
 		if err != nil {
-			return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
+			if errors.IsNotFound(err) {
+				return true, nil
+			}
+			log.Printf("Failed to get %s HTTPRoute", nbMeta.Name)
+			return false, err
 		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("unable to delete HTTPRoute %s : %v", nbMeta.Name, err)
 	}
 
 	return nil
-}
-
-func filterServiceMeshManagedPolicies(nbMeta *metav1.ObjectMeta) []client.ListOption {
-	labelSelectorReq, err := labels.NewRequirement("app.kubernetes.io/managed-by", selection.NotIn, []string{"maistra-istio-operator"})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	notManagedByMeshLabel := labels.NewSelector()
-	notManagedByMeshLabel = notManagedByMeshLabel.Add(*labelSelectorReq)
-
-	return []client.ListOption{
-		client.InNamespace(nbMeta.Namespace),
-		client.MatchingLabelsSelector{Selector: notManagedByMeshLabel},
-	}
 }
 
 // isNetworkPolicyForNotebook checks if a NetworkPolicy targets a specific notebook

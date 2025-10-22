@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-ISTIO_VERSION="1.17.8"
+ISTIO_VERSION="1.27.1"
 ISTIO_URL="https://istio.io/downloadIstio"
 
 echo "Installing Istio ${ISTIO_VERSION} ..."

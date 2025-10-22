@@ -54,11 +54,11 @@ import (
 
 // NotebookWebhook holds the webhook configuration.
 type NotebookWebhook struct {
-	Log         logr.Logger
-	Client      client.Client
-	Config      *rest.Config
-	Decoder     admission.Decoder
-	OAuthConfig OAuthConfig
+	Log                 logr.Logger
+	Client              client.Client
+	Config              *rest.Config
+	Decoder             admission.Decoder
+	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
 	Namespace string
 }
@@ -72,11 +72,27 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 })
 
 const (
+	ContainerNameKubeRbacProxy = "kube-rbac-proxy"
+
+	KubeRbacProxyConfigVolumeName = "kube-rbac-proxy-config"
+	KubeRbacProxyConfigMountPath  = "/etc/kube-rbac-proxy"
+	KubeRbacProxyConfigFileName   = "config-file.yaml"
+	KubeRbacProxyConfigFilePath   = KubeRbacProxyConfigMountPath + "/" + KubeRbacProxyConfigFileName
+
+	KubeRbacProxyTLSCertsVolumeName = "kube-rbac-proxy-tls-certificates"
+	KubeRbacProxyTLSCertsMountPath  = "/etc/tls/private"
+	KubeRbacProxyTLSCertFileName    = "tls.crt"
+	KubeRbacProxyTLSCertFilePath    = KubeRbacProxyTLSCertsMountPath + "/" + KubeRbacProxyTLSCertFileName
+	KubeRbacProxyTLSKeyFileName     = "tls.key"
+	KubeRbacProxyTLSKeyFilePath     = KubeRbacProxyTLSCertsMountPath + "/" + KubeRbacProxyTLSKeyFileName
+
 	IMAGE_STREAM_NOT_FOUND_EVENT     = "imagestream-not-found"
 	IMAGE_STREAM_TAG_NOT_FOUND_EVENT = "imagestream-tag-not-found"
 
 	WorkbenchImageNamespaceAnnotation = "opendatahub.io/workbench-image-namespace"
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
+
+	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -156,13 +172,13 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 	return config, nil
 }
 
-// InjectOAuthProxy injects the OAuth proxy sidecar container in the Notebook
+// InjectKubeRbacProxy injects the kube-rbac-proxy proxy sidecar container in the Notebook
 // spec
-func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
-	// Parse and validate OAuth proxy resource annotations
+func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacProxyConfig) error {
+	// Parse and validate kube-rbac-proxy resource annotations
 	config, err := parseAndValidateAuthSidecarResources(notebook)
 	if err != nil {
-		return fmt.Errorf("invalid OAuth proxy resource configuration: %w", err)
+		return fmt.Errorf("invalid kube-rbac-proxy resource configuration: %w", err)
 	}
 
 	// Convert config to ResourceRequirements
@@ -179,46 +195,32 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
-		Name:            "oauth-proxy",
-		Image:           oauth.ProxyImage,
+		Name:            ContainerNameKubeRbacProxy,
+		Image:           kubeRbacProxyConfig.ProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
-		Env: []corev1.EnvVar{{
-			Name: "NAMESPACE",
-			ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
-				},
-			},
-		}},
 		Args: []string{
-			"--provider=openshift",
-			"--https-address=:8443",
-			"--http-address=",
-			"--openshift-service-account=" + notebook.Name,
-			"--cookie-secret-file=/etc/oauth/config/cookie_secret",
-			"--cookie-expire=24h0m0s",
-			"--tls-cert=/etc/tls/private/tls.crt",
-			"--tls-key=/etc/tls/private/tls.key",
-			"--upstream=http://localhost:8888",
-			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-			"--email-domain=*",
-			"--skip-provider-button",
-			`--client-id=` + notebook.Name + `-` + notebook.Namespace + `-oauth-client`,
-			"--client-secret-file=/etc/oauth/client/secret",
-			"--scope=user:info user:check-access",
-			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
-				`"resourceName":"` + notebook.Name + `","namespace":"$(NAMESPACE)"}`,
+			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
+			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
+			"--logtostderr=true",
+			"--v=10", // TODO - TBD, this is too verbose
+			"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
+			"--config-file=" + KubeRbacProxyConfigFilePath,
+			"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
+			"--tls-private-key-file=" + KubeRbacProxyTLSKeyFilePath,
+			"--auth-header-fields-enabled=true",
+			"--auth-header-user-field-name=X-Auth-Request-User",
+			"--auth-header-groups-field-name=X-Auth-Request-Groups",
 		},
 		Ports: []corev1.ContainerPort{{
-			Name:          OAuthServicePortName,
-			ContainerPort: 8443,
+			Name:          KubeRbacProxyServicePortName,
+			ContainerPort: NotebookKubeRbacProxyPort,
 			Protocol:      corev1.ProtocolTCP,
 		}},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Path:   "/healthz",
+					Port:   intstr.FromInt32(NotebookKubeRbacProxyHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -231,8 +233,8 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
+					Path:   "/healthz",
+					Port:   intstr.FromInt32(NotebookKubeRbacProxyHealthPort),
 					Scheme: corev1.URISchemeHTTPS,
 				},
 			},
@@ -245,31 +247,21 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		Resources: resourceRequirements,
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      "oauth-client",
-				MountPath: "/etc/oauth/client",
+				Name:      KubeRbacProxyConfigVolumeName,
+				MountPath: KubeRbacProxyConfigMountPath,
 			},
 			{
-				Name:      "oauth-config",
-				MountPath: "/etc/oauth/config",
-			},
-			{
-				Name:      "tls-certificates",
-				MountPath: "/etc/tls/private",
+				Name:      KubeRbacProxyTLSCertsVolumeName,
+				MountPath: KubeRbacProxyTLSCertsMountPath,
 			},
 		},
-	}
-
-	// Add logout url if logout annotation is present in the notebook
-	if notebook.ObjectMeta.Annotations[AnnotationLogoutUrl] != "" {
-		proxyContainer.Args = append(proxyContainer.Args,
-			"--logout-url="+notebook.ObjectMeta.Annotations[AnnotationLogoutUrl])
 	}
 
 	// Add the sidecar container to the notebook
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	proxyContainerExists := false
 	for index, container := range *notebookContainers {
-		if container.Name == "oauth-proxy" {
+		if container.Name == ContainerNameKubeRbacProxy {
 			(*notebookContainers)[index] = proxyContainer
 			proxyContainerExists = true
 			break
@@ -279,67 +271,46 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		*notebookContainers = append(*notebookContainers, proxyContainer)
 	}
 
-	// Add the OAuth configuration volume:
+	// Add the kube-rbac-proxy configuration volume:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
-	oauthVolumeExists := false
-	oauthVolume := corev1.Volume{
-		Name: "oauth-config",
+	kubeRbacProxyVolumeExists := false
+	kubeRbacProxyVolume := corev1.Volume{
+		Name: KubeRbacProxyConfigVolumeName,
 		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-oauth-config",
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: notebook.Name + KubeRbacProxyConfigSuffix,
+				},
 				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == "oauth-config" {
-			(*notebookVolumes)[index] = oauthVolume
-			oauthVolumeExists = true
+		if volume.Name == KubeRbacProxyConfigVolumeName {
+			(*notebookVolumes)[index] = kubeRbacProxyVolume
+			kubeRbacProxyVolumeExists = true
 			break
 		}
 	}
-	if !oauthVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, oauthVolume)
+	if !kubeRbacProxyVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, kubeRbacProxyVolume)
 	}
 
-	// Add the OAuth Client configuration volume:
-	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
-	clientVolumeExists := false
-	clientVolume := corev1.Volume{
-		Name: "oauth-client",
-		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-oauth-client",
-				DefaultMode: ptr.To[int32](420),
-			},
-		},
-	}
-	for index, volume := range *notebookVolumes {
-		if volume.Name == "oauth-client" {
-			(*notebookVolumes)[index] = clientVolume
-			clientVolumeExists = true
-			break
-		}
-	}
-	if !clientVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, clientVolume)
-	}
-
-	// Add the TLS certificates volume:
+	// Add the TLS certificates volume for kube-rbac-proxy:
 	// https://pkg.go.dev/k8s.io/api/core/v1#Volume
 	tlsVolumeExists := false
 	tlsVolume := corev1.Volume{
-		Name: "tls-certificates",
+		Name: KubeRbacProxyTLSCertsVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName:  notebook.Name + "-tls",
+				SecretName:  notebook.Name + KubeRbacProxyTLSCertVolumeSecretSuffix,
 				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
 	for index, volume := range *notebookVolumes {
-		if volume.Name == "tls-certificates" {
+		if volume.Name == KubeRbacProxyTLSCertsVolumeName {
 			(*notebookVolumes)[index] = tlsVolume
 			tlsVolumeExists = true
 			break
@@ -441,14 +412,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	}
 
-	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
-			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
-		}
-
-		// Inject OAuth proxy
-		err = InjectOAuthProxy(notebook, w.OAuthConfig)
+	// Inject the kube-rbac-proxy if the annotation is present
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
+		// Inject kube-rbac-proxy
+		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -474,7 +441,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// RHOAIENG-14552: Running notebook cannot be updated carelessly, or we may end up restarting the pod when
-	// the webhook runs after e.g. the oauth-proxy image has been updated
+	// the webhook runs after e.g. the kube-rbac-proxy image has been updated
 	mutatedNotebook, needsRestart, err := w.maybeRestartRunningNotebook(ctx, req, notebook)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
@@ -672,11 +639,12 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	configMapMountKey := "ca-bundle.crt"
 	configMapMountValue := "ca-bundle.crt"
 	configEnvVars := map[string]string{
-		"PIP_CERT":               configMapMountPath,
-		"REQUESTS_CA_BUNDLE":     configMapMountPath,
-		"SSL_CERT_FILE":          configMapMountPath,
-		"PIPELINES_SSL_SA_CERTS": configMapMountPath,
-		"GIT_SSL_CAINFO":         configMapMountPath,
+		"PIP_CERT":                  configMapMountPath,
+		"REQUESTS_CA_BUNDLE":        configMapMountPath,
+		"SSL_CERT_FILE":             configMapMountPath,
+		"PIPELINES_SSL_SA_CERTS":    configMapMountPath,
+		"KF_PIPELINES_SSL_SA_CERTS": configMapMountPath,
+		"GIT_SSL_CAINFO":            configMapMountPath,
 	}
 
 	notebookContainers := &notebook.Spec.Template.Spec.Containers

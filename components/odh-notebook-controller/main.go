@@ -34,7 +34,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	imagev1 "github.com/openshift/api/image/v1"
 	oauthv1 "github.com/openshift/api/oauth/v1"
-	routev1 "github.com/openshift/api/route/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -58,11 +58,11 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(nbv1.AddToScheme(scheme))
-	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	utilruntime.Must(configv1.AddToScheme(scheme))
-	utilruntime.Must(oauthv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
 	utilruntime.Must(dspav1.AddToScheme(scheme))
+	utilruntime.Must(oauthv1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }
@@ -82,15 +82,15 @@ func getControllerNamespace() (string, error) {
 }
 
 func main() {
-	var metricsAddr, probeAddr, oauthProxyImage, webhookCertDir string
+	var metricsAddr, probeAddr, kubeRbacProxyImage, webhookCertDir string
 	var webhookPort int
 	var enableLeaderElection, enableDebugLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
-	flag.StringVar(&oauthProxyImage, "oauth-proxy-image", "",
-		"Image of the OAuth proxy sidecar container. (required)")
+	flag.StringVar(&kubeRbacProxyImage, "kube-rbac-proxy-image", "",
+		"Image of the kube-rbac-proxy sidecar container. (required)")
 	// specified explicitly, since on macOS the default temporary directory often resolves to a path under /var/folders/...
 	// this default path in /tmp/ is already hardcoded in the Makefile and manifests used for ktunnel deployment
 	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
@@ -112,8 +112,8 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// Validate required flags
-	if oauthProxyImage == "" {
-		setupLog.Error(fmt.Errorf("missing required flag"), "oauth-proxy-image flag must be set")
+	if kubeRbacProxyImage == "" {
+		setupLog.Error(fmt.Errorf("missing required flag"), "kube-rbac-proxy-image flag must be set")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -164,8 +164,8 @@ func main() {
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: namespace,
-			OAuthConfig: controllers.OAuthConfig{
-				ProxyImage: oauthProxyImage,
+			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
+				ProxyImage: kubeRbacProxyImage,
 			},
 			Decoder: admission.NewDecoder(mgr.GetScheme()),
 		},

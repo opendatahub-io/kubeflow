@@ -17,9 +17,10 @@ package controllers
 
 import (
 	"context"
+	"reflect"
+
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -32,8 +33,10 @@ import (
 )
 
 const (
-	NotebookOAuthPort = 8443
-	NotebookPort      = 8888
+	NotebookPort                             = 8888
+	NotebookKubeRbacProxyPort                = 8443
+	NotebookKubeRbacProxyHealthPort          = 8444
+	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
 )
 
 // ReconcileAllNetworkPolicies will manage the network policies reconciliation
@@ -52,13 +55,11 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 		return err
 	}
 
-	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
-		desiredOAuthNetworkPolicy := NewOAuthNetworkPolicy(notebook)
-		err = r.reconcileNetworkPolicy(desiredOAuthNetworkPolicy, ctx, notebook)
-		if err != nil {
-			log.Error(err, "error creating Notebook OAuth network policy")
-			return err
-		}
+	desiredKubeRbacProxyNetworkPolicy := NewKubeRbacProxyNetworkPolicy(notebook)
+	err = r.reconcileNetworkPolicy(desiredKubeRbacProxyNetworkPolicy, ctx, notebook)
+	if err != nil {
+		log.Error(err, "error creating Notebook kube-rbac-proxy network policy")
+		return err
 	}
 
 	return nil
@@ -135,8 +136,8 @@ func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespac
 			"kubernetes.io/metadata.name": namespace,
 		},
 	}
-	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the oauth port of a notebook
-	// Note: This policy needs to update if there is change in OAuth Port.
+	// Create a Kubernetes NetworkPolicy resource that allows traffic from notebook controller to the Notebook container
+	// Note: This policy needs to update if there is change in the notebook Port.
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      notebook.Name + "-ctrl-np",
@@ -172,15 +173,15 @@ func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespac
 	}
 }
 
-// NewOAuthNetworkPolicy defines the desired OAuth Network Policy
-func NewOAuthNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
+// NewKubeRbacProxyNetworkPolicy defines the desired kube-rbac-proxy Network Policy
+func NewKubeRbacProxyNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 
 	npProtocol := corev1.ProtocolTCP
-	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the oauth port of a notebook
-	// Note: This policy needs to update if there is change in OAuth Port or Webhook Port.
+	// Create a Kubernetes NetworkPolicy resource that allows all traffic to the kube-rbac-proxy port of a notebook
+	// Note: This policy needs to update if there is a change in kube-rbac-proxy Port or Webhook Port.
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      notebook.Name + "-oauth-np",
+			Name:      notebook.Name + NotebookKubeRbacProxyNetworkPolicySuffix,
 			Namespace: notebook.Namespace,
 		},
 		Spec: netv1.NetworkPolicySpec{
@@ -195,7 +196,7 @@ func NewOAuthNetworkPolicy(notebook *nbv1.Notebook) *netv1.NetworkPolicy {
 						{
 							Protocol: &npProtocol,
 							Port: &intstr.IntOrString{
-								IntVal: NotebookOAuthPort,
+								IntVal: NotebookKubeRbacProxyPort,
 							},
 						},
 					},

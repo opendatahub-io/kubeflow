@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,13 +31,10 @@ import (
 	. "github.com/onsi/gomega"
 
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
-	oauthv1 "github.com/openshift/api/oauth/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,6 +45,7 @@ import (
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var _ = Describe("The Openshift Notebook controller", func() {
@@ -63,7 +63,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		notebook := createNotebook(Name, Namespace)
 
-		expectedRoute := routev1.Route{
+		pathPrefix := gatewayv1.PathMatchPathPrefix
+		expectedHTTPRoute := gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      Name,
 				Namespace: Namespace,
@@ -71,67 +72,89 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					"notebook-name": Name,
 				},
 			},
-			Spec: routev1.RouteSpec{
-				To: routev1.RouteTargetReference{
-					Kind:   "Service",
-					Name:   Name,
-					Weight: ptr.To[int32](100),
+			Spec: gatewayv1.HTTPRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{
+					ParentRefs: []gatewayv1.ParentReference{
+						{
+							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
+							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Name:      gatewayv1.ObjectName("data-science-gateway"),
+							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+						},
+					},
 				},
-				Port: &routev1.RoutePort{
-					TargetPort: intstr.FromString("http-" + Name),
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						Matches: []gatewayv1.HTTPRouteMatch{
+							{
+								Path: &gatewayv1.HTTPPathMatch{
+									Type:  &pathPrefix,
+									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
+								},
+							},
+						},
+						BackendRefs: []gatewayv1.HTTPBackendRef{
+							{
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:  gatewayv1.ObjectName(Name),
+										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									},
+									Weight: func() *int32 { w := int32(1); return &w }(),
+								},
+							},
+						},
+					},
 				},
-				TLS: &routev1.TLSConfig{
-					Termination:                   routev1.TLSTerminationEdge,
-					InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
-				},
-				WildcardPolicy: routev1.WildcardPolicyNone,
-			},
-			Status: routev1.RouteStatus{
-				Ingress: []routev1.RouteIngress{},
 			},
 		}
 
-		route := &routev1.Route{}
+		httpRoute := &gatewayv1.HTTPRoute{}
 
-		It("Should create a Route to expose the traffic externally", func() {
+		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			By("By checking that the controller has created the Route")
+			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, route)
+				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
-		It("Should reconcile the Route when modified", func() {
-			By("By simulating a manual Route modification")
-			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
-			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
+		It("Should reconcile the HTTPRoute when modified", func() {
+			By("By simulating a manual HTTPRoute modification")
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
+			Expect(cli.Patch(ctx, httpRoute, patch)).Should(Succeed())
 
-			By("By checking that the controller has restored the Route spec")
+			By("By checking that the controller has restored the HTTPRoute spec")
 			Eventually(func() (string, error) {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				err := cli.Get(ctx, key, route)
+				err := cli.Get(ctx, key, httpRoute)
 				if err != nil {
 					return "", err
 				}
-				return route.Spec.To.Name, nil
+				if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
+					return string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name), nil
+				}
+				return "", nil
 			}, duration, interval).Should(Equal(Name))
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
-		It("Should recreate the Route when deleted", func() {
-			By("By deleting the notebook route")
-			Expect(cli.Delete(ctx, route)).Should(Succeed())
+		It("Should recreate the HTTPRoute when deleted", func() {
+			By("By deleting the notebook HTTPRoute")
+			Expect(cli.Delete(ctx, httpRoute)).Should(Succeed())
 
-			By("By checking that the controller has recreated the Route")
+			By("By checking that the controller has recreated the HTTPRoute")
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, route)
+				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
 		It("Should delete the Openshift Route", func() {
@@ -149,7 +172,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 
 			By("By checking that the Notebook owns the Route object")
-			Expect(route.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			Expect(httpRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -244,18 +267,21 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
 			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
 			workbenchTrustedCACertBundle := "workbench-trusted-ca-bundle"
-			trustedCACertBundle := createOAuthConfigmap(
-				"odh-trusted-ca-bundle",
-				"default",
-				map[string]string{
-					"config.openshift.io/inject-trusted-cabundle": "true",
+			trustedCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "odh-trusted-ca-bundle",
+					Namespace: "default",
+					Labels: map[string]string{
+						"config.openshift.io/inject-trusted-cabundle": "true",
+					},
 				},
 				// NOTE: use valid short CA certs and make them each be different
 				// $ openssl req -nodes -x509 -newkey ed25519 -days 365 -set_serial 1 -out /dev/stdout -subj "/"
-				map[string]string{
+				Data: map[string]string{
 					"ca-bundle.crt":     "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\nMzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\ndNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n-----END CERTIFICATE-----",
 					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\nMzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\nAxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n-----END CERTIFICATE-----",
-				})
+				},
+			}
 
 			serviceCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -346,83 +372,106 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		notebook := createNotebook(Name, Namespace)
 
-		expectedRoute := routev1.Route{
+		pathPrefix := gatewayv1.PathMatchPathPrefix
+		expectedHTTPRoute := gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "nb-",
-				Namespace:    Namespace,
+				Name:      Name,
+				Namespace: Namespace,
 				Labels: map[string]string{
 					"notebook-name": Name,
 				},
 			},
-			Spec: routev1.RouteSpec{
-				To: routev1.RouteTargetReference{
-					Kind:   "Service",
-					Name:   Name,
-					Weight: ptr.To[int32](100),
+			Spec: gatewayv1.HTTPRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{
+					ParentRefs: []gatewayv1.ParentReference{
+						{
+							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
+							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Name:      gatewayv1.ObjectName("data-science-gateway"),
+							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+						},
+					},
 				},
-				Port: &routev1.RoutePort{
-					TargetPort: intstr.FromString("http-" + Name),
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						Matches: []gatewayv1.HTTPRouteMatch{
+							{
+								Path: &gatewayv1.HTTPPathMatch{
+									Type:  &pathPrefix,
+									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
+								},
+							},
+						},
+						BackendRefs: []gatewayv1.HTTPBackendRef{
+							{
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:  gatewayv1.ObjectName(Name),
+										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									},
+									Weight: func() *int32 { w := int32(1); return &w }(),
+								},
+							},
+						},
+					},
 				},
-				TLS: &routev1.TLSConfig{
-					Termination:                   routev1.TLSTerminationEdge,
-					InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
-				},
-				WildcardPolicy: routev1.WildcardPolicyNone,
-			},
-			Status: routev1.RouteStatus{
-				Ingress: []routev1.RouteIngress{},
 			},
 		}
 
-		route := &routev1.Route{}
+		httpRoute2 := &gatewayv1.HTTPRoute{}
 
-		It("Should create a Route to expose the traffic externally", func() {
+		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
 
-			By("By checking that the controller has created the Route")
+			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
-				route, err := getRouteFromList(route, notebook, Name, Namespace)
-				if route == nil {
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				if httpRoute == nil {
 					return err
 				}
 				return nil
 			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute2).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
-		It("Should reconcile the Route when modified", func() {
-			By("By simulating a manual Route modification")
-			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
-			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
+		It("Should reconcile the HTTPRoute when modified", func() {
+			By("By simulating a manual HTTPRoute modification")
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
+			Expect(cli.Patch(ctx, httpRoute2, patch)).Should(Succeed())
 			time.Sleep(interval)
 
-			By("By checking that the controller has restored the Route spec")
+			By("By checking that the controller has restored the HTTPRoute spec")
 			Eventually(func() (string, error) {
-				route, err := getRouteFromList(route, notebook, Name, Namespace)
-				if route == nil {
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				if httpRoute == nil {
 					return "", err
 				}
-				return route.Spec.To.Name, nil
+				if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
+					return string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name), nil
+				}
+				return "", nil
 			}, duration, interval).Should(Equal(Name))
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute2).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
-		It("Should recreate the Route when deleted", func() {
-			By("By deleting the notebook route")
-			Expect(cli.Delete(ctx, route)).Should(Succeed())
+		It("Should recreate the HTTPRoute when deleted", func() {
+			By("By deleting the notebook HTTPRoute")
+			Expect(cli.Delete(ctx, httpRoute2)).Should(Succeed())
 			time.Sleep(interval)
 
-			By("By checking that the controller has recreated the Route")
+			By("By checking that the controller has recreated the HTTPRoute")
 			Eventually(func() error {
-				route, err := getRouteFromList(route, notebook, Name, Namespace)
-				if route == nil {
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				if httpRoute == nil {
 					return err
 				}
 				return nil
 			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
+			Expect(*httpRoute2).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
 		It("Should delete the Openshift Route", func() {
@@ -440,7 +489,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 
 			By("By checking that the Notebook owns the Route object")
-			Expect(route.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			Expect(httpRoute2.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -489,16 +538,19 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
 			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
 			workbenchTrustedCACertBundle := "workbench-trusted-ca-bundle"
-			trustedCACertBundle := createOAuthConfigmap(
-				"odh-trusted-ca-bundle",
-				"default",
-				map[string]string{
-					"config.openshift.io/inject-trusted-cabundle": "true",
+			trustedCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "odh-trusted-ca-bundle",
+					Namespace: "default",
+					Labels: map[string]string{
+						"config.openshift.io/inject-trusted-cabundle": "true",
+					},
 				},
-				map[string]string{
+				Data: map[string]string{
 					"ca-bundle.crt":     "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4MjZaFw0yNTExMTMy\nMzI4MjZaMAAwKjAFBgMrZXADIQD77pLvWIX0WmlkYthRZ79oIf7qrGO7yECf668T\nSB42vTAFBgMrZXADQQDs76j81LPh+lgnnf4L0ROUqB66YiBx9SyDTjm83Ya4KC+2\nLEP6Mw1//X2DX89f1chy7RxCpFS3eXb7U/p+GPwA\n-----END CERTIFICATE-----",
 					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
-				})
+				},
+			}
 			// Create the ConfigMap
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
 			defer func() {
@@ -609,7 +661,42 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 		}
 
-		expectedNotebookOAuthNetworkPolicy := createOAuthNetworkPolicy(notebook.Name, notebook.Namespace, npProtocol, NotebookOAuthPort)
+		expectedNotebookKubeRbacNetworkPolicy := &netv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebook.Name + NotebookKubeRbacProxyNetworkPolicySuffix,
+				Namespace: notebook.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "kubeflow.org/v1",
+						Kind:               "Notebook",
+						Name:               notebook.Name,
+						UID:                notebook.UID,
+						Controller:         &[]bool{true}[0],
+						BlockOwnerDeletion: &[]bool{true}[0],
+					},
+				},
+			},
+			Spec: netv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"notebook-name": notebook.Name,
+					},
+				},
+				PolicyTypes: []netv1.PolicyType{
+					netv1.PolicyTypeIngress,
+				},
+				Ingress: []netv1.NetworkPolicyIngressRule{
+					{
+						Ports: []netv1.NetworkPolicyPort{
+							{
+								Protocol: &npProtocol,
+								Port:     &[]intstr.IntOrString{intstr.FromInt(int(NotebookKubeRbacProxyPort))}[0],
+							},
+						},
+					},
+				},
+			},
+		}
 
 		notebookNetworkPolicy := &netv1.NetworkPolicy{}
 		notebookOAuthNetworkPolicy := &netv1.NetworkPolicy{}
@@ -627,10 +714,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has created Network policy to allow all requests on OAuth port")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-oauth-np", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + NotebookKubeRbacProxyNetworkPolicySuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
 			}, duration, interval).Should(Succeed())
-			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(expectedNotebookOAuthNetworkPolicy, CompareNotebookNetworkPolicies))
+			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
 		})
 
 		It("Should reconcile the Network policies when modified", func() {
@@ -656,10 +743,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has recreated the OAuth Network policy")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-oauth-np", Namespace: Namespace}
+				key := types.NamespacedName{Name: Name + NotebookKubeRbacProxyNetworkPolicySuffix, Namespace: Namespace}
 				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
 			}, duration, interval).Should(Succeed())
-			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(expectedNotebookOAuthNetworkPolicy, CompareNotebookNetworkPolicies))
+			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
 		})
 
 		It("Should delete the Network Policies", func() {
@@ -690,101 +777,98 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	})
 
-	When("Creating a Notebook with OAuth", func() {
+	When("Creating a Notebook with kube-rbac-proxy injection", func() {
 		const (
-			Name      = "test-notebook-oauth"
+			Name      = "test-notebook-kube-rbac-proxy"
 			Namespace = "default"
 		)
 
-		notebook := createNotebook(Name, Namespace)
-		notebook.SetLabels(map[string]string{
-			"app.kubernetes.io/instance": Name,
-		})
-		notebook.SetAnnotations(map[string]string{
-			"notebooks.opendatahub.io/inject-oauth":     "true",
-			"notebooks.opendatahub.io/foo":              "bar",
-			"notebooks.opendatahub.io/oauth-logout-url": "https://example.notebook-url/notebook/" + Namespace + "/" + Name,
-		})
-		notebook.Spec = nbv1.NotebookSpec{
-			Template: nbv1.NotebookTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{
-						Name:  Name,
-						Image: "registry.redhat.io/ubi9/ubi:latest",
-					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: "notebook-data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: Name + "-data",
-								},
-							},
-						},
+		notebook := createNotebookWithKubeRbacProxy(Name, Namespace)
+
+		expectedService := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      Name + KubeRbacProxyServiceSuffix,
+				Namespace: Namespace,
+				Labels: map[string]string{
+					"notebook-name": Name,
+				},
+				Annotations: map[string]string{
+					"service.beta.openshift.io/serving-cert-secret-name": Name + KubeRbacProxyTLSCertVolumeSecretSuffix,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "kubeflow.org/v1",
+						Kind:               "Notebook",
+						Name:               Name,
+						UID:                notebook.UID,
+						Controller:         &[]bool{true}[0],
+						BlockOwnerDeletion: &[]bool{true}[0],
 					},
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{
+					Name:       "kube-rbac-proxy",
+					Port:       8443,
+					TargetPort: intstr.FromString("kube-rbac-proxy"),
+					Protocol:   corev1.ProtocolTCP,
+				}},
+				Selector: map[string]string{
+					"statefulset": Name,
 				},
 			},
 		}
 
-		expectedNotebook := nbv1.Notebook{
+		pathPrefix := gatewayv1.PathMatchPathPrefix
+		expectedHTTPRoute := &gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      Name,
 				Namespace: Namespace,
 				Labels: map[string]string{
-					"app.kubernetes.io/instance": Name,
+					"notebook-name": Name,
 				},
-				Annotations: map[string]string{
-					"notebooks.opendatahub.io/inject-oauth":     "true",
-					"notebooks.opendatahub.io/foo":              "bar",
-					"notebooks.opendatahub.io/oauth-logout-url": "https://example.notebook-url/notebook/" + Namespace + "/" + Name,
-					"kubeflow-resource-stopped":                 "odh-notebook-controller-lock",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "kubeflow.org/v1",
+						Kind:               "Notebook",
+						Name:               Name,
+						UID:                notebook.UID,
+						Controller:         &[]bool{true}[0],
+						BlockOwnerDeletion: &[]bool{true}[0],
+					},
 				},
 			},
-			Spec: nbv1.NotebookSpec{
-				Template: nbv1.NotebookTemplateSpec{
-					Spec: corev1.PodSpec{
-						ServiceAccountName: Name,
-						Containers: []corev1.Container{
-							{
-								Name:  Name,
-								Image: "registry.redhat.io/ubi9/ubi:latest",
-							},
-							createOAuthContainer(Name, Namespace),
+			Spec: gatewayv1.HTTPRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{
+					ParentRefs: []gatewayv1.ParentReference{
+						{
+							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
+							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Name:      gatewayv1.ObjectName("data-science-gateway"),
+							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
 						},
-						Volumes: []corev1.Volume{
+					},
+				},
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						Matches: []gatewayv1.HTTPRouteMatch{
 							{
-								Name: "notebook-data",
-								VolumeSource: corev1.VolumeSource{
-									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-										ClaimName: Name + "-data",
-									},
+								Path: &gatewayv1.HTTPPathMatch{
+									Type:  &pathPrefix,
+									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
 								},
 							},
+						},
+						BackendRefs: []gatewayv1.HTTPBackendRef{
 							{
-								Name: "oauth-config",
-								VolumeSource: corev1.VolumeSource{
-									Secret: &corev1.SecretVolumeSource{
-										SecretName:  Name + "-oauth-config",
-										DefaultMode: ptr.To[int32](420),
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:  gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
+										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0]),
 									},
-								},
-							},
-							{
-								Name: "oauth-client",
-								VolumeSource: corev1.VolumeSource{
-									Secret: &corev1.SecretVolumeSource{
-										SecretName:  Name + "-oauth-client",
-										DefaultMode: ptr.To[int32](420),
-									},
-								},
-							},
-							{
-								Name: "tls-certificates",
-								VolumeSource: corev1.VolumeSource{
-									Secret: &corev1.SecretVolumeSource{
-										SecretName:  Name + "-tls",
-										DefaultMode: ptr.To[int32](420),
-									},
+									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
 							},
 						},
@@ -793,44 +877,250 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 		}
 
-		It("Should inject the OAuth proxy as a sidecar container", func() {
-			By("By creating a new Notebook")
+		expectedConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      Name + KubeRbacProxyConfigSuffix,
+				Namespace: Namespace,
+				Labels: map[string]string{
+					"notebook-name": Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "kubeflow.org/v1",
+						Kind:               "Notebook",
+						Name:               Name,
+						UID:                notebook.UID,
+						Controller:         &[]bool{true}[0],
+						BlockOwnerDeletion: &[]bool{true}[0],
+					},
+				},
+			},
+			Data: map[string]string{
+				"config-file.yaml": fmt.Sprintf(`authorization:
+  resourceAttributes:
+    verb: get
+    resource: notebooks
+    apiGroup: kubeflow.org
+    name: %s
+    namespace: %s`, Name, Namespace),
+			},
+		}
+
+		It("Should create a Notebook with inject-auth annotation to contain kube-rbac-proxy sidecar", func() {
+			By("By creating a new Notebook with inject-auth annotation")
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			By("By checking that the webhook has injected the sidecar container")
-			Expect(*notebook).To(BeMatchingK8sResource(expectedNotebook, CompareNotebooks))
-		})
-
-		It("Should remove the reconciliation lock annotation", func() {
-			By("By checking that the annotation lock annotation is not present")
-			delete(expectedNotebook.Annotations, culler.STOP_ANNOTATION)
-			Eventually(func() (nbv1.Notebook, error) {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				err := cli.Get(ctx, key, notebook)
-				return *notebook, err
-			}, duration, interval).Should(BeMatchingK8sResource(expectedNotebook, CompareNotebooks))
-		})
-
-		It("Should reconcile the Notebook when modified", func() {
-			By("By simulating a manual Notebook modification")
-			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
-			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-
-			By("By checking that the webhook has restored the Notebook spec")
+			By("By checking that the notebook was created successfully")
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
 			}, duration, interval).Should(Succeed())
-			Expect(*notebook).To(BeMatchingK8sResource(expectedNotebook, CompareNotebooks))
+
+			// Verify the notebook has the inject-auth annotation
+			Expect(notebook.Annotations[AnnotationInjectAuth]).To(Equal("true"))
 		})
 
-		serviceAccount := &corev1.ServiceAccount{}
-		expectedServiceAccount := createOAuthServiceAccount(Name, Namespace)
+		It("Should inject the kube-rbac-proxy as a sidecar container", func() {
+			By("By checking that the webhook has injected the sidecar container")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Eventually(func() error {
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return err
+				}
+
+				// Verify we have exactly 2 containers (original + kube-rbac-proxy)
+				if len(notebook.Spec.Template.Spec.Containers) != 2 {
+					return fmt.Errorf("expected 2 containers, got %d", len(notebook.Spec.Template.Spec.Containers))
+				}
+
+				// Verify the second container is the kube-rbac-proxy
+				kubeRbacProxyContainer := notebook.Spec.Template.Spec.Containers[1]
+				if kubeRbacProxyContainer.Name != "kube-rbac-proxy" {
+					return fmt.Errorf("expected kube-rbac-proxy container name 'kube-rbac-proxy', got '%s'", kubeRbacProxyContainer.Name)
+				}
+
+				// Verify kube-rbac-proxy container has the correct image
+				expectedImagePrefix := kubeRbacProxyImage
+				if !strings.HasPrefix(kubeRbacProxyContainer.Image, expectedImagePrefix) {
+					return fmt.Errorf("expected kube-rbac-proxy image to start with '%s', got '%s'", expectedImagePrefix, kubeRbacProxyContainer.Image)
+				}
+
+				// Verify kube-rbac-proxy container has the correct port
+				foundPort := false
+				for _, port := range kubeRbacProxyContainer.Ports {
+					if port.Name == "kube-rbac-proxy" && port.ContainerPort == 8443 {
+						foundPort = true
+						break
+					}
+				}
+				if !foundPort {
+					return fmt.Errorf("kube-rbac-proxy container missing port 'kube-rbac-proxy' on 8443")
+				}
+
+				return nil
+			}, duration, interval).Should(Succeed())
+		})
+
+		It("Should create a Service for the kube-rbac-proxy", func() {
+			By("By checking that the controller has created the Service")
+			service := &corev1.Service{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + KubeRbacProxyServiceSuffix, Namespace: Namespace}
+				return cli.Get(ctx, key, service)
+			}, duration, interval).Should(Succeed())
+			Expect(*service).To(BeMatchingK8sResource(*expectedService, CompareNotebookServices))
+		})
+
+		It("Should create an HTTPRoute for the kube-rbac-proxy", func() {
+			By("By checking that the controller has created the HTTPRoute")
+			httpRoute := &gatewayv1.HTTPRoute{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, httpRoute)
+			}, duration, interval).Should(Succeed())
+			Expect(*httpRoute).To(BeMatchingK8sResource(*expectedHTTPRoute, CompareNotebookHTTPRoutes))
+		})
+
+		It("Should reconcile the HTTPRoute when modified", func() {
+			By("By simulating a manual HTTPRoute modification")
+			httpRoute := &gatewayv1.HTTPRoute{}
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, httpRoute)).Should(Succeed())
+
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
+			Expect(cli.Patch(ctx, httpRoute, patch)).Should(Succeed())
+
+			By("By checking that the controller has restored the HTTPRoute spec")
+			Eventually(func() (string, error) {
+				err := cli.Get(ctx, key, httpRoute)
+				if err != nil {
+					return "", err
+				}
+				if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
+					return string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name), nil
+				}
+				return "", nil
+			}, duration, interval).Should(Equal(Name + KubeRbacProxyServiceSuffix))
+			Expect(*httpRoute).To(BeMatchingK8sResource(*expectedHTTPRoute, CompareNotebookHTTPRoutes))
+		})
+
+		It("Should recreate the HTTPRoute when deleted", func() {
+			By("By deleting the notebook HTTPRoute")
+			httpRoute := &gatewayv1.HTTPRoute{}
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, httpRoute)).Should(Succeed())
+			Expect(cli.Delete(ctx, httpRoute)).Should(Succeed())
+
+			By("By checking that the controller has recreated the HTTPRoute")
+			Eventually(func() error {
+				return cli.Get(ctx, key, httpRoute)
+			}, duration, interval).Should(Succeed())
+			Expect(*httpRoute).To(BeMatchingK8sResource(*expectedHTTPRoute, CompareNotebookHTTPRoutes))
+		})
+
+		It("Should remove the reconciliation lock annotation", func() {
+			By("By checking that the reconciliation lock annotation is removed")
+			Eventually(func() (map[string]string, error) {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return nil, err
+				}
+				return notebook.Annotations, nil
+			}, duration, interval).Should(Not(HaveKey(culler.STOP_ANNOTATION)))
+		})
+
+		It("Should reconcile the Notebook when modified", func() {
+			By("By simulating a manual Notebook modification")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+			// Store original values
+			originalServiceAccount := notebook.Spec.Template.Spec.ServiceAccountName
+			var originalContainerImage string
+			var originalVolumeSource corev1.VolumeSource
+
+			// Store original container image if there's a second container (kube-rbac-proxy)
+			if len(notebook.Spec.Template.Spec.Containers) > 1 {
+				originalContainerImage = notebook.Spec.Template.Spec.Containers[1].Image
+			}
+
+			// Store original volume source if there's a second volume
+			if len(notebook.Spec.Template.Spec.Volumes) > 1 {
+				originalVolumeSource = notebook.Spec.Template.Spec.Volumes[1].VolumeSource
+			}
+
+			// Make manual modifications
+			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
+			if len(notebook.Spec.Template.Spec.Containers) > 1 {
+				notebook.Spec.Template.Spec.Containers[1].Image = "bar"
+			}
+			if len(notebook.Spec.Template.Spec.Volumes) > 1 {
+				notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
+			}
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the controller has restored the Notebook spec")
+			Eventually(func() error {
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return err
+				}
+
+				// Check ServiceAccount restoration
+				if notebook.Spec.Template.Spec.ServiceAccountName != originalServiceAccount {
+					return fmt.Errorf("ServiceAccount not restored: expected %s, got %s",
+						originalServiceAccount, notebook.Spec.Template.Spec.ServiceAccountName)
+				}
+
+				// Check container image restoration if applicable
+				if len(notebook.Spec.Template.Spec.Containers) > 1 && originalContainerImage != "" {
+					if notebook.Spec.Template.Spec.Containers[1].Image != originalContainerImage {
+						return fmt.Errorf("Container image not restored: expected %s, got %s",
+							originalContainerImage, notebook.Spec.Template.Spec.Containers[1].Image)
+					}
+				}
+
+				// Check volume source restoration if applicable
+				if len(notebook.Spec.Template.Spec.Volumes) > 1 {
+					if !reflect.DeepEqual(notebook.Spec.Template.Spec.Volumes[1].VolumeSource, originalVolumeSource) {
+						return fmt.Errorf("Volume source not restored")
+					}
+				}
+
+				return nil
+			}, duration, interval).Should(Succeed())
+		})
+
+		It("Should create a ConfigMap for kube-rbac-proxy configuration", func() {
+			By("By checking that the controller has created the ConfigMap")
+			configMap := &corev1.ConfigMap{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
+				return cli.Get(ctx, key, configMap)
+			}, duration, interval).Should(Succeed())
+			Expect(*configMap).To(BeMatchingK8sResource(*expectedConfigMap, CompareNotebookConfigMaps))
+		})
+
+		It("Should recreate the ConfigMap when deleted", func() {
+			By("By deleting the notebook ConfigMap")
+			configMap := &corev1.ConfigMap{}
+			key := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, configMap)).Should(Succeed())
+			Expect(cli.Delete(ctx, configMap)).Should(Succeed())
+
+			By("By checking that the controller has recreated the ConfigMap")
+			Eventually(func() error {
+				return cli.Get(ctx, key, configMap)
+			}, duration, interval).Should(Succeed())
+			Expect(*configMap).To(BeMatchingK8sResource(*expectedConfigMap, CompareNotebookConfigMaps))
+		})
 
 		It("Should create a Service Account for the notebook", func() {
 			By("By checking that the controller has created the Service Account")
+			serviceAccount := &corev1.ServiceAccount{}
+			expectedServiceAccount := createExpectedServiceAccount(Name, Namespace)
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, serviceAccount)
@@ -840,234 +1130,20 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should recreate the Service Account when deleted", func() {
 			By("By deleting the notebook Service Account")
+			serviceAccount := &corev1.ServiceAccount{}
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, serviceAccount)).Should(Succeed())
 			Expect(cli.Delete(ctx, serviceAccount)).Should(Succeed())
 
 			By("By checking that the controller has recreated the Service Account")
+			expectedServiceAccount := createExpectedServiceAccount(Name, Namespace)
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, serviceAccount)
 			}, duration, interval).Should(Succeed())
 			Expect(*serviceAccount).To(BeMatchingK8sResource(expectedServiceAccount, CompareNotebookServiceAccounts))
 		})
 
-		service := &corev1.Service{}
-		expectedService := corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name + "-tls",
-				Namespace: Namespace,
-				Labels: map[string]string{
-					"notebook-name": Name,
-				},
-				Annotations: map[string]string{
-					"service.beta.openshift.io/serving-cert-secret-name": Name + "-tls",
-				},
-			},
-			Spec: corev1.ServiceSpec{
-				Ports: []corev1.ServicePort{{
-					Name:       OAuthServicePortName,
-					Port:       OAuthServicePort,
-					TargetPort: intstr.FromString(OAuthServicePortName),
-					Protocol:   corev1.ProtocolTCP,
-				}},
-			},
-		}
-
-		It("Should create a Service to expose the OAuth proxy", func() {
-			By("By checking that the controller has created the Service")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-tls", Namespace: Namespace}
-				return cli.Get(ctx, key, service)
-			}, duration, interval).Should(Succeed())
-			Expect(*service).To(BeMatchingK8sResource(expectedService, CompareNotebookServices))
-		})
-
-		It("Should recreate the Service when deleted", func() {
-			By("By deleting the notebook Service")
-			Expect(cli.Delete(ctx, service)).Should(Succeed())
-
-			By("By checking that the controller has recreated the Service")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-tls", Namespace: Namespace}
-				return cli.Get(ctx, key, service)
-			}, duration, interval).Should(Succeed())
-			Expect(*service).To(BeMatchingK8sResource(expectedService, CompareNotebookServices))
-		})
-
-		secret := &corev1.Secret{}
-
-		It("Should create a Secret with the OAuth proxy configuration", func() {
-			By("By checking that the controller has created the Secret")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-oauth-config", Namespace: Namespace}
-				return cli.Get(ctx, key, secret)
-			}, duration, interval).Should(Succeed())
-
-			By("By checking that the cookie secret format is correct")
-			Expect(len(secret.Data["cookie_secret"])).Should(Equal(32))
-		})
-
-		It("Should recreate the Secret when deleted", func() {
-			By("By deleting the notebook Secret")
-			Expect(cli.Delete(ctx, secret)).Should(Succeed())
-
-			By("By checking that the controller has recreated the Secret")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name + "-oauth-config", Namespace: Namespace}
-				return cli.Get(ctx, key, secret)
-			}, duration, interval).Should(Succeed())
-		})
-
-		route := &routev1.Route{}
-		expectedRoute := routev1.Route{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name,
-				Namespace: Namespace,
-				Labels: map[string]string{
-					"notebook-name": Name,
-				},
-			},
-			Spec: routev1.RouteSpec{
-				To: routev1.RouteTargetReference{
-					Kind:   "Service",
-					Name:   Name + "-tls",
-					Weight: ptr.To[int32](100),
-				},
-				Port: &routev1.RoutePort{
-					TargetPort: intstr.FromString(OAuthServicePortName),
-				},
-				TLS: &routev1.TLSConfig{
-					Termination:                   routev1.TLSTerminationReencrypt,
-					InsecureEdgeTerminationPolicy: routev1.InsecureEdgeTerminationPolicyRedirect,
-				},
-				WildcardPolicy: routev1.WildcardPolicyNone,
-			},
-			Status: routev1.RouteStatus{
-				Ingress: []routev1.RouteIngress{},
-			},
-		}
-
-		It("Should create a Route to expose the traffic externally", func() {
-			By("By checking that the controller has created the Route")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, route)
-			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
-		})
-
-		It("Should recreate the Route when deleted", func() {
-			By("By deleting the notebook Route")
-			Expect(cli.Delete(ctx, route)).Should(Succeed())
-
-			By("By checking that the controller has recreated the Route")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, route)
-			}, duration, interval).Should(Succeed())
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
-		})
-
-		It("Should reconcile the Route when modified", func() {
-			By("By simulating a manual Route modification")
-			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"to":{"name":"foo"}}}`))
-			Expect(cli.Patch(ctx, route, patch)).Should(Succeed())
-
-			By("By checking that the controller has restored the Route spec")
-			Eventually(func() (string, error) {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				err := cli.Get(ctx, key, route)
-				if err != nil {
-					return "", err
-				}
-				return route.Spec.To.Name, nil
-			}, duration, interval).Should(Equal(Name + "-tls"))
-			Expect(*route).To(BeMatchingK8sResource(expectedRoute, CompareNotebookRoutes))
-		})
-
-		oauthClient := &oauthv1.OAuthClient{}
-		oauthClientName := Name + "-" + Namespace + "-oauth-client"
-
-		It("Should create an OAuthClient for OAuth authentication", func() {
-			By("By setting the route host to simulate OpenShift ingress controller")
-			// In test environments, we need to manually set the route host since
-			// the OpenShift ingress controller doesn't run in envtest
-			route.Spec.Host = Name + "-" + Namespace + ".apps.test.cluster"
-			Expect(cli.Update(ctx, route)).Should(Succeed())
-
-			By("By checking that the controller has created the OAuthClient")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: oauthClientName}
-				return cli.Get(ctx, key, oauthClient)
-			}, duration, interval).Should(Succeed())
-
-			By("By verifying OAuthClient properties")
-			Expect(oauthClient.Name).To(Equal(oauthClientName))
-			Expect(oauthClient.Labels["notebook-owner"]).To(Equal(Name))
-			Expect(oauthClient.RedirectURIs).To(HaveLen(1))
-			Expect(oauthClient.RedirectURIs[0]).To(ContainSubstring("https://"))
-			Expect(oauthClient.GrantMethod).To(Equal(oauthv1.GrantHandlerAuto))
-			Expect(oauthClient.Secret).NotTo(BeEmpty())
-		})
-
-		It("Should add OAuth client finalizer to the notebook", func() {
-			By("By checking that the finalizer is added to the notebook")
-			Eventually(func() []string {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				err := cli.Get(ctx, key, notebook)
-				if err != nil {
-					return nil
-				}
-				return notebook.Finalizers
-			}, duration, interval).Should(ContainElement(NotebookOAuthClientFinalizer))
-		})
-
-		It("Should recreate the OAuthClient when deleted", func() {
-			By("By deleting the OAuthClient")
-			Expect(cli.Delete(ctx, oauthClient)).Should(Succeed())
-
-			By("By triggering a notebook reconciliation")
-			// Update notebook to trigger reconciliation
-			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-			notebook.Spec.Template.Spec.Containers[0].Image = "registry.redhat.io/ubi9/ubi:reconcile-trigger"
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-
-			By("By checking that the controller has recreated the OAuthClient")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: oauthClientName}
-				return cli.Get(ctx, key, oauthClient)
-			}, duration, interval).Should(Succeed())
-
-			// Verify it's the same OAuthClient with correct properties
-			Expect(oauthClient.Name).To(Equal(oauthClientName))
-			Expect(oauthClient.Labels["notebook-owner"]).To(Equal(Name))
-		})
-
-		It("Should update OAuthClient when it's modified", func() {
-			By("By manually modifying the OAuthClient")
-			originalSecret := oauthClient.Secret
-			oauthClient.Secret = "modified-secret"
-			Expect(cli.Update(ctx, oauthClient)).Should(Succeed())
-
-			By("By triggering a notebook reconciliation")
-			// Update notebook to trigger reconciliation
-			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-			notebook.Spec.Template.Spec.Containers[0].Image = "registry.redhat.io/ubi9/ubi:patch-trigger"
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-
-			By("By checking that the OAuthClient is restored to original state")
-			Eventually(func() string {
-				key := types.NamespacedName{Name: oauthClientName}
-				err := cli.Get(ctx, key, oauthClient)
-				if err != nil {
-					return ""
-				}
-				return oauthClient.Secret
-			}, duration, interval).Should(Equal(originalSecret))
-		})
-
-		It("Should delete the OAuth proxy objects", func() {
+		It("Should delete all kube-rbac-proxy related resources when the notebook is deleted", func() {
 			// Testenv cluster does not implement Kubernetes GC:
 			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
 			// To test that the deletion lifecycle works, test the ownership
@@ -1081,121 +1157,214 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				BlockOwnerDeletion: ptr.To(true),
 			}
 
-			By("By checking that the Notebook owns the Service Account object")
-			Expect(serviceAccount.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			By("By checking that the Notebook owns the kube-rbac-proxy Service object")
+			kubeRbacProxyService := &corev1.Service{}
+			serviceKey := types.NamespacedName{Name: Name + KubeRbacProxyServiceSuffix, Namespace: Namespace}
+			Expect(cli.Get(ctx, serviceKey, kubeRbacProxyService)).Should(Succeed())
+			Expect(kubeRbacProxyService.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
-			By("By checking that the Notebook owns the Service object")
-			Expect(service.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			By("By checking that the Notebook owns the kube-rbac-proxy HTTPRoute object")
+			kubeRbacProxyHTTPRoute := &gatewayv1.HTTPRoute{}
+			routeKey := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, routeKey, kubeRbacProxyHTTPRoute)).Should(Succeed())
+			Expect(kubeRbacProxyHTTPRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
-			By("By checking that the Notebook owns the Secret object")
-			Expect(secret.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
-
-			By("By checking that the Notebook owns the Route object")
-			Expect(route.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
-
-			By("By verifying the OAuthClient exists before notebook deletion")
-			oauthClientKey := types.NamespacedName{Name: oauthClientName}
-			Expect(cli.Get(ctx, oauthClientKey, oauthClient)).Should(Succeed())
-
-			By("By verifying the finalizer is present before notebook deletion")
-			notebookKey := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, notebookKey, notebook)).Should(Succeed())
-			Expect(notebook.Finalizers).To(ContainElement(NotebookOAuthClientFinalizer))
+			By("By checking that the Notebook owns the kube-rbac-proxy ConfigMap object")
+			kubeRbacProxyConfigMap := &corev1.ConfigMap{}
+			configMapKey := types.NamespacedName{Name: Name + KubeRbacProxyConfigSuffix, Namespace: Namespace}
+			Expect(cli.Get(ctx, configMapKey, kubeRbacProxyConfigMap)).Should(Succeed())
+			Expect(kubeRbacProxyConfigMap.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
 
-			By("By checking that the OAuthClient is deleted")
-			Eventually(func() bool {
-				err := cli.Get(ctx, oauthClientKey, oauthClient)
-				return apierrors.IsNotFound(err)
-			}, duration, interval).Should(BeTrue())
-
 			By("By checking that the Notebook is deleted")
 			Eventually(func() error {
-				return cli.Get(ctx, notebookKey, notebook)
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, notebook)
 			}, duration, interval).Should(HaveOccurred())
 		})
 	})
 
-	When("Creating notebook as part of Service Mesh", func() {
-
+	When("Testing HTTPRoute mode switching", func() {
 		const (
-			name      = "test-notebook-mesh"
-			namespace = "mesh-ns"
+			Name      = "test-notebook-mode-switch"
+			Namespace = "default"
 		)
-		testNamespaces = append(testNamespaces, namespace)
 
-		notebookOAuthNetworkPolicy := createOAuthNetworkPolicy(name, namespace, corev1.ProtocolTCP, NotebookOAuthPort)
-
-		It("Should not add OAuth sidecar", func() {
-			notebook := createNotebook(name, namespace)
-			notebook.SetAnnotations(map[string]string{AnnotationServiceMesh: "true"})
+		It("Should clean up unauthenticated HTTPRoutes when enabling kube-rbac-proxy", func() {
+			By("Creating a notebook without kube-rbac-proxy initially")
+			notebook := createNotebook(Name, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			actualNotebook := &nbv1.Notebook{}
+			By("Verifying an unauthenticated HTTPRoute is created")
+			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: name, Namespace: namespace}
-				return cli.Get(ctx, key, actualNotebook)
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
-			Expect(actualNotebook.Spec.Template.Spec.Containers).To(Not(ContainElement(createOAuthContainer(name, namespace))))
-		})
+			// Verify it points to the regular service (port 8888)
+			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name))
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
 
-		It("Should not define OAuth network policy", func() {
-			policies := &netv1.NetworkPolicyList{}
-			Eventually(func() error {
-				return cli.List(ctx, policies, client.InNamespace(namespace))
-			}, duration, interval).Should(Succeed())
-
-			Expect(policies.Items).To(Not(ContainElement(notebookOAuthNetworkPolicy)))
-		})
-
-		It("Should not create routes", func() {
-			routes := &routev1.RouteList{}
-			Eventually(func() error {
-				return cli.List(ctx, routes, client.InNamespace(namespace))
-			}, duration, interval).Should(Succeed())
-
-			Expect(routes.Items).To(BeEmpty())
-		})
-
-		It("Should not create OAuth Service Account", func() {
-			oauthServiceAccount := createOAuthServiceAccount(name, namespace)
-
-			serviceAccounts := &corev1.ServiceAccountList{}
-			Eventually(func() error {
-				return cli.List(ctx, serviceAccounts, client.InNamespace(namespace))
-			}, duration, interval).Should(Succeed())
-
-			Expect(serviceAccounts.Items).ToNot(ContainElement(oauthServiceAccount))
-		})
-
-		It("Should not create OAuth secret", func() {
-			secrets := &corev1.SecretList{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "SecretList",
-					APIVersion: "v1",
-				},
+			By("Updating the notebook to add kube-rbac-proxy sidecar container")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			if notebook.Annotations == nil {
+				notebook.Annotations = make(map[string]string)
 			}
+			notebook.Annotations[AnnotationInjectAuth] = "true"
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("Verifying the unauthenticated HTTPRoute is cleaned up")
 			Eventually(func() error {
-				return cli.List(ctx, secrets, client.InNamespace(namespace))
+				err := cli.Get(ctx, key, unauthenticatedRoute)
+				if err != nil {
+					return err
+				}
+				// Check if it still points to regular service (should be gone or changed)
+				if len(unauthenticatedRoute.Spec.Rules) > 0 && len(unauthenticatedRoute.Spec.Rules[0].BackendRefs) > 0 {
+					backendName := string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)
+					backendPort := unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port
+					if backendName == Name && backendPort != nil && *backendPort == 8888 {
+						return fmt.Errorf("unauthenticated HTTPRoute still exists")
+					}
+				}
+				return nil
 			}, duration, interval).Should(Succeed())
 
-			Expect(secrets.Items).To(BeEmpty())
+			By("Verifying an kube-rbac-proxy HTTPRoute is created")
+			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
+			Eventually(func() error {
+				return cli.Get(ctx, key, kubeRbacProxyRoute)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it points to the kube-rbac-proxy service (port 8443)
+			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + KubeRbacProxyServiceSuffix))
+			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
+
+			By("Cleaning up the test notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
 		})
 
+		It("Should clean up kube-rbac-proxy HTTPRoutes when disabling kube-rbac-proxy authentication", func() {
+			By("Creating a notebook with kube-rbac-proxy initially")
+			notebook := createNotebookWithKubeRbacProxy(Name+"-rbac-to-regular", Namespace)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Verifying an kube-rbac-proxy HTTPRoute is created")
+			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
+			key := types.NamespacedName{Name: Name + "-rbac-to-regular", Namespace: Namespace}
+			Eventually(func() error {
+				return cli.Get(ctx, key, kubeRbacProxyRoute)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it points to the kube-rbac-proxy service (port 8443)
+			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular" + KubeRbacProxyServiceSuffix))
+			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
+
+			By("Updating the notebook to disable kube-rbac-proxy authentication")
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			delete(notebook.Annotations, AnnotationInjectAuth)
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("Verifying the kube-rbac-proxy HTTPRoute is cleaned up")
+			Eventually(func() error {
+				err := cli.Get(ctx, key, kubeRbacProxyRoute)
+				if err != nil {
+					return err
+				}
+				// Check if it still points to kube-rbac-proxy service (should be gone or changed)
+				if len(kubeRbacProxyRoute.Spec.Rules) > 0 && len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs) > 0 {
+					backendName := string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)
+					backendPort := kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port
+					if backendName == Name+"-rbac-to-regular"+KubeRbacProxyServiceSuffix && backendPort != nil && *backendPort == 8443 {
+						return fmt.Errorf("kube-rbac-proxy HTTPRoute still exists")
+					}
+				}
+				return nil
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying an unauthenticated HTTPRoute is created")
+			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
+			Eventually(func() error {
+				return cli.Get(ctx, key, unauthenticatedRoute)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it points to the regular service (port 8888)
+			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular"))
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
+
+			By("Cleaning up the test notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+		})
+	})
+
+	When("Creating a Notebook without kube-rbac-proxy proxy injection", func() {
+		const (
+			Name      = "test-notebook-no-kube-rbac-proxy"
+			Namespace = "default"
+		)
+
+		notebook := createNotebook(Name, Namespace)
+
+		It("Should create a Notebook without kube-rbac-proxy proxy", func() {
+			By("By creating a new Notebook without inject-auth annotation")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("By checking that no kube-rbac-proxy proxy container was injected")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, notebook)
+			}, duration, interval).Should(Succeed())
+
+			// Verify only the original container exists
+			Expect(notebook.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(notebook.Spec.Template.Spec.Containers[0].Name).To(Equal(Name))
+
+			// Verify no kube-rbac-proxy volumes were added
+			volumeNames := make(map[string]bool)
+			for _, volume := range notebook.Spec.Template.Spec.Volumes {
+				volumeNames[volume.Name] = true
+			}
+			Expect(volumeNames[KubeRbacProxyConfigVolumeName]).To(BeFalse())
+			Expect(volumeNames[KubeRbacProxyTLSCertsVolumeName]).To(BeFalse())
+		})
+
+		It("Should create an unauthenticated HTTPRoute", func() {
+			By("By checking that the controller has created an unauthenticated HTTPRoute")
+			httpRoute := &gatewayv1.HTTPRoute{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, httpRoute)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it's an unauthenticated HTTPRoute (points to the notebook service, not kube-rbac-proxy service)
+			Expect(len(httpRoute.Spec.Rules)).To(BeNumerically(">", 0))
+			Expect(len(httpRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
+			Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)).To(Equal(Name))
+			Expect(*httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port).To(Equal(gatewayv1.PortNumber(8888)))
+		})
 	})
 
 	When("Checking ds-pipeline-config secret lifecycle", func() {
 		const (
-			notebookName          = "dspa-notebook"
-			dsSecretName          = "ds-pipeline-config"
-			Namespace             = "dspa-test-namespace"
-			accessKeyKey          = "accesskey"
-			secretKeyKey          = "secretkey"
-			secretName            = "cos-secret"
-			dashboardInstanceName = "default-dashboard"
+			notebookName = "dspa-notebook"
+			dsSecretName = "ds-pipeline-config"
+			Namespace    = "dspa-test-namespace"
+			accessKeyKey = "accesskey"
+			secretKeyKey = "secretkey"
+			secretName   = "cos-secret"
+			gatewayName  = "data-science-gateway"
 		)
 
 		testNamespaces = append(testNamespaces, Namespace)
@@ -1203,7 +1372,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		var (
 			dspaObj      *dspav1.DataSciencePipelinesApplication
 			s3CredSecret *corev1.Secret
-			dashboard    *unstructured.Unstructured
+			gateway      *unstructured.Unstructured
 		)
 		BeforeEach(func() {
 			//Pass env to be visible within test suite
@@ -1216,8 +1385,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("should create a ds-pipeline-config secret if a DSPA is present", func() {
-			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Dashboard CR, and Dashboard Secret.
-			// These components require the 'ds-pipeline-config' secret to be generated beforehand.
+			// Create all the necessary objects within dspa-test-namespace namespace: DSPA CR, Gateway CR, and COS Secret.
+			// These components are required for the 'ds-pipeline-config' secret to be generated.
 			By("Creating a DSPA object")
 			dspaObj = &dspav1.DataSciencePipelinesApplication{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1263,42 +1432,44 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 			Expect(cli.Create(ctx, s3CredSecret)).To(Succeed())
 
-			By("Creating a Dashboard CR")
-			dashboard = &unstructured.Unstructured{
+			By("Creating openshift-ingress namespace for Gateway")
+			openshiftIngressNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "openshift-ingress",
+				},
+			}
+			Expect(cli.Create(ctx, openshiftIngressNS)).To(Succeed())
+
+			By("Creating a Gateway CR")
+			gateway = &unstructured.Unstructured{
 				Object: map[string]interface{}{
-					"apiVersion": "components.platform.opendatahub.io/v1alpha1",
-					"kind":       "Dashboard",
+					"apiVersion": "gateway.networking.k8s.io/v1",
+					"kind":       "Gateway",
 					"metadata": map[string]interface{}{
-						"name":      dashboardInstanceName,
-						"namespace": Namespace,
+						"name":      gatewayName,
+						"namespace": "openshift-ingress",
+					},
+					"spec": map[string]interface{}{
+						"gatewayClassName": "openshift-default",
+						"listeners": []interface{}{
+							map[string]interface{}{
+								"hostname": "gateway.example.com",
+								"name":     "https",
+								"port":     int64(443),
+								"protocol": "HTTPS",
+							},
+						},
 					},
 				},
 			}
-			dashboard.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   "components.platform.opendatahub.io",
-				Version: "v1alpha1",
-				Kind:    "Dashboard",
+			gateway.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "gateway.networking.k8s.io",
+				Version: "v1",
+				Kind:    "Gateway",
 			})
-			Expect(cli.Create(ctx, dashboard)).To(Succeed())
+			Expect(cli.Create(ctx, gateway)).To(Succeed())
 
-			By("Patching the Dashboard status.url and Ready condition to simulate readiness")
-			// Fetch the Dashboard to get a valid resourceVersion
-			Expect(cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)).To(Succeed())
-			// Create a patch with updated status.url and conditions
-			dashboardPatch := dashboard.DeepCopy()
-			err := unstructured.SetNestedField(dashboardPatch.Object, "https://dashboard.example.com", "status", "url")
-			Expect(err).ToNot(HaveOccurred())
-			readyCondition := map[string]interface{}{
-				"type":   "Ready",
-				"status": "True",
-				"reason": "ComponentsAvailable",
-			}
-			err = unstructured.SetNestedSlice(dashboardPatch.Object, []interface{}{readyCondition}, "status", "conditions")
-			Expect(err).ToNot(HaveOccurred())
-			patch := client.MergeFrom(dashboard)
-			Expect(cli.Status().Patch(ctx, dashboardPatch, patch)).To(Succeed())
-
-			By("Waiting the Dashboard object is present and Ready")
+			By("Waiting for the Gateway object to be created")
 			time.Sleep(10 * time.Millisecond)
 
 			By("Creating Notebook")
@@ -1308,7 +1479,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Waiting for ds-pipeline-config Secret to be created")
 			Eventually(func() error {
 				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
-			}, 30*time.Second, 2*time.Second).Should(Succeed())
+			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
 
 			// ----------------------------------------------------------------
 			// Test workaround for the RHOAIENG-24545 - we need to manually modify
@@ -1343,7 +1514,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Check notebook status")
 			notebook = &nbv1.Notebook{}
-			err = cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
+			err := cli.Get(ctx, client.ObjectKey{Name: notebookName, Namespace: Namespace}, notebook)
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Validating the content of the ds-pipeline-config Secret")
@@ -1369,8 +1540,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					Name:      dsSecretName,
 					Namespace: Namespace,
 				}, &updatedSecret)).To(Succeed())
-				g.Expect(updatedSecret.ResourceVersion).ToNot(Equal(fetchedSecret), "Secret resource version should change on DSPA update")
-			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
+				// The secret content should be updated to reflect the bucket change
+				g.Expect(string(updatedSecret.Data["odh_dsp.json"])).To(ContainSubstring("changed-bucket"))
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("Deleting the DSPA and Notebook")
 			Expect(cli.Delete(ctx, notebook)).To(Succeed())
@@ -1424,13 +1596,26 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return apierrors.IsNotFound(err)
 			}, time.Second*5, time.Millisecond*500).Should(BeTrue())
 
-			// Delete Dashboard
-			if dashboard != nil {
-				_ = cli.Delete(ctx, dashboard)
+			// Delete S3 credentials secret
+			if s3CredSecret != nil {
+				_ = cli.Delete(ctx, s3CredSecret)
+			}
+
+			// Delete Gateway
+			if gateway != nil {
+				_ = cli.Delete(ctx, gateway)
 				Eventually(func() error {
-					return cli.Get(ctx, client.ObjectKeyFromObject(dashboard), dashboard)
+					return cli.Get(ctx, client.ObjectKeyFromObject(gateway), gateway)
 				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
 			}
+
+			// Delete openshift-ingress namespace
+			openshiftIngressNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "openshift-ingress",
+				},
+			}
+			_ = cli.Delete(ctx, openshiftIngressNS)
 
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1460,29 +1645,27 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 	}
 }
 
-func getRouteFromList(route *routev1.Route, notebook *nbv1.Notebook, name, namespace string) (*routev1.Route, error) {
-	routeList := &routev1.RouteList{}
-	opts := []client.ListOption{
-		client.InNamespace(namespace),
-		client.MatchingLabels{"notebook-name": name},
+func createNotebookWithKubeRbacProxy(name, namespace string) *nbv1.Notebook {
+	return &nbv1.Notebook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				AnnotationInjectAuth: "true",
+			},
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Name:  name,
+					Image: "registry.redhat.io/ubi9/ubi:latest",
+				}}}},
+		},
 	}
-
-	err := cli.List(ctx, routeList, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the route from the list
-	for _, nRoute := range routeList.Items {
-		if metav1.IsControlledBy(&nRoute, notebook) {
-			*route = nRoute
-			return route, nil
-		}
-	}
-	return nil, errors.New("Route not found")
 }
 
-func createOAuthServiceAccount(name, namespace string) corev1.ServiceAccount {
+// createExpectedServiceAccount creates the expected ServiceAccount for notebooks
+func createExpectedServiceAccount(name, namespace string) corev1.ServiceAccount {
 	return corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1490,149 +1673,89 @@ func createOAuthServiceAccount(name, namespace string) corev1.ServiceAccount {
 			Labels: map[string]string{
 				"notebook-name": name,
 			},
-			Annotations: map[string]string{
-				"serviceaccounts.openshift.io/oauth-redirectreference.first": "" +
-					`{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"` + name + `"}}`,
-			},
 		},
 	}
 }
 
-func createOAuthContainer(name, namespace string) corev1.Container {
-	return corev1.Container{
-		Name:            "oauth-proxy",
-		Image:           oauthProxyImage,
-		ImagePullPolicy: corev1.PullAlways,
-		Env: []corev1.EnvVar{{
-			Name: "NAMESPACE",
-			ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					FieldPath: "metadata.namespace",
-				},
-			},
-		}},
-		Args: []string{
-			"--provider=openshift",
-			"--https-address=:8443",
-			"--http-address=",
-			"--openshift-service-account=" + name,
-			"--cookie-secret-file=/etc/oauth/config/cookie_secret",
-			"--cookie-expire=24h0m0s",
-			"--tls-cert=/etc/tls/private/tls.crt",
-			"--tls-key=/etc/tls/private/tls.key",
-			"--upstream=http://localhost:8888",
-			"--upstream-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
-			"--email-domain=*",
-			"--skip-provider-button",
-			`--client-id=` + name + `-` + namespace + `-oauth-client`,
-			"--client-secret-file=/etc/oauth/client/secret",
-			"--scope=user:info user:check-access",
-			`--openshift-sar={"verb":"get","resource":"notebooks","resourceAPIGroup":"kubeflow.org",` +
-				`"resourceName":"` + name + `","namespace":"$(NAMESPACE)"}`,
-			"--logout-url=https://example.notebook-url/notebook/" + namespace + "/" + name,
-		},
-		Ports: []corev1.ContainerPort{{
-			Name:          OAuthServicePortName,
-			ContainerPort: 8443,
-			Protocol:      corev1.ProtocolTCP,
-		}},
-		LivenessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
-					Scheme: corev1.URISchemeHTTPS,
-				},
-			},
-			InitialDelaySeconds: 30,
-			TimeoutSeconds:      1,
-			PeriodSeconds:       5,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
-		},
-		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/oauth/healthz",
-					Port:   intstr.FromString(OAuthServicePortName),
-					Scheme: corev1.URISchemeHTTPS,
-				},
-			},
-			InitialDelaySeconds: 5,
-			TimeoutSeconds:      1,
-			PeriodSeconds:       5,
-			SuccessThreshold:    1,
-			FailureThreshold:    3,
-		},
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(DefaultAuthSidecarCPURequest),
-				corev1.ResourceMemory: resource.MustParse(DefaultAuthSidecarMemoryRequest),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(DefaultAuthSidecarCPULimit),
-				corev1.ResourceMemory: resource.MustParse(DefaultAuthSidecarMemoryLimit),
-			},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "oauth-client",
-				MountPath: "/etc/oauth/client",
-			},
-			{
-				Name:      "oauth-config",
-				MountPath: "/etc/oauth/config",
-			},
-			{
-				Name:      "tls-certificates",
-				MountPath: "/etc/tls/private",
-			},
-		},
+// CompareNotebookServiceAccounts compares two ServiceAccount objects for testing
+func CompareNotebookServiceAccounts(sa1 corev1.ServiceAccount, sa2 corev1.ServiceAccount) bool {
+	// Compare basic metadata
+	if sa1.Name != sa2.Name || sa1.Namespace != sa2.Namespace {
+		return false
 	}
+
+	// Compare labels
+	if !reflect.DeepEqual(sa1.Labels, sa2.Labels) {
+		return false
+	}
+
+	return true
 }
 
-func createOAuthNetworkPolicy(name, namespace string, npProtocol corev1.Protocol, port int32) netv1.NetworkPolicy {
-	return netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name + "-oauth-np",
-			Namespace: namespace,
-		},
-		Spec: netv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"notebook-name": name,
-				},
-			},
-			Ingress: []netv1.NetworkPolicyIngressRule{
-				{
-					Ports: []netv1.NetworkPolicyPort{
-						{
-							Protocol: &npProtocol,
-							Port: &intstr.IntOrString{
-								IntVal: port,
-							},
-						},
-					},
-				},
-			},
-			PolicyTypes: []netv1.PolicyType{
-				netv1.PolicyTypeIngress,
-			},
-		},
+// CompareNotebookServices compares two Service objects for testing
+func CompareNotebookServices(s1 corev1.Service, s2 corev1.Service) bool {
+	// Compare basic metadata
+	if s1.Name != s2.Name || s1.Namespace != s2.Namespace {
+		return false
 	}
+
+	// Compare labels
+	if !reflect.DeepEqual(s1.Labels, s2.Labels) {
+		return false
+	}
+
+	// Compare spec
+	if !reflect.DeepEqual(s1.Spec.Ports, s2.Spec.Ports) {
+		return false
+	}
+
+	if !reflect.DeepEqual(s1.Spec.Selector, s2.Spec.Selector) {
+		return false
+	}
+
+	return true
 }
 
-// createOAuthConfigmap creates a ConfigMap
-// this function can be used to create any kinda of ConfigMap
-func createOAuthConfigmap(name, namespace string, label map[string]string, configMapData map[string]string) *corev1.ConfigMap {
-	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    label,
-		},
-		Data: configMapData,
+// CompareNotebookConfigMaps compares two ConfigMap objects for testing
+func CompareNotebookConfigMaps(cm1 corev1.ConfigMap, cm2 corev1.ConfigMap) bool {
+	// Compare basic metadata
+	if cm1.Name != cm2.Name || cm1.Namespace != cm2.Namespace {
+		return false
 	}
+
+	// Compare labels
+	if !reflect.DeepEqual(cm1.Labels, cm2.Labels) {
+		return false
+	}
+
+	// Compare data
+	if !reflect.DeepEqual(cm1.Data, cm2.Data) {
+		return false
+	}
+
+	return true
+}
+
+func getHTTPRouteFromList(httpRoute *gatewayv1.HTTPRoute, notebook *nbv1.Notebook, name, namespace string) (*gatewayv1.HTTPRoute, error) {
+	httpRouteList := &gatewayv1.HTTPRouteList{}
+	opts := []client.ListOption{
+		client.InNamespace(namespace),
+		client.MatchingLabels{"notebook-name": name},
+	}
+
+	err := cli.List(ctx, httpRouteList, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the HTTPRoute from the list
+	for _, nHTTPRoute := range httpRouteList.Items {
+		if metav1.IsControlledBy(&nHTTPRoute, notebook) {
+			*httpRoute = nHTTPRoute
+			return httpRoute, nil
+		}
+	}
+	return nil, errors.New("HTTPRoute not found")
 }
 
 // checkCertConfigMapWithError checks the content of a config map defined by the name and namespace

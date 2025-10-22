@@ -25,7 +25,7 @@ spec:
           imagePullPolicy: Always
           command:
             - /manager
-          args: ["--oauth-proxy-image", "oauth-proxy-image_PLACEHOLDER"]
+          args: ["--kube-rbac-proxy-image", "kube-rbac-proxy_PLACEHOLDER"]
           securityContext:
             allowPrivilegeEscalation: false
           ports:

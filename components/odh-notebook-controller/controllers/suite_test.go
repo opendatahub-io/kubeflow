@@ -38,11 +38,10 @@ import (
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	imagev1 "github.com/openshift/api/image/v1"
-	oauthv1 "github.com/openshift/api/oauth/v1"
-	routev1 "github.com/openshift/api/route/v1"
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -73,8 +72,8 @@ var (
 
 	testNamespaces = []string{}
 
-	// OAuth proxy image hardcoded placeholder value for tests
-	oauthProxyImage string = "quay.io/odh-test-images/oauth-proxy-placeholder:latest"
+	// kube-rbac-proxy image hardcoded placeholder value for tests
+	kubeRbacProxyImage string = "quay.io/brancz/kube-rbac-proxy:v0.20.0"
 )
 
 const (
@@ -158,11 +157,10 @@ var _ = BeforeSuite(func() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
-	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
 	utilruntime.Must(dspav1.AddToScheme(scheme))
-	utilruntime.Must(oauthv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	// Initialize Kubernetes client
@@ -208,8 +206,8 @@ var _ = BeforeSuite(func() {
 			Client:    mgr.GetClient(),
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
-			OAuthConfig: OAuthConfig{
-				ProxyImage: oauthProxyImage,
+			KubeRbacProxyConfig: KubeRbacProxyConfig{
+				ProxyImage: kubeRbacProxyImage,
 			},
 			Decoder: admission.NewDecoder(mgr.GetScheme()),
 		},

@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestInjectOAuthProxyWithResourceValidation(t *testing.T) {
+func TestInjectKubeRbacProxyWithResourceValidation(t *testing.T) {
 	tests := []struct {
 		name        string
 		notebook    *nbv1.Notebook
@@ -87,21 +87,21 @@ func TestInjectOAuthProxyWithResourceValidation(t *testing.T) {
 		},
 	}
 
-	oauth := OAuthConfig{
-		ProxyImage: "test-oauth-image",
+	kubeRbacProxyImage := KubeRbacProxyConfig{
+		ProxyImage: "test-rbac-image",
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := InjectOAuthProxy(tt.notebook, oauth)
+			err := InjectKubeRbacProxy(tt.notebook, kubeRbacProxyImage)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
 				}
-				// Ensure no oauth-proxy container was injected
+				// Ensure no kube-rbac-proxy container was injected
 				for _, c := range tt.notebook.Spec.Template.Spec.Containers {
-					if c.Name == "oauth-proxy" {
-						t.Errorf("oauth-proxy container should not be injected when validation fails")
+					if c.Name == ContainerNameKubeRbacProxy {
+						t.Errorf("kube-rbac-proxy container should not be injected when validation fails")
 					}
 				}
 			} else {
@@ -109,17 +109,17 @@ func TestInjectOAuthProxyWithResourceValidation(t *testing.T) {
 					t.Errorf("expected no error but got: %v", err)
 				}
 
-				// Verify that oauth-proxy container was added with correct resources
-				var oauthContainer *corev1.Container
+				// Verify that kube-rbac-proxy container was added with correct resources
+				var kubeRbacProxyContainer *corev1.Container
 				for _, container := range tt.notebook.Spec.Template.Spec.Containers {
-					if container.Name == "oauth-proxy" {
-						oauthContainer = &container
+					if container.Name == ContainerNameKubeRbacProxy {
+						kubeRbacProxyContainer = &container
 						break
 					}
 				}
 
-				if oauthContainer == nil {
-					t.Errorf("oauth-proxy container not found")
+				if kubeRbacProxyContainer == nil {
+					t.Errorf("kube-rbac-proxy container not found")
 					return
 				}
 
@@ -127,8 +127,8 @@ func TestInjectOAuthProxyWithResourceValidation(t *testing.T) {
 				annotations := tt.notebook.GetAnnotations()
 				if annotations != nil {
 					if cpuReq, exists := annotations[AnnotationAuthSidecarCPURequest]; exists {
-						if oauthContainer.Resources.Requests.Cpu().String() != cpuReq {
-							t.Errorf("expected CPU request %s, got %s", cpuReq, oauthContainer.Resources.Requests.Cpu().String())
+						if kubeRbacProxyContainer.Resources.Requests.Cpu().String() != cpuReq {
+							t.Errorf("expected CPU request %s, got %s", cpuReq, kubeRbacProxyContainer.Resources.Requests.Cpu().String())
 						}
 					}
 				}
