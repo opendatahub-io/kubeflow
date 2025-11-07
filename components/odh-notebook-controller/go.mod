@@ -18,6 +18,8 @@ require (
 	k8s.io/client-go v0.33.0
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 	sigs.k8s.io/controller-runtime v0.21.0
+	// Used version that OpenShift 4.19 uses as the oldest supported OCP version.
+	// Keep in sync with what we have in config/crd/external/*.yaml files.
 	sigs.k8s.io/gateway-api v1.2.1
 )
 

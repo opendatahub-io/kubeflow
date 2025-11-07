@@ -159,8 +159,8 @@ func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyService(notebook *nb
 }
 
 // NewNotebookKubeRbacProxyHTTPRoute defines the desired HTTPRoute object for kube-rbac-proxy
-func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gatewayv1.HTTPRoute {
-	httpRoute := NewNotebookHTTPRoute(notebook, isGenerateName)
+func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gatewayv1.HTTPRoute {
+	httpRoute := NewNotebookHTTPRoute(notebook, centralNamespace)
 
 	// Update the backend to point to the kube-rbac-proxy service instead of the main service
 	httpRoute.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(notebook.Name + KubeRbacProxyServiceSuffix)

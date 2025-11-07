@@ -46,6 +46,7 @@ import (
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 )
 
 var _ = Describe("The Openshift Notebook controller", func() {
@@ -64,12 +65,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebook := createNotebook(Name, Namespace)
 
 		pathPrefix := gatewayv1.PathMatchPathPrefix
+		httpRouteName := "nb-" + Namespace + "-" + Name
 		expectedHTTPRoute := gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name,
-				Namespace: Namespace,
+				Name:      httpRouteName,
+				Namespace: odhNotebookControllerTestNamespace, // Central namespace
 				Labels: map[string]string{
-					"notebook-name": Name,
+					"notebook-name":      Name,
+					"notebook-namespace": Namespace,
 				},
 			},
 			Spec: gatewayv1.HTTPRouteSpec{
@@ -97,10 +100,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
-										Name:  gatewayv1.ObjectName(Name),
-										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:      gatewayv1.ObjectName(Name),
+										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
+										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -119,7 +123,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
@@ -132,7 +136,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has restored the HTTPRoute spec")
 			Eventually(func() (string, error) {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 				err := cli.Get(ctx, key, httpRoute)
 				if err != nil {
 					return "", err
@@ -151,28 +155,16 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has recreated the HTTPRoute")
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
 		It("Should delete the Openshift Route", func() {
-			// Testenv cluster does not implement Kubernetes GC:
-			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
-			// To test that the deletion lifecycle works, test the ownership
-			// instead of asserting on existence.
-			expectedOwnerReference := metav1.OwnerReference{
-				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
-				Name:               Name,
-				UID:                notebook.GetObjectMeta().GetUID(),
-				Controller:         ptr.To(true),
-				BlockOwnerDeletion: ptr.To(true),
-			}
-
-			By("By checking that the Notebook owns the Route object")
-			Expect(httpRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			By("By checking that the HTTPRoute has the correct labels for identification")
+			Expect(httpRoute.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-name", Name))
+			Expect(httpRoute.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-namespace", Namespace))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -184,6 +176,189 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(HaveOccurred())
 		})
 
+	})
+
+	When("Testing ReferenceGrant lifecycle", func() {
+		const (
+			Name      = "test-notebook-refgrant"
+			Namespace = "default"
+		)
+
+		notebook := createNotebook(Name, Namespace)
+		referenceGrant := &gatewayv1beta1.ReferenceGrant{}
+		referenceGrantKey := types.NamespacedName{Name: ReferenceGrantName, Namespace: Namespace}
+
+		It("Should create a ReferenceGrant when creating a Notebook", func() {
+			By("By creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the controller has created the ReferenceGrant")
+			Eventually(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, duration, interval).Should(Succeed())
+
+			// Verify the ReferenceGrant has correct spec
+			Expect(len(referenceGrant.Spec.From)).To(Equal(1))
+			Expect(referenceGrant.Spec.From[0].Group).To(Equal(gatewayv1.Group("gateway.networking.k8s.io")))
+			Expect(referenceGrant.Spec.From[0].Kind).To(Equal(gatewayv1.Kind("HTTPRoute")))
+			Expect(string(referenceGrant.Spec.From[0].Namespace)).To(Equal(odhNotebookControllerTestNamespace))
+
+			Expect(len(referenceGrant.Spec.To)).To(Equal(1))
+			Expect(referenceGrant.Spec.To[0].Group).To(Equal(gatewayv1.Group("")))
+			Expect(referenceGrant.Spec.To[0].Kind).To(Equal(gatewayv1.Kind("Service")))
+		})
+
+		It("Should recreate the ReferenceGrant when deleted", func() {
+			By("By deleting the ReferenceGrant")
+			Expect(cli.Delete(ctx, referenceGrant)).Should(Succeed())
+
+			By("By checking that the controller has recreated the ReferenceGrant")
+			Eventually(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, duration, interval).Should(Succeed())
+
+			// Verify it still has the correct spec
+			Expect(len(referenceGrant.Spec.From)).To(Equal(1))
+			Expect(string(referenceGrant.Spec.From[0].Namespace)).To(Equal(odhNotebookControllerTestNamespace))
+		})
+
+		It("Should reconcile the ReferenceGrant when modified", func() {
+			By("By modifying the ReferenceGrant spec")
+			Eventually(func() error {
+				if err := cli.Get(ctx, referenceGrantKey, referenceGrant); err != nil {
+					return err
+				}
+				// Corrupt the spec by changing the namespace
+				referenceGrant.Spec.From[0].Namespace = "wrong-namespace"
+				return cli.Update(ctx, referenceGrant)
+			}, duration, interval).Should(Succeed())
+
+			By("By checking that the controller has restored the ReferenceGrant spec")
+			Eventually(func() string {
+				if err := cli.Get(ctx, referenceGrantKey, referenceGrant); err != nil {
+					return ""
+				}
+				if len(referenceGrant.Spec.From) > 0 {
+					return string(referenceGrant.Spec.From[0].Namespace)
+				}
+				return ""
+			}, duration, interval).Should(Equal(odhNotebookControllerTestNamespace))
+		})
+
+		It("Should reconcile the ReferenceGrant labels when modified", func() {
+			By("By modifying the ReferenceGrant labels")
+			Eventually(func() error {
+				if err := cli.Get(ctx, referenceGrantKey, referenceGrant); err != nil {
+					return err
+				}
+				// Corrupt the labels by changing them
+				referenceGrant.Labels = map[string]string{
+					"wrong-label": "wrong-value",
+				}
+				return cli.Update(ctx, referenceGrant)
+			}, duration, interval).Should(Succeed())
+
+			By("By checking that the controller has restored the ReferenceGrant labels")
+			Eventually(func() map[string]string {
+				if err := cli.Get(ctx, referenceGrantKey, referenceGrant); err != nil {
+					return nil
+				}
+				return referenceGrant.Labels
+			}, duration, interval).Should(And(
+				HaveKeyWithValue("app.kubernetes.io/managed-by", "odh-notebook-controller"),
+				HaveKeyWithValue("opendatahub.io/component", "notebook-controller"),
+			))
+		})
+
+		It("Should keep ReferenceGrant when deleting notebook if other notebooks exist", func() {
+			By("By creating a second notebook in the same namespace")
+			notebook2 := createNotebook(Name+"-second", Namespace)
+			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
+
+			// Wait for second notebook to be reconciled
+			time.Sleep(interval)
+
+			By("By deleting the first notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the ReferenceGrant still exists")
+			Consistently(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, 2*time.Second, interval).Should(Succeed())
+
+			By("By cleaning up the second notebook")
+			Expect(cli.Delete(ctx, notebook2)).Should(Succeed())
+
+			By("By checking that the ReferenceGrant is now deleted")
+			Eventually(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, duration, interval).Should(HaveOccurred())
+		})
+	})
+
+	When("Testing ReferenceGrant with multiple notebooks in same namespace", func() {
+		const (
+			Namespace = "default"
+			Name1     = "notebook-multi-1"
+			Name2     = "notebook-multi-2"
+			Name3     = "notebook-multi-3"
+		)
+
+		referenceGrantKey := types.NamespacedName{Name: ReferenceGrantName, Namespace: Namespace}
+
+		It("Should share one ReferenceGrant across multiple notebooks", func() {
+			By("By creating first notebook")
+			notebook1 := createNotebook(Name1, Namespace)
+			Expect(cli.Create(ctx, notebook1)).Should(Succeed())
+
+			By("By verifying ReferenceGrant exists or is created")
+			referenceGrant := &gatewayv1beta1.ReferenceGrant{}
+			Eventually(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, duration, interval).Should(Succeed())
+			// Note: ReferenceGrant might already exist from previous tests in default namespace
+			// We just verify it exists and has correct spec
+
+			By("By creating second and third notebooks")
+			notebook2 := createNotebook(Name2, Namespace)
+			notebook3 := createNotebook(Name3, Namespace)
+			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
+			Expect(cli.Create(ctx, notebook3)).Should(Succeed())
+
+			// Wait for reconciliation
+			time.Sleep(interval)
+
+			By("By verifying the ReferenceGrant still exists")
+			Expect(cli.Get(ctx, referenceGrantKey, referenceGrant)).Should(Succeed())
+
+			By("By deleting first notebook")
+			Expect(cli.Delete(ctx, notebook1)).Should(Succeed())
+
+			// Wait for finalizers to be processed
+			time.Sleep(interval)
+
+			By("By verifying ReferenceGrant still exists (other notebooks remain)")
+			Consistently(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, 2*time.Second, interval).Should(Succeed())
+
+			By("By deleting second notebook")
+			Expect(cli.Delete(ctx, notebook2)).Should(Succeed())
+
+			// Wait for finalizers to be processed
+			time.Sleep(interval)
+
+			By("By verifying ReferenceGrant still exists (third notebook remains)")
+			Consistently(func() error {
+				return cli.Get(ctx, referenceGrantKey, referenceGrant)
+			}, 2*time.Second, interval).Should(Succeed())
+
+			By("By cleaning up third notebook")
+			Expect(cli.Delete(ctx, notebook3)).Should(Succeed())
+
+			// Note: We don't verify the ReferenceGrant is deleted here because other tests
+			// in the default namespace might still have notebooks running
+		})
 	})
 
 	// New test case for RoleBinding reconciliation
@@ -303,11 +478,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				// Clean up the ConfigMap after the test
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
 					// Log the error without failing the test
-					logger.Info("Error occurred during deletion of ConfigMap: %v", err)
+					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
 				if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
 					// Log the error without failing the test
-					logger.Info("Error occurred during deletion of ConfigMap: %v", err)
+					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
 			}()
 
@@ -373,12 +548,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		notebook := createNotebook(Name, Namespace)
 
 		pathPrefix := gatewayv1.PathMatchPathPrefix
+		httpRouteName := "nb-" + Namespace + "-" + Name
 		expectedHTTPRoute := gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name,
-				Namespace: Namespace,
+				Name:      httpRouteName,
+				Namespace: odhNotebookControllerTestNamespace,
 				Labels: map[string]string{
-					"notebook-name": Name,
+					"notebook-name":      Name,
+					"notebook-namespace": Namespace,
 				},
 			},
 			Spec: gatewayv1.HTTPRouteSpec{
@@ -406,10 +583,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
-										Name:  gatewayv1.ObjectName(Name),
-										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:      gatewayv1.ObjectName(Name),
+										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
+										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -429,7 +607,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
-				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, Name, Namespace)
 				if httpRoute == nil {
 					return err
 				}
@@ -446,7 +624,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has restored the HTTPRoute spec")
 			Eventually(func() (string, error) {
-				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, Name, Namespace)
 				if httpRoute == nil {
 					return "", err
 				}
@@ -465,7 +643,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the controller has recreated the HTTPRoute")
 			Eventually(func() error {
-				httpRoute, err := getHTTPRouteFromList(httpRoute2, notebook, Name, Namespace)
+				httpRoute, err := getHTTPRouteFromList(httpRoute2, Name, Namespace)
 				if httpRoute == nil {
 					return err
 				}
@@ -474,22 +652,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*httpRoute2).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
-		It("Should delete the Openshift Route", func() {
-			// Testenv cluster does not implement Kubernetes GC:
-			// https://book.kubebuilder.io/reference/envtest.html#testing-considerations
-			// To test that the deletion lifecycle works, test the ownership
-			// instead of asserting on existence.
-			expectedOwnerReference := metav1.OwnerReference{
-				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
-				Name:               Name,
-				UID:                notebook.GetObjectMeta().GetUID(),
-				Controller:         ptr.To(true),
-				BlockOwnerDeletion: ptr.To(true),
-			}
-
-			By("By checking that the Notebook owns the Route object")
-			Expect(httpRoute2.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+		It("Should delete the Openshift HTTPRoute", func() {
+			By("By checking that the HTTPRoute has the correct labels for identification")
+			Expect(httpRoute2.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-name", Name))
+			Expect(httpRoute2.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-namespace", Namespace))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -499,6 +665,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Eventually(func() error {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
+			}, duration, interval).Should(HaveOccurred())
+
+			By("By checking that the HTTPRoute is deleted")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
+				return cli.Get(ctx, key, httpRoute2)
 			}, duration, interval).Should(HaveOccurred())
 		})
 
@@ -519,11 +691,16 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By updating the Notebook's image")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
-
+			// Refresh the notebook object to get the latest version and update it
+			// Use Eventually to handle any race conditions with controller modifications
 			updatedImage := "registry.redhat.io/ubi9/ubi:updated"
-			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			Eventually(func() error {
+				if err := cli.Get(ctx, key, notebook); err != nil {
+					return err
+				}
+				notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
+				return cli.Update(ctx, notebook)
+			}, duration, interval).Should(Succeed())
 
 			By("By checking that the Notebook's image is updated")
 			Eventually(func() string {
@@ -557,7 +734,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				// Clean up the ConfigMap after the test
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
 					// Log the error without failing the test
-					logger.Info("Error occurred during deletion of ConfigMap: %v", err)
+					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
 			}()
 
@@ -820,22 +997,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		}
 
 		pathPrefix := gatewayv1.PathMatchPathPrefix
+		httpRouteName := "nb-" + Namespace + "-" + Name
 		expectedHTTPRoute := &gatewayv1.HTTPRoute{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      Name,
-				Namespace: Namespace,
+				Name:      httpRouteName,
+				Namespace: odhNotebookControllerTestNamespace, // Central namespace
 				Labels: map[string]string{
-					"notebook-name": Name,
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
-						Name:               Name,
-						UID:                notebook.UID,
-						Controller:         &[]bool{true}[0],
-						BlockOwnerDeletion: &[]bool{true}[0],
-					},
+					"notebook-name":      Name,
+					"notebook-namespace": Namespace,
 				},
 			},
 			Spec: gatewayv1.HTTPRouteSpec{
@@ -863,10 +1032,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group: func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:  func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
-										Name:  gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
-										Port:  (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0]),
+										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Name:      gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
+										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
+										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -976,7 +1146,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By checking that the controller has created the HTTPRoute")
 			httpRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 			Expect(*httpRoute).To(BeMatchingK8sResource(*expectedHTTPRoute, CompareNotebookHTTPRoutes))
@@ -985,7 +1155,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should reconcile the HTTPRoute when modified", func() {
 			By("By simulating a manual HTTPRoute modification")
 			httpRoute := &gatewayv1.HTTPRoute{}
-			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 			Expect(cli.Get(ctx, key, httpRoute)).Should(Succeed())
 
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
@@ -1008,7 +1178,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should recreate the HTTPRoute when deleted", func() {
 			By("By deleting the notebook HTTPRoute")
 			httpRoute := &gatewayv1.HTTPRoute{}
-			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 			Expect(cli.Get(ctx, key, httpRoute)).Should(Succeed())
 			Expect(cli.Delete(ctx, httpRoute)).Should(Succeed())
 
@@ -1163,11 +1333,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(cli.Get(ctx, serviceKey, kubeRbacProxyService)).Should(Succeed())
 			Expect(kubeRbacProxyService.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
-			By("By checking that the Notebook owns the kube-rbac-proxy HTTPRoute object")
+			By("By checking that the kube-rbac-proxy HTTPRoute has the correct labels")
 			kubeRbacProxyHTTPRoute := &gatewayv1.HTTPRoute{}
-			routeKey := types.NamespacedName{Name: Name, Namespace: Namespace}
+			routeKey := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 			Expect(cli.Get(ctx, routeKey, kubeRbacProxyHTTPRoute)).Should(Succeed())
-			Expect(kubeRbacProxyHTTPRoute.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+			Expect(kubeRbacProxyHTTPRoute.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-name", Name))
+			Expect(kubeRbacProxyHTTPRoute.GetObjectMeta().GetLabels()).To(HaveKeyWithValue("notebook-namespace", Namespace))
 
 			By("By checking that the Notebook owns the kube-rbac-proxy ConfigMap object")
 			kubeRbacProxyConfigMap := &corev1.ConfigMap{}
@@ -1199,9 +1370,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Verifying an unauthenticated HTTPRoute is created")
 			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
+			httpRouteKey := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, unauthenticatedRoute)
+				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
 			// Verify it points to the regular service (port 8888)
@@ -1221,7 +1392,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Verifying the unauthenticated HTTPRoute is cleaned up")
 			Eventually(func() error {
-				err := cli.Get(ctx, key, unauthenticatedRoute)
+				err := cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 				if err != nil {
 					return err
 				}
@@ -1239,7 +1410,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Verifying an kube-rbac-proxy HTTPRoute is created")
 			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				return cli.Get(ctx, key, kubeRbacProxyRoute)
+				return cli.Get(ctx, httpRouteKey, kubeRbacProxyRoute)
 			}, duration, interval).Should(Succeed())
 
 			// Verify it points to the kube-rbac-proxy service (port 8443)
@@ -1254,30 +1425,32 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should clean up kube-rbac-proxy HTTPRoutes when disabling kube-rbac-proxy authentication", func() {
 			By("Creating a notebook with kube-rbac-proxy initially")
-			notebook := createNotebookWithKubeRbacProxy(Name+"-rbac-to-regular", Namespace)
+			notebookName := Name + "-rbac-to-regular"
+			notebook := createNotebookWithKubeRbacProxy(notebookName, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("Verifying an kube-rbac-proxy HTTPRoute is created")
 			kubeRbacProxyRoute := &gatewayv1.HTTPRoute{}
-			key := types.NamespacedName{Name: Name + "-rbac-to-regular", Namespace: Namespace}
+			httpRouteKey := types.NamespacedName{Name: "nb-" + Namespace + "-" + notebookName, Namespace: odhNotebookControllerTestNamespace}
 			Eventually(func() error {
-				return cli.Get(ctx, key, kubeRbacProxyRoute)
+				return cli.Get(ctx, httpRouteKey, kubeRbacProxyRoute)
 			}, duration, interval).Should(Succeed())
 
 			// Verify it points to the kube-rbac-proxy service (port 8443)
 			Expect(len(kubeRbacProxyRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
-			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular" + KubeRbacProxyServiceSuffix))
+			Expect(string(kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(notebookName + KubeRbacProxyServiceSuffix))
 			Expect(*kubeRbacProxyRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8443)))
 
 			By("Updating the notebook to disable kube-rbac-proxy authentication")
+			key := types.NamespacedName{Name: notebookName, Namespace: Namespace}
 			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
 			delete(notebook.Annotations, AnnotationInjectAuth)
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
 			By("Verifying the kube-rbac-proxy HTTPRoute is cleaned up")
 			Eventually(func() error {
-				err := cli.Get(ctx, key, kubeRbacProxyRoute)
+				err := cli.Get(ctx, httpRouteKey, kubeRbacProxyRoute)
 				if err != nil {
 					return err
 				}
@@ -1295,7 +1468,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Verifying an unauthenticated HTTPRoute is created")
 			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				return cli.Get(ctx, key, unauthenticatedRoute)
+				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
 			// Verify it points to the regular service (port 8888)
@@ -1344,7 +1517,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By checking that the controller has created an unauthenticated HTTPRoute")
 			httpRoute := &gatewayv1.HTTPRoute{}
 			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + Name, Namespace: odhNotebookControllerTestNamespace}
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 
@@ -1486,8 +1659,15 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// the workbench so that the expected resource is mounted properly
 			// kubeflow-resource-stopped: '2025-06-25T13:53:46Z'
 			By("Running the workaround for RHOAIENG-24545")
-			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			// Refresh the notebook to get the latest version and update it
+			// Use Eventually to handle any race conditions with controller modifications
+			Eventually(func() error {
+				if err := cli.Get(ctx, types.NamespacedName{Name: notebookName, Namespace: Namespace}, notebook); err != nil {
+					return err
+				}
+				notebook.Spec.Template.Spec.ServiceAccountName = "foo"
+				return cli.Update(ctx, notebook)
+			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
 			// end of workaround
 			// ----------------------------------------------------------------
 
@@ -1736,11 +1916,14 @@ func CompareNotebookConfigMaps(cm1 corev1.ConfigMap, cm2 corev1.ConfigMap) bool 
 	return true
 }
 
-func getHTTPRouteFromList(httpRoute *gatewayv1.HTTPRoute, notebook *nbv1.Notebook, name, namespace string) (*gatewayv1.HTTPRoute, error) {
+func getHTTPRouteFromList(httpRoute *gatewayv1.HTTPRoute, name, namespace string) (*gatewayv1.HTTPRoute, error) {
 	httpRouteList := &gatewayv1.HTTPRouteList{}
 	opts := []client.ListOption{
-		client.InNamespace(namespace),
-		client.MatchingLabels{"notebook-name": name},
+		client.InNamespace(odhNotebookControllerTestNamespace), // Central namespace
+		client.MatchingLabels{
+			"notebook-name":      name,
+			"notebook-namespace": namespace,
+		},
 	}
 
 	err := cli.List(ctx, httpRouteList, opts...)
@@ -1748,9 +1931,13 @@ func getHTTPRouteFromList(httpRoute *gatewayv1.HTTPRoute, notebook *nbv1.Noteboo
 		return nil, err
 	}
 
+	// TODO - shall we assure that only and exactly one route is found?
+
 	// Get the HTTPRoute from the list
 	for _, nHTTPRoute := range httpRouteList.Items {
-		if metav1.IsControlledBy(&nHTTPRoute, notebook) {
+		// Match by labels since cross-namespace owner references don't work
+		if nHTTPRoute.Labels["notebook-name"] == name &&
+			nHTTPRoute.Labels["notebook-namespace"] == namespace {
 			*httpRoute = nHTTPRoute
 			return httpRoute, nil
 		}

@@ -42,6 +42,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -158,6 +159,7 @@ var _ = BeforeSuite(func() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
+	utilruntime.Must(gatewayv1beta1.Install(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
 	utilruntime.Must(dspav1.AddToScheme(scheme))
@@ -167,6 +169,15 @@ var _ = BeforeSuite(func() {
 	cli, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cli).NotTo(BeNil())
+
+	// Create the central namespace where HTTPRoutes will be created
+	centralNamespace := &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: odhNotebookControllerTestNamespace,
+		},
+	}
+	err = cli.Create(ctx, centralNamespace)
+	Expect(err).NotTo(HaveOccurred())
 
 	// Setup controller manager
 	webhookInstallOptions := &envTest.WebhookInstallOptions

@@ -1,12 +1,13 @@
-# latest version available from https://github.com/kubernetes-sigs/gateway-api/blob/main/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
+# latest version available from https://github.com/kubernetes-sigs/gateway-api/blob/v1.2.1/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     api-approved.kubernetes.io: https://github.com/kubernetes-sigs/gateway-api/pull/3328
-    gateway.networking.k8s.io/bundle-version: v1.4.0-rc.2
+    gateway.networking.k8s.io/bundle-version: v1.2.1
     gateway.networking.k8s.io/channel: standard
+  creationTimestamp: null
   name: httproutes.gateway.networking.k8s.io
 spec:
   group: gateway.networking.k8s.io
@@ -132,9 +133,8 @@ spec:
                   type: string
                 maxItems: 16
                 type: array
-                x-kubernetes-list-type: atomic
               parentRefs:
-                description: |-
+                description: |+
                   ParentRefs references the resources (usually Gateways) that a Route wants
                   to be attached to. Note that the referenced parent resource needs to
                   allow this for the attachment to be complete. For Gateways, that means
@@ -185,6 +185,12 @@ spec:
                   allowed by something in the namespace they are referring to. For example,
                   Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                   generic way to enable other kinds of cross-namespace reference.
+
+
+
+
+
+
                 items:
                   description: |-
                     ParentReference identifies an API object (usually a Gateway) that can be considered
@@ -246,6 +252,8 @@ spec:
                         Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                         generic way to enable any other kind of cross-namespace reference.
 
+
+
                         Support: Core
                       maxLength: 63
                       minLength: 1
@@ -263,6 +271,8 @@ spec:
                         as opposed to a listener(s) whose port(s) may be changed. When both Port
                         and SectionName are specified, the name and port of the selected listener
                         must match both specified values.
+
+
 
                         Implementations MAY choose to support other parent resources.
                         Implementations supporting other types of parent resources MUST clearly
@@ -316,7 +326,6 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: sectionName must be specified when parentRefs includes
                     2 or more references to the same parent
@@ -343,7 +352,9 @@ spec:
                   - path:
                       type: PathPrefix
                       value: /
-                description: Rules are a list of HTTP matchers, filters and actions.
+                description: |+
+                  Rules are a list of HTTP matchers, filters and actions.
+
                 items:
                   description: |-
                     HTTPRouteRule defines semantics for matching an HTTP request based on
@@ -395,6 +406,24 @@ spec:
                           ReferenceGrant object is required in the referent namespace to allow that
                           namespace's owner to accept the reference. See the ReferenceGrant
                           documentation for details.
+
+                          <gateway:experimental:description>
+
+                          When the BackendRef points to a Kubernetes Service, implementations SHOULD
+                          honor the appProtocol field if it is set for the target Service Port.
+
+                          Implementations supporting appProtocol SHOULD recognize the Kubernetes
+                          Standard Application Protocols defined in KEP-3726.
+
+                          If a Service appProtocol isn't specified, an implementation MAY infer the
+                          backend protocol through its own means. Implementations MAY infer the
+                          protocol from the Route type referring to the backend Service.
+
+                          If a Route is not able to send traffic to the backend using the specified
+                          protocol then the backend is considered invalid. Implementations MUST set the
+                          "ResolvedRefs" condition to "False" with the "UnsupportedProtocol" reason.
+
+                          </gateway:experimental:description>
                         properties:
                           filters:
                             description: |-
@@ -480,7 +509,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -555,7 +584,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -583,7 +612,7 @@ spec:
                                       x-kubernetes-list-type: map
                                   type: object
                                 requestMirror:
-                                  description: |-
+                                  description: |+
                                     RequestMirror defines a schema for a filter that mirrors requests.
                                     Requests are sent to the specified destination, but responses from
                                     that destination are ignored.
@@ -593,6 +622,7 @@ spec:
                                     backends.
 
                                     Support: Extended
+
                                   properties:
                                     backendRef:
                                       description: |-
@@ -687,49 +717,9 @@ spec:
                                       - message: Must have port for Service reference
                                         rule: '(size(self.group) == 0 && self.kind
                                           == ''Service'') ? has(self.port) : true'
-                                    fraction:
-                                      description: |-
-                                        Fraction represents the fraction of requests that should be
-                                        mirrored to BackendRef.
-
-                                        Only one of Fraction or Percent may be specified. If neither field
-                                        is specified, 100% of requests will be mirrored.
-                                      properties:
-                                        denominator:
-                                          default: 100
-                                          format: int32
-                                          minimum: 1
-                                          type: integer
-                                        numerator:
-                                          format: int32
-                                          minimum: 0
-                                          type: integer
-                                      required:
-                                      - numerator
-                                      type: object
-                                      x-kubernetes-validations:
-                                      - message: numerator must be less than or equal
-                                          to denominator
-                                        rule: self.numerator <= self.denominator
-                                    percent:
-                                      description: |-
-                                        Percent represents the percentage of requests that should be
-                                        mirrored to BackendRef. Its minimum value is 0 (indicating 0% of
-                                        requests) and its maximum value is 100 (indicating 100% of requests).
-
-                                        Only one of Fraction or Percent may be specified. If neither field
-                                        is specified, 100% of requests will be mirrored.
-                                      format: int32
-                                      maximum: 100
-                                      minimum: 0
-                                      type: integer
                                   required:
                                   - backendRef
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: Only one of percent or fraction may be
-                                      specified in HTTPRequestMirrorFilter
-                                    rule: '!(has(self.percent) && has(self.fraction))'
                                 requestRedirect:
                                   description: |-
                                     RequestRedirect defines a schema for a filter that responds to the
@@ -916,7 +906,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -991,7 +981,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -1193,8 +1183,11 @@ spec:
                                 rule: '!(!has(self.extensionRef) && self.type == ''ExtensionRef'')'
                             maxItems: 16
                             type: array
-                            x-kubernetes-list-type: atomic
                             x-kubernetes-validations:
+                            - message: May specify either httpRouteFilterRequestRedirect
+                                or httpRouteFilterRequestRewrite, but not both
+                              rule: '!(self.exists(f, f.type == ''RequestRedirect'')
+                                && self.exists(f, f.type == ''URLRewrite''))'
                             - message: May specify either httpRouteFilterRequestRedirect
                                 or httpRouteFilterRequestRewrite, but not both
                               rule: '!(self.exists(f, f.type == ''RequestRedirect'')
@@ -1300,7 +1293,6 @@ spec:
                             ? has(self.port) : true'
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-type: atomic
                     filters:
                       description: |-
                         Filters define the filters that are applied to requests that match
@@ -1310,7 +1302,7 @@ spec:
                         they are specified.
 
                         Implementations MAY choose to implement this ordering strictly, rejecting
-                        any combination or order of filters that cannot be supported. If implementations
+                        any combination or order of filters that can not be supported. If implementations
                         choose a strict interpretation of filter ordering, they MUST clearly document
                         that behavior.
 
@@ -1332,7 +1324,7 @@ spec:
 
                         All filters are expected to be compatible with each other except for the
                         URLRewrite and RequestRedirect filters, which may not be combined. If an
-                        implementation cannot support other combinations of filters, they must clearly
+                        implementation can not support other combinations of filters, they must clearly
                         document that limitation. In cases where incompatible or unsupported
                         filters are specified and cause the `Accepted` condition to be set to status
                         `False`, implementations may use the `IncompatibleFilters` reason to specify
@@ -1415,7 +1407,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -1489,7 +1481,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -1517,7 +1509,7 @@ spec:
                                 x-kubernetes-list-type: map
                             type: object
                           requestMirror:
-                            description: |-
+                            description: |+
                               RequestMirror defines a schema for a filter that mirrors requests.
                               Requests are sent to the specified destination, but responses from
                               that destination are ignored.
@@ -1527,6 +1519,7 @@ spec:
                               backends.
 
                               Support: Extended
+
                             properties:
                               backendRef:
                                 description: |-
@@ -1621,49 +1614,9 @@ spec:
                                 - message: Must have port for Service reference
                                   rule: '(size(self.group) == 0 && self.kind == ''Service'')
                                     ? has(self.port) : true'
-                              fraction:
-                                description: |-
-                                  Fraction represents the fraction of requests that should be
-                                  mirrored to BackendRef.
-
-                                  Only one of Fraction or Percent may be specified. If neither field
-                                  is specified, 100% of requests will be mirrored.
-                                properties:
-                                  denominator:
-                                    default: 100
-                                    format: int32
-                                    minimum: 1
-                                    type: integer
-                                  numerator:
-                                    format: int32
-                                    minimum: 0
-                                    type: integer
-                                required:
-                                - numerator
-                                type: object
-                                x-kubernetes-validations:
-                                - message: numerator must be less than or equal to
-                                    denominator
-                                  rule: self.numerator <= self.denominator
-                              percent:
-                                description: |-
-                                  Percent represents the percentage of requests that should be
-                                  mirrored to BackendRef. Its minimum value is 0 (indicating 0% of
-                                  requests) and its maximum value is 100 (indicating 100% of requests).
-
-                                  Only one of Fraction or Percent may be specified. If neither field
-                                  is specified, 100% of requests will be mirrored.
-                                format: int32
-                                maximum: 100
-                                minimum: 0
-                                type: integer
                             required:
                             - backendRef
                             type: object
-                            x-kubernetes-validations:
-                            - message: Only one of percent or fraction may be specified
-                                in HTTPRequestMirrorFilter
-                              rule: '!(has(self.percent) && has(self.fraction))'
                           requestRedirect:
                             description: |-
                               RequestRedirect defines a schema for a filter that responds to the
@@ -1849,7 +1802,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -1923,7 +1876,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -2122,7 +2075,6 @@ spec:
                           rule: '!(!has(self.extensionRef) && self.type == ''ExtensionRef'')'
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-type: atomic
                       x-kubernetes-validations:
                       - message: May specify either httpRouteFilterRequestRedirect
                           or httpRouteFilterRequestRewrite, but not both
@@ -2224,7 +2176,7 @@ spec:
                                 name:
                                   description: |-
                                     Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                    case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                    case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                     If multiple entries specify equivalent header names, only the first
                                     entry with an equivalent name MUST be considered for a match. Subsequent
@@ -2434,16 +2386,6 @@ spec:
                         type: object
                       maxItems: 64
                       type: array
-                      x-kubernetes-list-type: atomic
-                    name:
-                      description: |-
-                        Name is the name of the route rule. This name MUST be unique within a Route if it is set.
-
-                        Support: Extended
-                      maxLength: 253
-                      minLength: 1
-                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
-                      type: string
                     timeouts:
                       description: |-
                         Timeouts defines the timeouts that can be configured for an HTTP request.
@@ -2549,7 +2491,6 @@ spec:
                       != ''PathPrefix'') ? false : true) : true'
                 maxItems: 16
                 type: array
-                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: While 16 rules and 64 matches per rule are allowed, the
                     total number of matches across all rules in a route must be less
@@ -2608,7 +2549,7 @@ spec:
                         There are a number of cases where the "Accepted" condition may not be set
                         due to lack of controller visibility, that includes when:
 
-                        * The Route refers to a nonexistent parent.
+                        * The Route refers to a non-existent parent.
                         * The Route is of a type that the controller does not support.
                         * The Route is in a namespace the controller does not have access to.
                       items:
@@ -2742,6 +2683,8 @@ spec:
                             Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                             generic way to enable any other kind of cross-namespace reference.
 
+
+
                             Support: Core
                           maxLength: 63
                           minLength: 1
@@ -2759,6 +2702,8 @@ spec:
                             as opposed to a listener(s) whose port(s) may be changed. When both Port
                             and SectionName are specified, the name and port of the selected listener
                             must match both specified values.
+
+
 
                             Implementations MAY choose to support other parent resources.
                             Implementations supporting other types of parent resources MUST clearly
@@ -2811,13 +2756,11 @@ spec:
                       - name
                       type: object
                   required:
-                  - conditions
                   - controllerName
                   - parentRef
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-type: atomic
             required:
             - parents
             type: object
@@ -2941,9 +2884,8 @@ spec:
                   type: string
                 maxItems: 16
                 type: array
-                x-kubernetes-list-type: atomic
               parentRefs:
-                description: |-
+                description: |+
                   ParentRefs references the resources (usually Gateways) that a Route wants
                   to be attached to. Note that the referenced parent resource needs to
                   allow this for the attachment to be complete. For Gateways, that means
@@ -2994,6 +2936,12 @@ spec:
                   allowed by something in the namespace they are referring to. For example,
                   Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                   generic way to enable other kinds of cross-namespace reference.
+
+
+
+
+
+
                 items:
                   description: |-
                     ParentReference identifies an API object (usually a Gateway) that can be considered
@@ -3055,6 +3003,8 @@ spec:
                         Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                         generic way to enable any other kind of cross-namespace reference.
 
+
+
                         Support: Core
                       maxLength: 63
                       minLength: 1
@@ -3072,6 +3022,8 @@ spec:
                         as opposed to a listener(s) whose port(s) may be changed. When both Port
                         and SectionName are specified, the name and port of the selected listener
                         must match both specified values.
+
+
 
                         Implementations MAY choose to support other parent resources.
                         Implementations supporting other types of parent resources MUST clearly
@@ -3125,7 +3077,6 @@ spec:
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: sectionName must be specified when parentRefs includes
                     2 or more references to the same parent
@@ -3152,7 +3103,9 @@ spec:
                   - path:
                       type: PathPrefix
                       value: /
-                description: Rules are a list of HTTP matchers, filters and actions.
+                description: |+
+                  Rules are a list of HTTP matchers, filters and actions.
+
                 items:
                   description: |-
                     HTTPRouteRule defines semantics for matching an HTTP request based on
@@ -3204,6 +3157,24 @@ spec:
                           ReferenceGrant object is required in the referent namespace to allow that
                           namespace's owner to accept the reference. See the ReferenceGrant
                           documentation for details.
+
+                          <gateway:experimental:description>
+
+                          When the BackendRef points to a Kubernetes Service, implementations SHOULD
+                          honor the appProtocol field if it is set for the target Service Port.
+
+                          Implementations supporting appProtocol SHOULD recognize the Kubernetes
+                          Standard Application Protocols defined in KEP-3726.
+
+                          If a Service appProtocol isn't specified, an implementation MAY infer the
+                          backend protocol through its own means. Implementations MAY infer the
+                          protocol from the Route type referring to the backend Service.
+
+                          If a Route is not able to send traffic to the backend using the specified
+                          protocol then the backend is considered invalid. Implementations MUST set the
+                          "ResolvedRefs" condition to "False" with the "UnsupportedProtocol" reason.
+
+                          </gateway:experimental:description>
                         properties:
                           filters:
                             description: |-
@@ -3289,7 +3260,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -3364,7 +3335,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -3392,7 +3363,7 @@ spec:
                                       x-kubernetes-list-type: map
                                   type: object
                                 requestMirror:
-                                  description: |-
+                                  description: |+
                                     RequestMirror defines a schema for a filter that mirrors requests.
                                     Requests are sent to the specified destination, but responses from
                                     that destination are ignored.
@@ -3402,6 +3373,7 @@ spec:
                                     backends.
 
                                     Support: Extended
+
                                   properties:
                                     backendRef:
                                       description: |-
@@ -3496,49 +3468,9 @@ spec:
                                       - message: Must have port for Service reference
                                         rule: '(size(self.group) == 0 && self.kind
                                           == ''Service'') ? has(self.port) : true'
-                                    fraction:
-                                      description: |-
-                                        Fraction represents the fraction of requests that should be
-                                        mirrored to BackendRef.
-
-                                        Only one of Fraction or Percent may be specified. If neither field
-                                        is specified, 100% of requests will be mirrored.
-                                      properties:
-                                        denominator:
-                                          default: 100
-                                          format: int32
-                                          minimum: 1
-                                          type: integer
-                                        numerator:
-                                          format: int32
-                                          minimum: 0
-                                          type: integer
-                                      required:
-                                      - numerator
-                                      type: object
-                                      x-kubernetes-validations:
-                                      - message: numerator must be less than or equal
-                                          to denominator
-                                        rule: self.numerator <= self.denominator
-                                    percent:
-                                      description: |-
-                                        Percent represents the percentage of requests that should be
-                                        mirrored to BackendRef. Its minimum value is 0 (indicating 0% of
-                                        requests) and its maximum value is 100 (indicating 100% of requests).
-
-                                        Only one of Fraction or Percent may be specified. If neither field
-                                        is specified, 100% of requests will be mirrored.
-                                      format: int32
-                                      maximum: 100
-                                      minimum: 0
-                                      type: integer
                                   required:
                                   - backendRef
                                   type: object
-                                  x-kubernetes-validations:
-                                  - message: Only one of percent or fraction may be
-                                      specified in HTTPRequestMirrorFilter
-                                    rule: '!(has(self.percent) && has(self.fraction))'
                                 requestRedirect:
                                   description: |-
                                     RequestRedirect defines a schema for a filter that responds to the
@@ -3725,7 +3657,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -3800,7 +3732,7 @@ spec:
                                           name:
                                             description: |-
                                               Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                              case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                              case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                               If multiple entries specify equivalent header names, the first entry with
                                               an equivalent name MUST be considered for a match. Subsequent entries
@@ -4002,8 +3934,11 @@ spec:
                                 rule: '!(!has(self.extensionRef) && self.type == ''ExtensionRef'')'
                             maxItems: 16
                             type: array
-                            x-kubernetes-list-type: atomic
                             x-kubernetes-validations:
+                            - message: May specify either httpRouteFilterRequestRedirect
+                                or httpRouteFilterRequestRewrite, but not both
+                              rule: '!(self.exists(f, f.type == ''RequestRedirect'')
+                                && self.exists(f, f.type == ''URLRewrite''))'
                             - message: May specify either httpRouteFilterRequestRedirect
                                 or httpRouteFilterRequestRewrite, but not both
                               rule: '!(self.exists(f, f.type == ''RequestRedirect'')
@@ -4109,7 +4044,6 @@ spec:
                             ? has(self.port) : true'
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-type: atomic
                     filters:
                       description: |-
                         Filters define the filters that are applied to requests that match
@@ -4119,7 +4053,7 @@ spec:
                         they are specified.
 
                         Implementations MAY choose to implement this ordering strictly, rejecting
-                        any combination or order of filters that cannot be supported. If implementations
+                        any combination or order of filters that can not be supported. If implementations
                         choose a strict interpretation of filter ordering, they MUST clearly document
                         that behavior.
 
@@ -4141,7 +4075,7 @@ spec:
 
                         All filters are expected to be compatible with each other except for the
                         URLRewrite and RequestRedirect filters, which may not be combined. If an
-                        implementation cannot support other combinations of filters, they must clearly
+                        implementation can not support other combinations of filters, they must clearly
                         document that limitation. In cases where incompatible or unsupported
                         filters are specified and cause the `Accepted` condition to be set to status
                         `False`, implementations may use the `IncompatibleFilters` reason to specify
@@ -4224,7 +4158,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -4298,7 +4232,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -4326,7 +4260,7 @@ spec:
                                 x-kubernetes-list-type: map
                             type: object
                           requestMirror:
-                            description: |-
+                            description: |+
                               RequestMirror defines a schema for a filter that mirrors requests.
                               Requests are sent to the specified destination, but responses from
                               that destination are ignored.
@@ -4336,6 +4270,7 @@ spec:
                               backends.
 
                               Support: Extended
+
                             properties:
                               backendRef:
                                 description: |-
@@ -4430,49 +4365,9 @@ spec:
                                 - message: Must have port for Service reference
                                   rule: '(size(self.group) == 0 && self.kind == ''Service'')
                                     ? has(self.port) : true'
-                              fraction:
-                                description: |-
-                                  Fraction represents the fraction of requests that should be
-                                  mirrored to BackendRef.
-
-                                  Only one of Fraction or Percent may be specified. If neither field
-                                  is specified, 100% of requests will be mirrored.
-                                properties:
-                                  denominator:
-                                    default: 100
-                                    format: int32
-                                    minimum: 1
-                                    type: integer
-                                  numerator:
-                                    format: int32
-                                    minimum: 0
-                                    type: integer
-                                required:
-                                - numerator
-                                type: object
-                                x-kubernetes-validations:
-                                - message: numerator must be less than or equal to
-                                    denominator
-                                  rule: self.numerator <= self.denominator
-                              percent:
-                                description: |-
-                                  Percent represents the percentage of requests that should be
-                                  mirrored to BackendRef. Its minimum value is 0 (indicating 0% of
-                                  requests) and its maximum value is 100 (indicating 100% of requests).
-
-                                  Only one of Fraction or Percent may be specified. If neither field
-                                  is specified, 100% of requests will be mirrored.
-                                format: int32
-                                maximum: 100
-                                minimum: 0
-                                type: integer
                             required:
                             - backendRef
                             type: object
-                            x-kubernetes-validations:
-                            - message: Only one of percent or fraction may be specified
-                                in HTTPRequestMirrorFilter
-                              rule: '!(has(self.percent) && has(self.fraction))'
                           requestRedirect:
                             description: |-
                               RequestRedirect defines a schema for a filter that responds to the
@@ -4658,7 +4553,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -4732,7 +4627,7 @@ spec:
                                     name:
                                       description: |-
                                         Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                        case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                        case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                         If multiple entries specify equivalent header names, the first entry with
                                         an equivalent name MUST be considered for a match. Subsequent entries
@@ -4931,7 +4826,6 @@ spec:
                           rule: '!(!has(self.extensionRef) && self.type == ''ExtensionRef'')'
                       maxItems: 16
                       type: array
-                      x-kubernetes-list-type: atomic
                       x-kubernetes-validations:
                       - message: May specify either httpRouteFilterRequestRedirect
                           or httpRouteFilterRequestRewrite, but not both
@@ -5033,7 +4927,7 @@ spec:
                                 name:
                                   description: |-
                                     Name is the name of the HTTP Header to be matched. Name matching MUST be
-                                    case-insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
+                                    case insensitive. (See https://tools.ietf.org/html/rfc7230#section-3.2).
 
                                     If multiple entries specify equivalent header names, only the first
                                     entry with an equivalent name MUST be considered for a match. Subsequent
@@ -5243,16 +5137,6 @@ spec:
                         type: object
                       maxItems: 64
                       type: array
-                      x-kubernetes-list-type: atomic
-                    name:
-                      description: |-
-                        Name is the name of the route rule. This name MUST be unique within a Route if it is set.
-
-                        Support: Extended
-                      maxLength: 253
-                      minLength: 1
-                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
-                      type: string
                     timeouts:
                       description: |-
                         Timeouts defines the timeouts that can be configured for an HTTP request.
@@ -5358,7 +5242,6 @@ spec:
                       != ''PathPrefix'') ? false : true) : true'
                 maxItems: 16
                 type: array
-                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: While 16 rules and 64 matches per rule are allowed, the
                     total number of matches across all rules in a route must be less
@@ -5417,7 +5300,7 @@ spec:
                         There are a number of cases where the "Accepted" condition may not be set
                         due to lack of controller visibility, that includes when:
 
-                        * The Route refers to a nonexistent parent.
+                        * The Route refers to a non-existent parent.
                         * The Route is of a type that the controller does not support.
                         * The Route is in a namespace the controller does not have access to.
                       items:
@@ -5551,6 +5434,8 @@ spec:
                             Gateway has the AllowedRoutes field, and ReferenceGrant provides a
                             generic way to enable any other kind of cross-namespace reference.
 
+
+
                             Support: Core
                           maxLength: 63
                           minLength: 1
@@ -5568,6 +5453,8 @@ spec:
                             as opposed to a listener(s) whose port(s) may be changed. When both Port
                             and SectionName are specified, the name and port of the selected listener
                             must match both specified values.
+
+
 
                             Implementations MAY choose to support other parent resources.
                             Implementations supporting other types of parent resources MUST clearly
@@ -5620,13 +5507,11 @@ spec:
                       - name
                       type: object
                   required:
-                  - conditions
                   - controllerName
                   - parentRef
                   type: object
                 maxItems: 32
                 type: array
-                x-kubernetes-list-type: atomic
             required:
             - parents
             type: object

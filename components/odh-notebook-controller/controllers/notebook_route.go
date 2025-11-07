@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
@@ -45,23 +44,33 @@ const (
 // - NOTEBOOK_GATEWAY_NAME: Override the Gateway name (default: "data-science-gateway")
 // - NOTEBOOK_GATEWAY_NAMESPACE: Override the Gateway namespace (default: "openshift-ingress")
 
-// NewNotebookHTTPRoute defines the desired HTTPRoute object
-func NewNotebookHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gatewayv1.HTTPRoute {
+// NewNotebookHTTPRoute defines the desired HTTPRoute object in the central namespace.
+// The HTTPRoute is created in the controller's namespace and references
+// the backend Service in the user's namespace using cross-namespace references.
+func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gatewayv1.HTTPRoute {
+	// Create a unique name combining namespace and notebook name to avoid conflicts
+	// Format: nb-{user-namespace}-{notebook-name}
+	httpRouteName := "nb-" + notebook.Namespace + "-" + notebook.Name
+
 	routeMetadata := metav1.ObjectMeta{
-		Name:      notebook.Name,
-		Namespace: notebook.Namespace,
+		Name:      httpRouteName,
+		Namespace: centralNamespace, // Central protected namespace
 		Labels: map[string]string{
-			"notebook-name": notebook.Name,
+			"notebook-name":      notebook.Name,
+			"notebook-namespace": notebook.Namespace, // Critical for filtering and cleanup
 		},
 	}
 
-	// If the route name + namespace is greater than 63 characters, use generateName
-	if isGenerateName {
+	// If the HTTPRoute name (namespace-notebook) is greater than 63 characters, use generateName
+	if len(httpRouteName) > HTTPRouteSubDomainMaxLen {
+		// Use a prefix that includes namespace info
+		prefix := "nb-" + notebook.Namespace[:min(len(notebook.Namespace), 10)] + "-" + notebook.Name[:min(len(notebook.Name), 10)] + "-"
 		routeMetadata = metav1.ObjectMeta{
-			GenerateName: "nb-",
-			Namespace:    notebook.Namespace,
+			GenerateName: prefix,
+			Namespace:    centralNamespace,
 			Labels: map[string]string{
-				"notebook-name": notebook.Name,
+				"notebook-name":      notebook.Name,
+				"notebook-namespace": notebook.Namespace,
 			},
 		}
 	}
@@ -106,8 +115,9 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, isGenerateName bool) *gateway
 						{
 							BackendRef: gatewayv1.BackendRef{
 								BackendObjectReference: gatewayv1.BackendObjectReference{
-									Name: gatewayv1.ObjectName(notebook.Name),
-									Port: (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									Name:      gatewayv1.ObjectName(notebook.Name),
+									Namespace: (*gatewayv1.Namespace)(&notebook.Namespace), // Cross-namespace reference
+									Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
 								},
 							},
 						},
@@ -128,31 +138,28 @@ func CompareNotebookHTTPRoutes(r1 gatewayv1.HTTPRoute, r2 gatewayv1.HTTPRoute) b
 }
 
 // reconcileHTTPRoute will manage the creation, update and deletion of the HTTPRoute returned
-// by the newHTTPRoute function
+// by the newHTTPRoute function. HTTPRoutes are now created in the central namespace (controller's namespace)
+// instead of the user's namespace for security reasons.
 func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook,
-	ctx context.Context, newHTTPRoute func(*nbv1.Notebook, bool) *gatewayv1.HTTPRoute) error {
+	ctx context.Context, newHTTPRoute func(*nbv1.Notebook, string) *gatewayv1.HTTPRoute) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	var isGenerateName = false
-	// If the HTTPRoute name + namespace is greater than 63 characters, use generateName
-	if len(notebook.Name)+len(notebook.Namespace) > HTTPRouteSubDomainMaxLen {
-		log.Info("HTTPRoute name is too long, using generateName")
-		isGenerateName = true
-	}
-
-	// Generate the desired HTTPRoute
-	desiredHTTPRoute := newHTTPRoute(notebook, isGenerateName)
+	// Generate the desired HTTPRoute in the central namespace
+	desiredHTTPRoute := newHTTPRoute(notebook, r.Namespace)
 
 	// Create the HTTPRoute if it does not already exist
 	foundHTTPRoute := &gatewayv1.HTTPRoute{}
 	httpRouteList := &gatewayv1.HTTPRouteList{}
 	justCreated := false
 
-	// List the HTTPRoutes in the notebook namespace with the notebook name label
+	// List the HTTPRoutes in the CENTRAL namespace (not user namespace) with matching labels
 	opts := []client.ListOption{
-		client.InNamespace(notebook.Namespace),
-		client.MatchingLabels{"notebook-name": notebook.Name},
+		client.InNamespace(r.Namespace), // Central namespace = controller's namespace
+		client.MatchingLabels{
+			"notebook-name":      notebook.Name,
+			"notebook-namespace": notebook.Namespace,
+		},
 	}
 
 	err := r.List(ctx, httpRouteList, opts...)
@@ -162,30 +169,26 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 	}
 
 	// Get the HTTPRoute from the list
-	for _, nHTTPRoute := range httpRouteList.Items {
-		if metav1.IsControlledBy(&nHTTPRoute, notebook) {
-			foundHTTPRoute = &nHTTPRoute
-			break
-		}
-	}
-
-	// If the HTTPRoute is not found, create it
-	if foundHTTPRoute.Name == "" && foundHTTPRoute.Namespace == "" {
-		log.Info("Creating HTTPRoute")
-		// Add .metadata.ownerReferences to the HTTPRoute to be deleted by the
-		// Kubernetes garbage collector if the notebook is deleted
-		err = ctrl.SetControllerReference(notebook, desiredHTTPRoute, r.Scheme)
-		if err != nil {
-			log.Error(err, "Unable to add OwnerReference to the HTTPRoute")
-			return err
-		}
-		// Create the HTTPRoute in the cluster
+	// Note: We cannot use IsControlledBy since HTTPRoute is in different namespace
+	// We rely on label matching instead
+	if len(httpRouteList.Items) == 1 {
+		foundHTTPRoute = &httpRouteList.Items[0]
+	} else if len(httpRouteList.Items) > 1 {
+		log.Error(fmt.Errorf("multiple HTTPRoutes found for notebook"), "Multiple HTTPRoutes found for notebook")
+		return fmt.Errorf("multiple HTTPRoutes found for notebook")
+	} else {
+		// If the HTTPRoute is not found, create it
+		log.Info("Creating HTTPRoute " + desiredHTTPRoute.Name + " in central namespace " + r.Namespace)
+		// NOTE: We CANNOT use SetControllerReference because HTTPRoute is in a different namespace
+		// than the Notebook. Cross-namespace owner references are not supported in Kubernetes.
+		// We will use finalizers for cleanup instead.
 		err = r.Create(ctx, desiredHTTPRoute)
 		if err != nil && !apierrs.IsAlreadyExists(err) {
 			log.Error(err, "Unable to create the HTTPRoute")
 			return err
 		}
 		justCreated = true
+		log.Info("Successfully created HTTPRoute in central namespace")
 	}
 
 	// Reconcile the HTTPRoute spec if it has been manually modified
@@ -193,10 +196,10 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 		log.Info("Reconciling HTTPRoute")
 		// Retry the update operation when there are conflicts
 		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			// Get the last HTTPRoute revision
+			// Get the last HTTPRoute revision from the central namespace
 			if err := r.Get(ctx, types.NamespacedName{
 				Name:      foundHTTPRoute.Name,
-				Namespace: notebook.Namespace,
+				Namespace: r.Namespace, // Central namespace
 			}, foundHTTPRoute); err != nil {
 				return err
 			}
@@ -211,13 +214,6 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 		}
 	}
 
-	// For generateName case, we might need to update hostname after creation
-	if justCreated && isGenerateName {
-		log.Info("HTTPRoute created with generateName, hostname pattern applied")
-		// The hostname is already set in the HTTPRoute spec, no additional action needed
-		// Unlike OpenShift Routes, HTTPRoute hostnames are explicit, not auto-generated
-	}
-
 	return nil
 }
 
@@ -228,6 +224,46 @@ func (r *OpenshiftNotebookReconciler) ReconcileHTTPRoute(
 	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookHTTPRoute)
 }
 
+// DeleteHTTPRouteForNotebook deletes the HTTPRoute for a notebook from the central namespace.
+// This is called during notebook deletion as part of finalizer cleanup.
+func (r *OpenshiftNotebookReconciler) DeleteHTTPRouteForNotebook(notebook *nbv1.Notebook, ctx context.Context) error {
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	// List HTTPRoutes in the central namespace that belong to this notebook
+	httpRouteList := &gatewayv1.HTTPRouteList{}
+	opts := []client.ListOption{
+		client.InNamespace(r.Namespace), // Central namespace
+		client.MatchingLabels{
+			"notebook-name":      notebook.Name,
+			"notebook-namespace": notebook.Namespace,
+		},
+	}
+
+	err := r.List(ctx, httpRouteList, opts...)
+	if err != nil {
+		log.Error(err, "Unable to list HTTPRoutes for deletion")
+		return err
+	}
+
+	// Delete all matching HTTPRoutes
+	var deletionErrors []error
+	for _, httpRoute := range httpRouteList.Items {
+		log.Info("Deleting HTTPRoute from central namespace", "httpRoute", httpRoute.Name)
+		err = r.Delete(ctx, &httpRoute)
+		if err != nil && !apierrs.IsNotFound(err) {
+			log.Error(err, "Unable to delete HTTPRoute", "httpRoute", httpRoute.Name)
+			deletionErrors = append(deletionErrors, fmt.Errorf("failed to delete HTTPRoute %s: %w", httpRoute.Name, err))
+		}
+	}
+
+	if len(deletionErrors) > 0 {
+		return fmt.Errorf("failed to delete some HTTPRoutes: %v", deletionErrors)
+	}
+
+	log.Info("Successfully deleted HTTPRoute(s) for notebook")
+	return nil
+}
+
 // EnsureConflictingHTTPRouteAbsent deletes any existing conflicting HTTPRoute for the notebook
 // to prevent conflicts when switching between auth and non-auth modes.
 func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
@@ -235,11 +271,14 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// List all HTTPRoutes for this notebook
+	// List all HTTPRoutes for this notebook in the CENTRAL namespace
 	httpRouteList := &gatewayv1.HTTPRouteList{}
 	opts := []client.ListOption{
-		client.InNamespace(notebook.Namespace),
-		client.MatchingLabels{"notebook-name": notebook.Name},
+		client.InNamespace(r.Namespace), // Central namespace
+		client.MatchingLabels{
+			"notebook-name":      notebook.Name,
+			"notebook-namespace": notebook.Namespace,
+		},
 	}
 
 	err := r.List(ctx, httpRouteList, opts...)
@@ -248,37 +287,35 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 		return err
 	}
 
-	// Check each HTTPRoute owned by this notebook
+	// Check each HTTPRoute for this notebook (using label matching since no owner refs)
 	for _, httpRoute := range httpRouteList.Items {
-		if metav1.IsControlledBy(&httpRoute, notebook) {
-			// Determine if this HTTPRoute conflicts with the current mode
-			shouldDelete := false
+		// Determine if this HTTPRoute conflicts with the current mode
+		shouldDelete := false
 
-			if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
-				backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
-				backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
+		if len(httpRoute.Spec.Rules) > 0 && len(httpRoute.Spec.Rules[0].BackendRefs) > 0 {
+			backendName := string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)
+			backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
-				isKubeRbacProxyRoute := (backendName == notebook.Name+KubeRbacProxyServiceSuffix) || (backendPort != nil && *backendPort == 8443)
-				isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
+			isKubeRbacProxyRoute := (backendName == notebook.Name+KubeRbacProxyServiceSuffix) || (backendPort != nil && *backendPort == 8443)
+			isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
 
-				// Delete conflicting routes:
-				// - If switching TO auth mode, delete regular routes
-				// - If switching FROM auth mode, delete kube-rbac-proxy routes
-				if isAuthMode && isRegularRoute {
-					shouldDelete = true
-					log.Info("Deleting regular HTTPRoute to switch to auth mode", "httpRoute", httpRoute.Name)
-				} else if !isAuthMode && isKubeRbacProxyRoute {
-					shouldDelete = true
-					log.Info("Deleting kube-rbac-proxy HTTPRoute to switch to non-auth mode", "httpRoute", httpRoute.Name)
-				}
+			// Delete conflicting routes:
+			// - If switching TO auth mode, delete regular routes
+			// - If switching FROM auth mode, delete kube-rbac-proxy routes
+			if isAuthMode && isRegularRoute {
+				shouldDelete = true
+				log.Info("Deleting regular HTTPRoute to switch to auth mode", "httpRoute", httpRoute.Name)
+			} else if !isAuthMode && isKubeRbacProxyRoute {
+				shouldDelete = true
+				log.Info("Deleting kube-rbac-proxy HTTPRoute to switch to non-auth mode", "httpRoute", httpRoute.Name)
 			}
+		}
 
-			if shouldDelete {
-				err = r.Delete(ctx, &httpRoute)
-				if err != nil && !apierrs.IsNotFound(err) {
-					log.Error(err, "Unable to delete conflicting HTTPRoute", "httpRoute", httpRoute.Name)
-					return err
-				}
+		if shouldDelete {
+			err = r.Delete(ctx, &httpRoute)
+			if err != nil && !apierrs.IsNotFound(err) {
+				log.Error(err, "Unable to delete conflicting HTTPRoute", "httpRoute", httpRoute.Name)
+				return err
 			}
 		}
 	}

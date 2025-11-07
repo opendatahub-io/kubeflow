@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strconv"
@@ -36,7 +37,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +48,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 )
 
 const (
@@ -61,6 +63,13 @@ const (
 	DefaultAuthSidecarMemoryRequest    = "64Mi"
 	DefaultAuthSidecarCPULimit         = "100m"
 	DefaultAuthSidecarMemoryLimit      = "64Mi"
+)
+
+const (
+	// Finalizer names for cross-namespace resource cleanup
+	HTTPRouteFinalizerName      = "notebook.opendatahub.io/httproute-cleanup"
+	ReferenceGrantFinalizerName = "notebook.opendatahub.io/referencegrant-cleanup"
+	KubeRbacProxyFinalizerName  = "notebook.opendatahub.io/kube-rbac-proxy-cleanup"
 )
 
 const (
@@ -85,6 +94,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/status,verbs=get
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update;patch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
@@ -179,7 +189,6 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Handle deletion with finalizer
-	const finalizerName = "notebook.opendatahub.io/kube-rbac-proxy-cleanup"
 	if notebook.DeletionTimestamp != nil {
 
 		// In RHOAI 2.25, there were used OAuthClient CR for each workbench.
@@ -204,36 +213,155 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			log.Info("Successfully cleaned up OAuthClient and removed finalizer")
 		}
 
-		// Notebook is being deleted
+		// Track which finalizers need to be removed and collect any cleanup errors
+		finalizersToRemove := []string{}
+		cleanupErrors := []error{}
+
+		// Clean up HTTPRoute from central namespace
+		if controllerutil.ContainsFinalizer(notebook, HTTPRouteFinalizerName) {
+			log.Info("Cleaning up HTTPRoute from central namespace")
+			err := r.DeleteHTTPRouteForNotebook(notebook, ctx)
+			if err != nil {
+				log.Error(err, "Failed to delete HTTPRoute")
+				cleanupErrors = append(cleanupErrors, err)
+			} else {
+				finalizersToRemove = append(finalizersToRemove, HTTPRouteFinalizerName)
+				log.Info("Successfully cleaned up HTTPRoute")
+			}
+		}
+
+		// Clean up ReferenceGrant if this is the last notebook in the namespace
+		if controllerutil.ContainsFinalizer(notebook, ReferenceGrantFinalizerName) {
+			log.Info("Checking if ReferenceGrant cleanup is needed")
+			err := r.DeleteReferenceGrantIfLastNotebook(notebook, ctx)
+			if err != nil {
+				log.Error(err, "Failed to delete ReferenceGrant")
+				cleanupErrors = append(cleanupErrors, err)
+			} else {
+				finalizersToRemove = append(finalizersToRemove, ReferenceGrantFinalizerName)
+				log.Info("Successfully handled ReferenceGrant cleanup")
+			}
+		}
+
+		// Notebook is being deleted - clean up kube-rbac-proxy resources
+		kubeRbacProxyCleanupSuccess := true
 		if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
 			// Clean up ClusterRoleBinding before allowing deletion
 			err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
 			if err != nil {
 				log.Error(err, "Failed to cleanup kube-rbac-proxy ClusterRoleBinding during deletion")
-				return ctrl.Result{}, err
+				kubeRbacProxyCleanupSuccess = false
+				cleanupErrors = append(cleanupErrors, err)
 			}
 		}
 
-		// Remove our finalizer to allow deletion to proceed
-		if controllerutil.ContainsFinalizer(notebook, finalizerName) {
-			controllerutil.RemoveFinalizer(notebook, finalizerName)
-			err = r.Update(ctx, notebook)
+		// Remove kube-rbac-proxy finalizer only if cleanup succeeded (or wasn't needed)
+		if controllerutil.ContainsFinalizer(notebook, KubeRbacProxyFinalizerName) && kubeRbacProxyCleanupSuccess {
+			finalizersToRemove = append(finalizersToRemove, KubeRbacProxyFinalizerName)
+		}
+
+		// Remove finalizers for successfully cleaned up resources with retry logic
+		// This is done even if some cleanups failed to allow partial progress and avoid race conditions
+		if len(finalizersToRemove) > 0 {
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				// Get the latest version of the notebook to avoid conflicts
+				currentNotebook := &nbv1.Notebook{}
+				if err := r.Get(ctx, types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}, currentNotebook); err != nil {
+					return err
+				}
+
+				// Remove all finalizers that were successfully cleaned up
+				modified := false
+				for _, finalizer := range finalizersToRemove {
+					if controllerutil.ContainsFinalizer(currentNotebook, finalizer) {
+						controllerutil.RemoveFinalizer(currentNotebook, finalizer)
+						modified = true
+					}
+				}
+
+				// Only update if we actually removed finalizers
+				if modified {
+					return r.Update(ctx, currentNotebook)
+				}
+				return nil
+			})
+
 			if err != nil {
-				log.Error(err, "Failed to remove finalizer")
+				log.Error(err, "Failed to remove finalizers after retries", "finalizers", finalizersToRemove)
 				return ctrl.Result{}, err
 			}
+			log.Info("Successfully removed finalizers for completed cleanups", "finalizers", finalizersToRemove)
 		}
+
+		// If there were any cleanup errors, return and retry for the remaining resources
+		if len(cleanupErrors) > 0 {
+			// Combine all errors into a single error message for better visibility
+			var combinedErr error
+			if len(cleanupErrors) == 1 {
+				combinedErr = cleanupErrors[0]
+			} else {
+				// Multiple errors - combine them
+				errMsg := fmt.Sprintf("multiple cleanup failures (%d errors): ", len(cleanupErrors))
+				for i, err := range cleanupErrors {
+					if i > 0 {
+						errMsg += "; "
+					}
+					errMsg += err.Error()
+				}
+				combinedErr = errors.New(errMsg)
+			}
+			log.Info("Some cleanup operations failed, will retry on next reconciliation", "errors", len(cleanupErrors))
+			return ctrl.Result{}, combinedErr
+		}
+
 		return ctrl.Result{}, nil
 	}
 
+	// Add finalizers for HTTPRoute and ReferenceGrant cleanup
+	// Check which finalizers need to be added
+	finalizersToAdd := []string{}
+	if !controllerutil.ContainsFinalizer(notebook, HTTPRouteFinalizerName) {
+		finalizersToAdd = append(finalizersToAdd, HTTPRouteFinalizerName)
+	}
+	if !controllerutil.ContainsFinalizer(notebook, ReferenceGrantFinalizerName) {
+		finalizersToAdd = append(finalizersToAdd, ReferenceGrantFinalizerName)
+	}
+
 	// Add finalizer if kube-rbac-proxy is enabled and finalizer is not present
-	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) && !controllerutil.ContainsFinalizer(notebook, finalizerName) {
-		controllerutil.AddFinalizer(notebook, finalizerName)
-		err = r.Update(ctx, notebook)
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) && !controllerutil.ContainsFinalizer(notebook, KubeRbacProxyFinalizerName) {
+		finalizersToAdd = append(finalizersToAdd, KubeRbacProxyFinalizerName)
+	}
+
+	// Add all finalizers with retry logic to handle concurrent modifications
+	if len(finalizersToAdd) > 0 {
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			// Get the latest version of the notebook to avoid conflicts
+			currentNotebook := &nbv1.Notebook{}
+			if err := r.Get(ctx, types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}, currentNotebook); err != nil {
+				return err
+			}
+
+			// Add all missing finalizers
+			modified := false
+			for _, finalizer := range finalizersToAdd {
+				if !controllerutil.ContainsFinalizer(currentNotebook, finalizer) {
+					controllerutil.AddFinalizer(currentNotebook, finalizer)
+					modified = true
+				}
+			}
+
+			// Only update if we actually added finalizers
+			if modified {
+				return r.Update(ctx, currentNotebook)
+			}
+			return nil
+		})
+
 		if err != nil {
-			log.Error(err, "Failed to add finalizer")
+			log.Error(err, "Failed to add finalizers after retries", "finalizers", finalizersToAdd)
 			return ctrl.Result{}, err
 		}
+		log.Info("Successfully added finalizers", "finalizers", finalizersToAdd)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -286,6 +414,14 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			log.Error(err, "Unable to Reconcile Elyra runtime config secret")
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Reconcile ReferenceGrant to allow cross-namespace HTTPRoute backend references
+	// This must be done before creating HTTPRoutes
+	err = r.ReconcileReferenceGrant(notebook, ctx)
+	if err != nil {
+		log.Error(err, "Unable to reconcile ReferenceGrant")
+		return ctrl.Result{}, err
 	}
 
 	// Create the objects required by the kube-rbac-proxy sidecar if annotation is present
@@ -568,13 +704,82 @@ func (r *OpenshiftNotebookReconciler) UnsetNotebookCertConfig(notebook *nbv1.Not
 func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&nbv1.Notebook{}).
-		Owns(&gatewayv1.HTTPRoute{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&netv1.NetworkPolicy{}).
 		Owns(&rbacv1.RoleBinding{}).
+
+		// Watch for HTTPRoutes in the central namespace
+		// When an HTTPRoute is deleted or modified, trigger reconcile for the corresponding notebook
+		Watches(&gatewayv1.HTTPRoute{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				// Only watch HTTPRoutes in the central namespace (controller's namespace)
+				if o.GetNamespace() != r.Namespace {
+					return []reconcile.Request{}
+				}
+
+				// Get the notebook labels from the HTTPRoute
+				notebookName := o.GetLabels()["notebook-name"]
+				notebookNamespace := o.GetLabels()["notebook-namespace"]
+
+				if notebookName == "" || notebookNamespace == "" {
+					return []reconcile.Request{}
+				}
+
+				// Trigger reconcile for the notebook
+				return []reconcile.Request{
+					{
+						NamespacedName: types.NamespacedName{
+							Name:      notebookName,
+							Namespace: notebookNamespace,
+						},
+					},
+				}
+			}),
+		).
+
+		// Watch for ReferenceGrants in user namespaces
+		// When a ReferenceGrant is deleted or modified, trigger reconcile for one notebook in that namespace
+		// (one is sufficient since ReferenceGrant is shared by all notebooks in the namespace)
+		Watches(&gatewayv1beta1.ReferenceGrant{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
+
+				// Only watch ReferenceGrants with the expected name
+				if o.GetName() != ReferenceGrantName {
+					return []reconcile.Request{}
+				}
+
+				// Skip ReferenceGrants in the central namespace (they shouldn't exist there)
+				if o.GetNamespace() == r.Namespace {
+					return []reconcile.Request{}
+				}
+
+				// List all notebooks in the namespace where the ReferenceGrant exists
+				var nbList nbv1.NotebookList
+				if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+					log.Error(err, "Unable to list Notebooks when attempting to handle ReferenceGrant event")
+					return []reconcile.Request{}
+				}
+
+				// Trigger reconcile for only the first notebook (sufficient to fix shared ReferenceGrant)
+				if len(nbList.Items) > 0 {
+					log.Info("Triggering reconcile for one notebook due to ReferenceGrant change", "notebook", nbList.Items[0].Name)
+					return []reconcile.Request{
+						{
+							NamespacedName: types.NamespacedName{
+								Name:      nbList.Items[0].Name,
+								Namespace: nbList.Items[0].Namespace,
+							},
+						},
+					}
+				}
+
+				return []reconcile.Request{}
+			}),
+		).
 
 		// Watch for all the required ConfigMaps
 		// odh-trusted-ca-bundle, kube-root-ca.crt, workbench-trusted-ca-bundle
