@@ -78,19 +78,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # latest govulncheck works with the latest stable go version
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          check-latest: true
+          go-version-file: ${{ matrix.component }}/go.mod
           cache-dependency-path: ${{ matrix.component }}/go.sum
 
       # https://go.googlesource.com/vuln
       - name: govulncheck
         if: "${{ !cancelled() }}"
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
           go mod tidy
-          $(go env GOPATH)/bin/govulncheck -show=verbose ./...
+          make govulncheck
         working-directory: ${{ matrix.component }}
 
   check-generated-code:
@@ -112,7 +111,7 @@ jobs:
               git diff
               exit 1
           fi
-          
+
   code-static-analysis:
     runs-on: ubuntu-latest
     steps:

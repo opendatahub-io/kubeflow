@@ -66,6 +66,18 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+# Extract go version from go.mod (e.g., "1.23.6" from "go 1.23.6")
+GO_VERSION = $(shell grep '^go ' go.mod | awk '{print $$2}')
+.PHONY: govulncheck
+govulncheck: ## Run govulncheck against code. Uses the Go version specified in go.mod.
+	@if [ -z "$(GO_VERSION)" ]; then \
+		echo "Warning: No go version directive found in go.mod, using default Go version"; \
+		go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...; \
+	else \
+		echo "Using Go version: $(GO_VERSION)"; \
+		GOVERSION=go$(GO_VERSION) go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...; \
+	fi
+
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -v ./... -coverprofile cover.out
