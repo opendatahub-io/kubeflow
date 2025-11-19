@@ -378,7 +378,7 @@ func Test_BeMatchingK8sResource_MismatchedStructs(t *testing.T) {
 		},
 	}
 	matcher := BeMatchingK8sResource(someOtherRoute, func(r1 routev1.Route, r2 routev1.Route) bool {
-		return r1.ObjectMeta.Name == r2.ObjectMeta.Name
+		return r1.Name == r2.Name
 	})
 	res, err := matcher.Match(someRoute)
 	assert.NoError(t, err)
