@@ -109,14 +109,14 @@ func (m *beMatchingK8sResource[T, PT]) Match(actual interface{}) (success bool, 
 func (m *beMatchingK8sResource[T, PT]) FailureMessage(actual interface{}) (message string) {
 	fullDiff := cmp.Diff(actual, m.expected)
 	minimalDiff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nto compare identical to\n\t%#v\nbut it differs in\n%s\nMinimized diff is\n%s",
+	return fmt.Sprintf("Expected\n\t%#v\nto match\n\t%#v\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
 		actual, m.expected, fullDiff, minimalDiff)
 }
 
 func (m *beMatchingK8sResource[T, PT]) NegatedFailureMessage(actual interface{}) (message string) {
 	fullDiff := cmp.Diff(actual, m.expected)
 	minimalDiff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nto not compare identical to\n\t%#v\nit differs in\n%s\nMinimized diff is\n%s",
+	return fmt.Sprintf("Expected\n\t%#v\nNOT TO MATCH\n\t%#v\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
 		actual, m.expected, fullDiff, minimalDiff)
 }
 
