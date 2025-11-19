@@ -6,6 +6,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -223,6 +224,11 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 		current := reflect.ValueOf(clone).Elem()
 		pointer := reflect.ValueOf(accumulator).Elem()
 
+		// Track map containers and keys separately because map values are not addressable
+		var currentMapContainer, pointerMapContainer reflect.Value
+		var currentMapKey, pointerMapKey reflect.Value
+		isMapValue := false
+
 		// the root of the path is operation-less, skip path[0]
 		var i int
 		for i = 1; i < len(diffPath); i++ {
@@ -238,15 +244,26 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 			case cmp.StructField:
 				current = current.Field(step.Index())
 				pointer = pointer.Field(step.Index())
+				isMapValue = false
 			case cmp.SliceIndex:
 				current = current.Index(step.Key())
 				pointer = pointer.Index(step.Key())
+				isMapValue = false
 			case cmp.MapIndex:
+				// Store the map container and key before accessing the value
+				// Map values are not addressable, so we need to use SetMapIndex later
+				currentMapContainer = current
+				pointerMapContainer = pointer
+				currentMapKey = step.Key()
+				pointerMapKey = step.Key()
 				current = current.MapIndex(step.Key())
 				pointer = pointer.MapIndex(step.Key())
+				isMapValue = true
 			case cmp.Indirect:
 				current = reflect.Indirect(current)
 				pointer = reflect.Indirect(pointer)
+				// After indirect, we're no longer dealing with a map value directly
+				isMapValue = false
 			case cmp.TypeAssertion:
 				// this is imo a noop, we don't care about checking type assertions
 			case cmp.Transform:
@@ -263,12 +280,25 @@ func (m *beMatchingK8sResource[T, PT]) computeMinimizedDiff(actual T) (message s
 			log.Printf("%#v:\n\t-: %+v\n\t+: %+v\n", diffPath, vx, vy)
 		}
 
-		current.Set(vx)
+		// Set the value using the appropriate method based on whether it's a map value
+		if isMapValue && currentMapContainer.IsValid() {
+			// For map values, use SetMapIndex on the map container
+			currentMapContainer.SetMapIndex(currentMapKey, vx)
+		} else {
+			// For struct fields and slice elements, use Set directly
+			current.Set(vx)
+		}
 
 		// Check whether our comparator function's result is influenced by this field's value
 		if !m.comparator(actual, *clone) {
 			// If yes, store that in the accumulator object from which we later compute a final diff
-			pointer.Set(vx)
+			if isMapValue && pointerMapContainer.IsValid() {
+				// For map values, use SetMapIndex on the map container
+				pointerMapContainer.SetMapIndex(pointerMapKey, vx)
+			} else {
+				// For struct fields and slice elements, use Set directly
+				pointer.Set(vx)
+			}
 		}
 	}}
 	cmp.Equal(m.expected, actual, cmp.Reporter(&reporter))
@@ -394,4 +424,68 @@ func Test_BeMatchingK8sResource_CrashingMatcher(t *testing.T) {
 
 	assert.Regexp(t, regexp.MustCompile(`-[\pZ\pC]+Path:\s+"someRoutePath",`), msg)
 	assert.Regexp(t, regexp.MustCompile(`\+[\pZ\pC]+Path:\s+"someOtherRoutePath",`), msg)
+}
+
+// Test that map values can be handled correctly without crashing
+// This test specifically targets the "reflect: reflect.Value.Set using unaddressable value" error
+func Test_BeMatchingK8sResource_MapValues(t *testing.T) {
+	someRoute := routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-route",
+			Labels: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+		},
+		Spec: routev1.RouteSpec{
+			Host: "test-host",
+		},
+	}
+	someOtherRoute := routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-route",
+			Labels: map[string]string{
+				"key1": "different-value1", // Different value
+				"key2": "value2",           // Same value
+				"key3": "value3",           // Extra key
+			},
+		},
+		Spec: routev1.RouteSpec{
+			Host: "test-host",
+		},
+	}
+	// Comparator that only cares about the Host field, not Labels
+	matcher := BeMatchingK8sResource(someOtherRoute, func(r1 routev1.Route, r2 routev1.Route) bool {
+		return r1.Spec.Host == r2.Spec.Host
+	})
+	res, err := matcher.Match(someRoute)
+	assert.NoError(t, err)
+	assert.True(t, res) // Should match because Host is the same
+
+	// Now test with different Host to trigger diff computation
+	someOtherRoute.Spec.Host = "different-host"
+	matcher = BeMatchingK8sResource(someOtherRoute, func(r1 routev1.Route, r2 routev1.Route) bool {
+		return r1.Spec.Host == r2.Spec.Host
+	})
+	res, err = matcher.Match(someRoute)
+	assert.NoError(t, err)
+	assert.False(t, res)
+
+	// This should not crash when computing the diff, even though Labels differ
+	msg := matcher.FailureMessage(someRoute)
+	assert.NotContains(t, msg, MatcherPanickedMessage)
+	assert.Contains(t, msg, "Minimized diff (-actual +expected):")
+
+	// Extract just the minimized diff section (everything after "Minimized diff (-actual +expected):")
+	minimizedDiffStart := "Minimized diff (-actual +expected):"
+	if strings.Contains(msg, minimizedDiffStart) {
+		minimizedDiff := msg[strings.Index(msg, minimizedDiffStart)+len(minimizedDiffStart):]
+		// The minimized diff should not include Label differences since comparator doesn't care about them
+		// Verify that the minimized diff doesn't contain Label-related differences
+		assert.NotContains(t, minimizedDiff, "\"key1\": \"different-value1\"")
+		assert.NotContains(t, minimizedDiff, "\"key3\": \"value3\"")
+		// But it should contain Host differences since that's what the comparator cares about
+		assert.Contains(t, minimizedDiff, "test-host")
+		assert.Contains(t, minimizedDiff, "different-host")
+	}
 }
