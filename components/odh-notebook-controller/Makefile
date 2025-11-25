@@ -91,6 +91,10 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: vulncheck
+vulncheck: ## Run govulncheck against code. `go run ...` uses the Go toolchain version specified in go.mod.
+	go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...
+
 .PHONY: test test-with-rbac-false test-with-rbac-true
 test: test-with-rbac-false test-with-rbac-true
 test-with-rbac-false: manifests generate fmt vet envtest ## Run tests.
