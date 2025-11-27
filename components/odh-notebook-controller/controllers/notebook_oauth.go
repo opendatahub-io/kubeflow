@@ -451,18 +451,36 @@ func (r *OpenshiftNotebookReconciler) createOAuthClient(notebook *nbv1.Notebook,
 
 	// Get the route that will be used in the OAuthClient
 	oauthClientRoute := &routev1.Route{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      notebook.Name,
-		Namespace: notebook.Namespace,
-	}, oauthClientRoute)
+	routeList := &routev1.RouteList{}
+
+	// List the routes in the notebook namespace with the notebook name label
+	opts := []client.ListOption{
+		client.InNamespace(notebook.Namespace),
+		client.MatchingLabels{"notebook-name": notebook.Name},
+	}
+
+	err := r.List(ctx, routeList, opts...)
 	if err != nil {
-		log.Error(err, "Unable to retrieve route", "route", notebook.Name)
+		log.Error(err, "Unable to list routes for OAuth client", "notebook", notebook.Name)
 		return err
+	}
+
+	// Get the route from the list
+	for _, nRoute := range routeList.Items {
+		if metav1.IsControlledBy(&nRoute, notebook) {
+			oauthClientRoute = &nRoute
+			break
+		}
+	}
+
+	if oauthClientRoute.Name == "" {
+		log.Error(err, "Unable to find route for OAuth client", "notebook", notebook.Name)
+		return fmt.Errorf("route not found for notebook %s", notebook.Name)
 	}
 
 	// Check if the route host has been assigned by OpenShift ingress controller
 	if oauthClientRoute.Spec.Host == "" {
-		log.Info("Route host not yet assigned by ingress controller, retrying later", "route", notebook.Name)
+		log.Info("Route host not yet assigned by ingress controller, retrying later", "notebook", notebook.Name)
 		return nil
 	}
 

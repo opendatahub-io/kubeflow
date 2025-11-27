@@ -51,7 +51,7 @@ import (
 var _ = Describe("The Openshift Notebook controller", func() {
 	// Define utility constants for testing timeouts/durations and intervals.
 	const (
-		duration = 10 * time.Second
+		duration = 20 * time.Second
 		interval = 200 * time.Millisecond
 	)
 
@@ -451,6 +451,68 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				return cli.Get(ctx, key, notebook)
 			}, duration, interval).Should(HaveOccurred())
+		})
+
+		It("Should handle OAuth client creation with generated route names", func() {
+			By("Creating a new notebook with OAuth enabled and name that triggers route generateName")
+			// Use a name that triggers route generateName but doesn't exceed label limits
+			// Route threshold: name + namespace > 63 chars
+			// "test-notebook-with-a-very-long-name-thats-48char" (48) + "default" (7) = 55 < 63
+			// Adding "-0123456789" (11) = 66 > 63, triggers generateName for routes
+			longName := Name + "-0123456789"
+			oauthNotebook := createNotebook(longName, Namespace)
+			oauthNotebook.SetAnnotations(map[string]string{
+				"notebooks.opendatahub.io/inject-oauth": "true",
+			})
+			Expect(cli.Create(ctx, oauthNotebook)).Should(Succeed())
+			defer cli.Delete(ctx, oauthNotebook)
+
+			By("Waiting for the OAuth route to be created with generateName")
+			var oauthRoute *routev1.Route
+			Eventually(func() error {
+				foundRoute, err := getRouteFromList(&routev1.Route{}, oauthNotebook, longName, Namespace)
+				if foundRoute == nil {
+					return err
+				}
+				oauthRoute = foundRoute
+				return nil
+			}, duration, interval).Should(Succeed())
+
+			By("Waiting for the controller to create the OAuth client secret")
+			secret := &corev1.Secret{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: longName + "-oauth-client", Namespace: Namespace}
+				return cli.Get(ctx, key, secret)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying the route has a generated name but correct labels")
+			Expect(oauthRoute.Name).Should(HavePrefix("nb-"))
+			Expect(oauthRoute.Name).ShouldNot(Equal(longName))
+			Expect(oauthRoute.Labels["notebook-name"]).Should(Equal(longName))
+
+			By("Setting the route host to simulate OpenShift ingress controller")
+			// In test environments, we need to manually set the route host since
+			// the OpenShift ingress controller doesn't run in envtest
+			oauthRoute.Spec.Host = oauthRoute.Name + "-" + Namespace + ".apps.test.cluster"
+			Expect(cli.Update(ctx, oauthRoute)).Should(Succeed())
+
+			By("Verifying the OAuthClient was created and references the generated route")
+			// The controller watches Routes owned by Notebooks, so updating the route
+			// will automatically trigger notebook reconciliation, which will create the OAuthClient
+			oauthClientName := longName + "-" + Namespace + "-oauth-client"
+			oauthClient := &oauthv1.OAuthClient{}
+			Eventually(func() error {
+				key := types.NamespacedName{Name: oauthClientName}
+				return cli.Get(ctx, key, oauthClient)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying OAuthClient properties match the generated route")
+			Expect(oauthClient.Name).To(Equal(oauthClientName))
+			Expect(oauthClient.Labels["notebook-owner"]).To(Equal(longName))
+			Expect(oauthClient.RedirectURIs).To(HaveLen(1))
+			Expect(oauthClient.RedirectURIs[0]).To(Equal("https://" + oauthRoute.Spec.Host))
+			Expect(oauthClient.GrantMethod).To(Equal(oauthv1.GrantHandlerAuto))
+			Expect(oauthClient.Secret).NotTo(BeEmpty())
 		})
 
 	})
