@@ -400,9 +400,8 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
-		// // Mount Secret ds-pipeline-config
+		// Mount Secret ds-pipeline-config
 		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
-			// Mount Secret ds-pipeline-config
 			err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
 			if err != nil {
 				log.Error(err, "Unable to mount Elyra runtime config volume")
@@ -410,6 +409,13 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			}
 		}
 
+		// Mount Feast config if the label is enabled
+		if isFeastEnabled(notebook) {
+			err = NewFeastConfig(ctx, w.Client, notebook, log)
+			if err != nil {
+				log.Info("Unable to mount Feast config volume", "error", err)
+			}
+		}
 	}
 
 	// Inject the kube-rbac-proxy if the annotation is present
