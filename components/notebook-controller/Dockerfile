@@ -7,7 +7,7 @@
 
 # Build arguments
 ARG SOURCE_CODE=.
-ARG GOLANG_VERSION=1.24
+ARG GOLANG_VERSION=1.25
 
 # Use ubi9/go-toolset as base image
 # https://catalog.redhat.com/software/containers/ubi9/go-toolset/61e5c00b4ec9945c18787690
