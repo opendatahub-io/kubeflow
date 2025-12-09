@@ -17,7 +17,6 @@ package controllers
 
 import (
 	"math/rand"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -26,14 +25,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 func randStringRunes(n int) string {
 	b := make([]rune, n)
@@ -383,7 +377,7 @@ var _ = Describe("Feast Config Integration Tests", func() {
 
 			// Replicate webhook flow: Check label first
 			if isFeastEnabled(notebook) {
-				err := NewFeastConfig(ctx, cli, notebook, ctrl.Log.WithName("test"))
+				err := NewFeastConfig(ctx, cli, notebook)
 				Expect(err).ToNot(HaveOccurred())
 			} else {
 				Fail("Feast should be enabled but isFeastEnabled returned false")
@@ -447,10 +441,10 @@ var _ = Describe("Feast Config Integration Tests", func() {
 
 			// Replicate webhook flow: Check label first
 			if isFeastEnabled(notebook) {
-				err := NewFeastConfig(ctx, cli, notebook, ctrl.Log.WithName("test"))
-				// Error should occur but is logged as info in webhook (non-blocking)
+				err := NewFeastConfig(ctx, cli, notebook)
+				// Error should occur but is logged as info/warn in webhook (non-blocking)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("Feast ConfigMap"))
+				Expect(err.Error()).To(ContainSubstring("ConfigMap"))
 				Expect(err.Error()).To(ContainSubstring("not found"))
 			} else {
 				Fail("Feast should be enabled but isFeastEnabled returned false")

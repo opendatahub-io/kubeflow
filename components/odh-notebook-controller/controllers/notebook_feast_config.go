@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,7 +30,7 @@ const (
 	feastConfigMapSuffix  = "-feast-config"
 	feastConfigVolumeName = "odh-feast-config"
 	feastConfigMountPath  = "/opt/app-root/src/feast-config"
-	feastLabelKey         = "opendatahub.io/feast-config"
+	feastLabelKey         = "opendatahub.io/feast-integration"
 )
 
 // isFeastEnabled checks if Feast config mounting is enabled via label.
@@ -113,14 +112,14 @@ func mountFeastConfig(notebook *nbv1.Notebook, configMapName string) error {
 }
 
 // NewFeastConfig creates a new Feast config.
-func NewFeastConfig(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
+func NewFeastConfig(ctx context.Context, cli client.Client, notebook *nbv1.Notebook) error {
 
 	feastConfigMapName := notebook.Name + feastConfigMapSuffix
 
 	feastConfigMapObj := &corev1.ConfigMap{}
 	err := cli.Get(ctx, types.NamespacedName{Name: feastConfigMapName, Namespace: notebook.Namespace}, feastConfigMapObj)
 	if err != nil {
-		return fmt.Errorf("Feast ConfigMap %s not found in namespace %s, skipping mount: %v", feastConfigMapName, notebook.Namespace, err)
+		return fmt.Errorf("feast ConfigMap %s not found in namespace %s, skipping mount: %v", feastConfigMapName, notebook.Namespace, err)
 	}
 
 	// mount the Feast config volume

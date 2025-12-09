@@ -411,7 +411,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 		// Mount Feast config if the label is enabled
 		if isFeastEnabled(notebook) {
-			err = NewFeastConfig(ctx, w.Client, notebook, log)
+			err = NewFeastConfig(ctx, w.Client, notebook)
 			if err != nil {
 				log.Info("Unable to mount Feast config volume", "error", err)
 			}
