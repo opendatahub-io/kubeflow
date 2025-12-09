@@ -527,6 +527,223 @@ var _ = Describe("Runtime images ConfigMap should be mounted", func() {
 			})
 		}
 	})
+
+	// Test for ImageStream watch - when ImageStream changes after notebook creation,
+	// the ConfigMap should be updated automatically by the controller
+	When("ImageStream changes after notebook is created", func() {
+		const (
+			watchTestNotebookName  = "test-notebook-imagestream-watch"
+			watchTestNamespace     = "default"
+			watchTestImageStreamNS = "redhat-ods-applications" // controller namespace
+		)
+
+		BeforeEach(func() {
+			err := cli.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: odhNotebookControllerTestNamespace}}, &client.CreateOptions{})
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				Expect(err).ToNot(HaveOccurred())
+			}
+		})
+
+		It("Should update ConfigMap when a new runtime image ImageStream is added", func() {
+			notebook := createNotebook(watchTestNotebookName, watchTestNamespace)
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      RuntimeImagesCMName,
+					Namespace: watchTestNamespace,
+				},
+			}
+			imageStream := &imagev1.ImageStream{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ImageStream",
+					APIVersion: "image.openshift.io/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "watch-test-runtime-image",
+					Namespace: watchTestImageStreamNS,
+					Labels: map[string]string{
+						"opendatahub.io/runtime-image": "true",
+					},
+				},
+				Spec: imagev1.ImageStreamSpec{
+					LookupPolicy: imagev1.ImageLookupPolicy{
+						Local: true,
+					},
+					Tags: []imagev1.TagReference{
+						{
+							Name: "v1",
+							Annotations: map[string]string{
+								"opendatahub.io/runtime-image-metadata": `[{"display_name": "Watch Test Runtime","metadata": {"tags": ["v1"],"display_name": "Watch Test Runtime","pull_policy": "IfNotPresent"},"schema_name": "runtime-image"}]`,
+							},
+							From: &corev1.ObjectReference{
+								Kind: "DockerImage",
+								Name: "quay.io/opendatahub/watch-test:v1",
+							},
+						},
+					},
+				},
+			}
+
+			// Cleanup first
+			_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
+			_ = cli.Delete(ctx, imageStream, &client.DeleteOptions{})
+			_ = cli.Delete(ctx, configMap, &client.DeleteOptions{})
+
+			// Wait until notebook is deleted
+			By("Waiting for test resources to be cleaned up")
+			Eventually(func(g Gomega) {
+				err := cli.Get(ctx, client.ObjectKey{Name: watchTestNotebookName, Namespace: watchTestNamespace}, &nbv1.Notebook{})
+				g.Expect(apierrs.IsNotFound(err)).To(BeTrue())
+			}).WithOffset(1).Should(Succeed())
+
+			// Step 1: Create notebook WITHOUT the ImageStream existing
+			// At this point, no runtime images ConfigMap should be created (no ImageStreams with label)
+			By("Creating the Notebook without any runtime image ImageStreams")
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+			// Wait for notebook to be reconciled
+			By("Waiting for notebook to be reconciled")
+			Eventually(func(g Gomega) {
+				nb := &nbv1.Notebook{}
+				err := cli.Get(ctx, client.ObjectKey{Name: watchTestNotebookName, Namespace: watchTestNamespace}, nb)
+				g.Expect(err).ToNot(HaveOccurred())
+			}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
+
+			// Verify no ConfigMap exists yet (no runtime images)
+			By("Verifying ConfigMap does not exist yet")
+			err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: watchTestNamespace}, configMap)
+			Expect(apierrs.IsNotFound(err)).To(BeTrue(), "ConfigMap should not exist when no runtime image ImageStreams exist")
+
+			// Step 2: Now create the ImageStream with runtime-image label
+			// The watch should trigger reconciliation and create the ConfigMap
+			By("Creating the runtime image ImageStream")
+			Expect(cli.Create(ctx, imageStream)).To(Succeed())
+
+			// Step 3: Verify the ConfigMap is created by the controller (via watch trigger)
+			By("Waiting for ConfigMap to be created after ImageStream is added")
+			Eventually(func(g Gomega) {
+				err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: watchTestNamespace}, configMap)
+				g.Expect(err).ToNot(HaveOccurred())
+				// Verify the ConfigMap has the expected data
+				g.Expect(configMap.Data).To(HaveKey("watch-test-runtime.json"))
+			}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
+
+			By("Verifying the ConfigMap content")
+			Expect(configMap.Data["watch-test-runtime.json"]).To(ContainSubstring("Watch Test Runtime"))
+			Expect(configMap.Data["watch-test-runtime.json"]).To(ContainSubstring("quay.io/opendatahub/watch-test:v1"))
+
+			// Cleanup
+			By("Cleaning up test resources")
+			Expect(cli.Delete(ctx, notebook, &client.DeleteOptions{})).To(Succeed())
+			Expect(cli.Delete(ctx, imageStream, &client.DeleteOptions{})).To(Succeed())
+			Expect(cli.Delete(ctx, configMap, &client.DeleteOptions{})).To(Succeed())
+		})
+
+		It("Should update ConfigMap when an existing runtime image ImageStream is modified", func() {
+			notebook := createNotebook(watchTestNotebookName+"-update", watchTestNamespace)
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      RuntimeImagesCMName,
+					Namespace: watchTestNamespace,
+				},
+			}
+			imageStream := &imagev1.ImageStream{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ImageStream",
+					APIVersion: "image.openshift.io/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "watch-test-runtime-update",
+					Namespace: watchTestImageStreamNS,
+					Labels: map[string]string{
+						"opendatahub.io/runtime-image": "true",
+					},
+				},
+				Spec: imagev1.ImageStreamSpec{
+					LookupPolicy: imagev1.ImageLookupPolicy{
+						Local: true,
+					},
+					Tags: []imagev1.TagReference{
+						{
+							Name: "v1",
+							Annotations: map[string]string{
+								"opendatahub.io/runtime-image-metadata": `[{"display_name": "Original Name","metadata": {"tags": ["v1"],"display_name": "Original Name","pull_policy": "IfNotPresent"},"schema_name": "runtime-image"}]`,
+							},
+							From: &corev1.ObjectReference{
+								Kind: "DockerImage",
+								Name: "quay.io/opendatahub/original:v1",
+							},
+						},
+					},
+				},
+			}
+
+			// Cleanup first
+			_ = cli.Delete(ctx, notebook, &client.DeleteOptions{})
+			_ = cli.Delete(ctx, imageStream, &client.DeleteOptions{})
+			_ = cli.Delete(ctx, configMap, &client.DeleteOptions{})
+
+			// Wait for cleanup
+			By("Waiting for test resources to be cleaned up")
+			Eventually(func(g Gomega) {
+				err := cli.Get(ctx, client.ObjectKey{Name: watchTestNotebookName + "-update", Namespace: watchTestNamespace}, &nbv1.Notebook{})
+				g.Expect(apierrs.IsNotFound(err)).To(BeTrue())
+			}).WithOffset(1).Should(Succeed())
+
+			// Step 1: Create ImageStream first, then notebook
+			By("Creating the initial ImageStream")
+			Expect(cli.Create(ctx, imageStream)).To(Succeed())
+
+			By("Creating the Notebook")
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+			// Wait for ConfigMap to be created with original data
+			By("Waiting for ConfigMap to be created with original data")
+			Eventually(func(g Gomega) {
+				err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: watchTestNamespace}, configMap)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(configMap.Data).To(HaveKey("original-name.json"))
+			}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
+
+			// Step 2: Update the ImageStream with a new tag
+			By("Updating the ImageStream with a new tag")
+			// Fetch the latest version first
+			updatedImageStream := &imagev1.ImageStream{}
+			Expect(cli.Get(ctx, client.ObjectKey{Name: imageStream.Name, Namespace: imageStream.Namespace}, updatedImageStream)).To(Succeed())
+
+			// Add a new tag
+			updatedImageStream.Spec.Tags = append(updatedImageStream.Spec.Tags, imagev1.TagReference{
+				Name: "v2",
+				Annotations: map[string]string{
+					"opendatahub.io/runtime-image-metadata": `[{"display_name": "Updated Name v2","metadata": {"tags": ["v2"],"display_name": "Updated Name v2","pull_policy": "IfNotPresent"},"schema_name": "runtime-image"}]`,
+				},
+				From: &corev1.ObjectReference{
+					Kind: "DockerImage",
+					Name: "quay.io/opendatahub/updated:v2",
+				},
+			})
+			Expect(cli.Update(ctx, updatedImageStream)).To(Succeed())
+
+			// Step 3: Verify the ConfigMap is updated with the new tag data
+			By("Waiting for ConfigMap to be updated with new tag")
+			Eventually(func(g Gomega) {
+				err := cli.Get(ctx, client.ObjectKey{Name: RuntimeImagesCMName, Namespace: watchTestNamespace}, configMap)
+				g.Expect(err).ToNot(HaveOccurred())
+				// Should have both the original and new tag
+				g.Expect(configMap.Data).To(HaveKey("original-name.json"))
+				g.Expect(configMap.Data).To(HaveKey("updated-name-v2.json"))
+			}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
+
+			By("Verifying the updated ConfigMap content")
+			Expect(configMap.Data["updated-name-v2.json"]).To(ContainSubstring("Updated Name v2"))
+			Expect(configMap.Data["updated-name-v2.json"]).To(ContainSubstring("quay.io/opendatahub/updated:v2"))
+
+			// Cleanup
+			By("Cleaning up test resources")
+			Expect(cli.Delete(ctx, notebook, &client.DeleteOptions{})).To(Succeed())
+			Expect(cli.Delete(ctx, updatedImageStream, &client.DeleteOptions{})).To(Succeed())
+			Expect(cli.Delete(ctx, configMap, &client.DeleteOptions{})).To(Succeed())
+		})
+	})
 })
 
 var _ = Describe("FormatKeyName function", func() {

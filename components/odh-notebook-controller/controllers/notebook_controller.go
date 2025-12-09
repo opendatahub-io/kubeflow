@@ -33,6 +33,7 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	imagev1 "github.com/openshift/api/image/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -842,6 +843,57 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 
 				return []reconcile.Request{}
+			}),
+		).
+
+		// Watch for ImageStreams with runtime-image label in the controller namespace
+		// When a runtime image ImageStream is added/updated/deleted, update the pipeline-runtime-images
+		// ConfigMap in all namespaces that have notebooks
+		Watches(&imagev1.ImageStream{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				log := r.Log.WithValues("imagestream", o.GetName(), "namespace", o.GetNamespace())
+
+				// Only watch ImageStreams in the controller namespace
+				if o.GetNamespace() != r.Namespace {
+					return []reconcile.Request{}
+				}
+
+				// Only process ImageStreams with the runtime-image label
+				labels := o.GetLabels()
+				if labels["opendatahub.io/runtime-image"] != "true" {
+					return []reconcile.Request{}
+				}
+
+				log.Info("Runtime image ImageStream changed, triggering reconciliation for notebooks")
+
+				// List all notebooks across all namespaces
+				var nbList nbv1.NotebookList
+				if err := r.List(ctx, &nbList); err != nil {
+					log.Error(err, "Unable to list Notebooks when attempting to handle ImageStream change")
+					return []reconcile.Request{}
+				}
+
+				// Group notebooks by namespace and trigger reconcile for first notebook in each namespace
+				// (one per namespace is sufficient since the ConfigMap is shared within a namespace)
+				seenNamespaces := make(map[string]bool)
+				reconcileRequests := []reconcile.Request{}
+				for _, nb := range nbList.Items {
+					if !seenNamespaces[nb.Namespace] {
+						seenNamespaces[nb.Namespace] = true
+						reconcileRequests = append(reconcileRequests, reconcile.Request{
+							NamespacedName: types.NamespacedName{
+								Name:      nb.Name,
+								Namespace: nb.Namespace,
+							},
+						})
+					}
+				}
+
+				if len(reconcileRequests) > 0 {
+					log.Info("Triggering reconcile for notebooks due to ImageStream change", "namespaceCount", len(reconcileRequests))
+				}
+
+				return reconcileRequests
 			}),
 		)
 	err := builder.Complete(r)
