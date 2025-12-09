@@ -28,9 +28,9 @@ const (
 )
 
 // getRuntimeConfigMap verifies if a ConfigMap exists in the namespace.
-func (r *OpenshiftNotebookReconciler) getRuntimeConfigMap(ctx context.Context, configMapName, namespace string) (*corev1.ConfigMap, bool, error) {
+func getRuntimeConfigMap(ctx context.Context, cli client.Client, cfgMapName, namespace string) (*corev1.ConfigMap, bool, error) {
 	configMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, configMap)
+	err := cli.Get(ctx, types.NamespacedName{Name: cfgMapName, Namespace: namespace}, configMap)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			return nil, false, nil
@@ -40,9 +40,12 @@ func (r *OpenshiftNotebookReconciler) getRuntimeConfigMap(ctx context.Context, c
 	return configMap, true, nil
 }
 
-func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Context, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
+// SyncRuntimeImagesConfigMap creates or updates the pipeline-runtime-images ConfigMap
+// in the notebook's namespace based on ImageStreams with the opendatahub.io/runtime-image label.
+// This standalone function can be called from both the webhook and the controller.
+func SyncRuntimeImagesConfigMap(ctx context.Context, cli client.Client, log logr.Logger, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
 
-	log := r.Log.WithValues("namespace", notebookNamespace)
+	log = log.WithValues("namespace", notebookNamespace)
 
 	// Create a dynamic client
 	dynamicClient, err := dynamic.NewForConfig(config)
@@ -116,7 +119,7 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 	}
 
 	// Check if the ConfigMap already exists
-	existingConfigMap, configMapExists, err := r.getRuntimeConfigMap(ctx, configMapName, notebookNamespace)
+	existingConfigMap, configMapExists, err := getRuntimeConfigMap(ctx, cli, configMapName, notebookNamespace)
 	if err != nil {
 		log.Error(err, "Error getting ConfigMap", "ConfigMap.Name", configMapName)
 		return err
@@ -132,7 +135,7 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 	if len(data) == 0 && configMapExists {
 		log.Info("Data is empty but the ConfigMap already exists. Leaving it as is.")
 		// OR optionally delete it:
-		// if err := r.Delete(ctx, existingConfigMap); err != nil {
+		// if err := cli.Delete(ctx, existingConfigMap); err != nil {
 		//	log.Error(err, "Failed to delete existing empty ConfigMap")
 		//	return err
 		//}
@@ -153,7 +156,7 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 	if configMapExists {
 		if !reflect.DeepEqual(existingConfigMap.Data, data) {
 			existingConfigMap.Data = data
-			if err := r.Update(ctx, existingConfigMap); err != nil {
+			if err := cli.Update(ctx, existingConfigMap); err != nil {
 				log.Error(err, "Failed to update ConfigMap", "ConfigMap.Name", configMapName)
 				return err
 			}
@@ -165,7 +168,7 @@ func (r *OpenshiftNotebookReconciler) syncRuntimeImagesConfigMap(ctx context.Con
 	}
 
 	// Otherwise, create the ConfigMap
-	if err := r.Create(ctx, configMap); err != nil {
+	if err := cli.Create(ctx, configMap); err != nil {
 		log.Error(err, "Failed to create ConfigMap", "ConfigMap.Name", configMapName)
 		return err
 	}
@@ -230,8 +233,10 @@ func parseRuntimeImageMetadata(rawJSON string, image_url string) string {
 	return string(metadataJSON)
 }
 
+// EnsureNotebookConfigMap creates or updates the pipeline-runtime-images ConfigMap
+// in the notebook's namespace. Called from the controller reconciliation loop.
 func (r *OpenshiftNotebookReconciler) EnsureNotebookConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.syncRuntimeImagesConfigMap(ctx, notebook.Namespace, r.Namespace, r.Config)
+	return SyncRuntimeImagesConfigMap(ctx, r.Client, r.Log, notebook.Namespace, r.Namespace, r.Config)
 }
 
 func MountPipelineRuntimeImages(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
