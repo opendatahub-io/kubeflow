@@ -144,7 +144,6 @@ var _ = Describe("mountFeastConfig", func() {
 		Expect(foundVolume).ToNot(BeNil(), "Feast config volume should be added")
 		Expect(foundVolume.ConfigMap).ToNot(BeNil())
 		Expect(foundVolume.ConfigMap.Name).To(Equal(configMapName))
-		Expect(*foundVolume.ConfigMap.Optional).To(BeTrue())
 		// Items should be nil to allow all ConfigMap keys to be mounted dynamically
 		Expect(foundVolume.ConfigMap.Items).To(BeNil())
 
@@ -486,11 +485,10 @@ var _ = Describe("Feast Config Integration Tests", func() {
 					foundVolume = true
 					Expect(v.ConfigMap).ToNot(BeNil())
 					Expect(v.ConfigMap.Name).To(Equal(configMapName))
-					Expect(*v.ConfigMap.Optional).To(BeTrue())
 					break
 				}
 			}
-			Expect(foundVolume).To(BeTrue(), "Feast config volume should be added when label is enabled and ConfigMap exists")
+			Expect(foundVolume).To(BeTrue(), "Feast config volume should be added when label is enabled")
 
 			// Verify volume mount was added
 			containers := notebook.Spec.Template.Spec.Containers
@@ -508,7 +506,7 @@ var _ = Describe("Feast Config Integration Tests", func() {
 	})
 
 	When("Label is enabled but ConfigMap does not exist", func() {
-		It("should return error but not block notebook creation", func() {
+		It("should mount volume reference (pod will fail to start if ConfigMap missing)", func() {
 			notebookName := "test-notebook-feast-no-cm"
 
 			// Create Notebook with Feast label enabled but no ConfigMap
@@ -537,19 +535,25 @@ var _ = Describe("Feast Config Integration Tests", func() {
 			// Replicate webhook flow: Check label first
 			if isFeastEnabled(notebook) {
 				err := NewFeastConfig(ctx, cli, notebook)
-				// Error should occur but is logged as info/warn in webhook (non-blocking)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("ConfigMap"))
-				Expect(err.Error()).To(ContainSubstring("not found"))
+				// Should not error - volume reference is added regardless of ConfigMap existence
+				Expect(err).ToNot(HaveOccurred())
 			} else {
 				Fail("Feast should be enabled but isFeastEnabled returned false")
 			}
 
-			// Verify that no volume was added since ConfigMap doesn't exist
+			// Verify that volume reference was added (even though ConfigMap doesn't exist)
+			// Note: Pod will fail to start at runtime if ConfigMap is missing
 			volumes := notebook.Spec.Template.Spec.Volumes
+			foundVolume := false
 			for _, v := range volumes {
-				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added when ConfigMap is missing")
+				if v.Name == feastConfigVolumeName {
+					foundVolume = true
+					Expect(v.ConfigMap).ToNot(BeNil())
+					Expect(v.ConfigMap.Name).To(Equal(notebookName + feastConfigMapSuffix))
+					break
+				}
 			}
+			Expect(foundVolume).To(BeTrue(), "Feast config volume reference should be added even if ConfigMap doesn't exist yet")
 		})
 	})
 

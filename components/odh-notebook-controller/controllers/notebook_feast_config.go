@@ -21,8 +21,6 @@ import (
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -70,7 +68,6 @@ func mountFeastConfig(notebook *nbv1.Notebook, configMapName string) error {
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: configMapName,
 				},
-				Optional: ptr.To(true),
 			},
 		},
 	}
@@ -154,15 +151,8 @@ func unmountFeastConfig(notebook *nbv1.Notebook) {
 func NewFeastConfig(ctx context.Context, cli client.Client, notebook *nbv1.Notebook) error {
 
 	feastConfigMapName := notebook.Name + feastConfigMapSuffix
-
-	feastConfigMapObj := &corev1.ConfigMap{}
-	err := cli.Get(ctx, types.NamespacedName{Name: feastConfigMapName, Namespace: notebook.Namespace}, feastConfigMapObj)
-	if err != nil {
-		return fmt.Errorf("feast ConfigMap %s not found in namespace %s, skipping mount: %v", feastConfigMapName, notebook.Namespace, err)
-	}
-
 	// mount the Feast config volume
-	err = mountFeastConfig(notebook, feastConfigMapName)
+	err := mountFeastConfig(notebook, feastConfigMapName)
 	if err != nil {
 		return fmt.Errorf("error mounting Feast config volume: %v", err)
 	}
