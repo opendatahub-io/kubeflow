@@ -1738,6 +1738,106 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		})
 
+		It("Should create ds-pipeline-config secret when DSPA is created after notebook exists", func() {
+			// This test verifies the DSPA watch functionality - when a DSPA is created
+			// after a notebook already exists, the controller should automatically create
+			// the ds-pipeline-config secret via the DSPA watch trigger.
+			// Note: Gateway is optional for the Elyra secret (only affects public_api_endpoint field),
+			// so we skip it here to avoid namespace cleanup timing issues.
+
+			// Use a different namespace to avoid conflicts with the first test's cleanup
+			const watchTestNamespace = "dspa-watch-test-namespace"
+			testNamespaces = append(testNamespaces, watchTestNamespace)
+
+			By("Creating the test namespace")
+			watchNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: watchTestNamespace,
+				},
+			}
+			err := cli.Create(ctx, watchNS)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).ToNot(HaveOccurred())
+			}
+
+			By("Creating the notebook first WITHOUT any DSPA in the namespace")
+			notebook := createNotebook(notebookName, watchTestNamespace)
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+			By("Verifying no ds-pipeline-config secret exists yet")
+			Consistently(func() bool {
+				err := cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: watchTestNamespace}, &corev1.Secret{})
+				return apierrors.IsNotFound(err)
+			}, 2*time.Second, 200*time.Millisecond).Should(BeTrue(), "Secret should not exist when no DSPA is present")
+
+			By("Creating the COS credentials Secret")
+			watchS3CredSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secretName,
+					Namespace: watchTestNamespace,
+				},
+				Data: map[string][]byte{
+					accessKeyKey: []byte("testaccesskey"),
+					secretKeyKey: []byte("testsecretkey"),
+				},
+			}
+			Expect(cli.Create(ctx, watchS3CredSecret)).To(Succeed())
+
+			By("Creating the DSPA object AFTER the notebook exists")
+			watchDspaObj := &dspav1.DataSciencePipelinesApplication{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dspa",
+					Namespace: watchTestNamespace,
+				},
+				Spec: dspav1.DSPASpec{
+					ObjectStorage: &dspav1.ObjectStorage{
+						ExternalStorage: &dspav1.ExternalStorage{
+							Host:   "minio.default.svc.cluster.local",
+							Bucket: "pipelines-watch-test",
+							S3CredentialSecret: &dspav1.S3CredentialSecret{
+								SecretName: secretName,
+								AccessKey:  accessKeyKey,
+								SecretKey:  secretKeyKey,
+							},
+						},
+					},
+				},
+			}
+			Expect(cli.Create(ctx, watchDspaObj)).To(Succeed())
+
+			By("Setting DSPA Status with an API server URL")
+			watchDspaObj.Status = dspav1.DSPAStatus{
+				Components: dspav1.ComponentStatus{
+					APIServer: dspav1.ComponentDetailStatus{
+						ExternalUrl: "https://pipeline-api-watch.example.com",
+					},
+				},
+			}
+			Expect(cli.Status().Update(ctx, watchDspaObj)).To(Succeed())
+
+			By("Waiting for ds-pipeline-config Secret to be created by the DSPA watch")
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: watchTestNamespace}, &corev1.Secret{})
+			}, 15*time.Second, 500*time.Millisecond).Should(Succeed(),
+				"Secret should be created automatically when DSPA is added after notebook exists")
+
+			By("Validating the content of the ds-pipeline-config Secret")
+			var fetchedSecret corev1.Secret
+			err = cli.Get(ctx, types.NamespacedName{
+				Name:      dsSecretName,
+				Namespace: watchTestNamespace,
+			}, &fetchedSecret)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fetchedSecret.Data).To(HaveKey("odh_dsp.json"))
+			Expect(string(fetchedSecret.Data["odh_dsp.json"])).To(ContainSubstring("pipelines-watch-test"),
+				"Secret should contain the correct bucket from the DSPA")
+
+			By("Cleaning up the test resources")
+			Expect(cli.Delete(ctx, notebook)).To(Succeed())
+			Expect(cli.Delete(ctx, watchDspaObj)).To(Succeed())
+			Expect(cli.Delete(ctx, watchS3CredSecret)).To(Succeed())
+		})
+
 		AfterEach(func() {
 			By("Cleaning up all created resources")
 
