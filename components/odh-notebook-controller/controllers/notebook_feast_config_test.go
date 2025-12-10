@@ -471,7 +471,7 @@ var _ = Describe("Feast Config Integration Tests", func() {
 
 			// Replicate webhook flow: Check label first
 			if isFeastEnabled(notebook) {
-				err := NewFeastConfig(ctx, cli, notebook)
+				err := NewFeastConfig(notebook)
 				Expect(err).ToNot(HaveOccurred())
 			} else {
 				Fail("Feast should be enabled but isFeastEnabled returned false")
@@ -534,7 +534,7 @@ var _ = Describe("Feast Config Integration Tests", func() {
 
 			// Replicate webhook flow: Check label first
 			if isFeastEnabled(notebook) {
-				err := NewFeastConfig(ctx, cli, notebook)
+				err := NewFeastConfig(notebook)
 				// Should not error - volume reference is added regardless of ConfigMap existence
 				Expect(err).ToNot(HaveOccurred())
 			} else {
@@ -639,7 +639,7 @@ var _ = Describe("Feast Config Integration Tests", func() {
 
 			// Step 1: Mount Feast config (label = true)
 			if isFeastEnabled(notebook) {
-				err := NewFeastConfig(ctx, cli, notebook)
+				err := NewFeastConfig(notebook)
 				Expect(err).ToNot(HaveOccurred())
 			}
 			Expect(isFeastMounted(notebook)).To(BeTrue(), "Feast should be mounted when label is true")

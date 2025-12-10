@@ -16,12 +16,10 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"fmt"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -148,7 +146,7 @@ func unmountFeastConfig(notebook *nbv1.Notebook) {
 }
 
 // NewFeastConfig creates a new Feast config.
-func NewFeastConfig(ctx context.Context, cli client.Client, notebook *nbv1.Notebook) error {
+func NewFeastConfig(notebook *nbv1.Notebook) error {
 
 	feastConfigMapName := notebook.Name + feastConfigMapSuffix
 	// mount the Feast config volume
