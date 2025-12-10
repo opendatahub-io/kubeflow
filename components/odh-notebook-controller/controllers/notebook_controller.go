@@ -33,6 +33,7 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	imagev1 "github.com/openshift/api/image/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -894,6 +895,46 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 
 				return reconcileRequests
+			}),
+		).
+
+		// Watch for DSPA (DataSciencePipelinesApplication) changes
+		// When a DSPA is created/updated/deleted, update the ds-pipeline-config Secret
+		// for all notebooks in that namespace
+		Watches(&dspav1.DataSciencePipelinesApplication{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				log := r.Log.WithValues("dspa", o.GetName(), "namespace", o.GetNamespace())
+
+				// Only process DSPA named "dspa"
+				if o.GetName() != dspaInstanceName {
+					return []reconcile.Request{}
+				}
+
+				log.Info("DSPA changed, triggering reconciliation for notebooks in namespace")
+
+				// List all notebooks in the DSPA's namespace
+				var nbList nbv1.NotebookList
+				if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+					log.Error(err, "Unable to list Notebooks when attempting to handle DSPA change")
+					return []reconcile.Request{}
+				}
+
+				// Trigger reconcile for first notebook in the namespace
+				// (one is sufficient since the Secret is shared within a namespace)
+				if len(nbList.Items) > 0 {
+					nb := nbList.Items[0]
+					log.Info("Triggering reconcile for notebook due to DSPA change", "notebook", nb.Name)
+					return []reconcile.Request{
+						{
+							NamespacedName: types.NamespacedName{
+								Name:      nb.Name,
+								Namespace: nb.Namespace,
+							},
+						},
+					}
+				}
+
+				return []reconcile.Request{}
 			}),
 		)
 	err := builder.Complete(r)
