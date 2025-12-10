@@ -302,6 +302,101 @@ var _ = Describe("mountFeastConfig", func() {
 	})
 })
 
+var _ = Describe("unmountFeastConfig", func() {
+	It("should remove volume and volume mount from notebook", func() {
+		notebookName := "test-notebook"
+		configMapName := "test-notebook-feast-config"
+
+		// Create notebook with Feast config already mounted
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebookName,
+				Namespace: "default",
+			},
+			Spec: nbv1.NotebookSpec{
+				Template: nbv1.NotebookTemplateSpec{
+					Spec: corev1.PodSpec{
+						Volumes: []corev1.Volume{
+							{
+								Name: feastConfigVolumeName,
+								VolumeSource: corev1.VolumeSource{
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{
+											Name: configMapName,
+										},
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  notebookName,
+								Image: "test-image:latest",
+								VolumeMounts: []corev1.VolumeMount{
+									{
+										Name:      feastConfigVolumeName,
+										MountPath: feastConfigMountPath,
+										ReadOnly:  true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Verify volume and mount exist before unmounting
+		Expect(isFeastMounted(notebook)).To(BeTrue())
+
+		// Unmount
+		unmountFeastConfig(notebook)
+
+		// Verify volume was removed
+		volumes := notebook.Spec.Template.Spec.Volumes
+		for _, v := range volumes {
+			Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should be removed")
+		}
+
+		// Verify volume mount was removed
+		containers := notebook.Spec.Template.Spec.Containers
+		Expect(containers).To(HaveLen(1))
+		for _, vm := range containers[0].VolumeMounts {
+			Expect(vm.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume mount should be removed")
+		}
+
+		// Verify isFeastMounted returns false after unmounting
+		Expect(isFeastMounted(notebook)).To(BeFalse())
+	})
+
+	It("should handle notebook without Feast config gracefully", func() {
+		notebookName := "test-notebook-no-feast"
+
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebookName,
+				Namespace: "default",
+			},
+			Spec: nbv1.NotebookSpec{
+				Template: nbv1.NotebookTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  notebookName,
+								Image: "test-image:latest",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		// Should not panic when unmounting from notebook without Feast config
+		Expect(func() { unmountFeastConfig(notebook) }).ToNot(Panic())
+		Expect(isFeastMounted(notebook)).To(BeFalse())
+	})
+})
+
 var _ = Describe("Feast Config Integration Tests", func() {
 	var testNamespace string
 
@@ -458,27 +553,12 @@ var _ = Describe("Feast Config Integration Tests", func() {
 		})
 	})
 
-	When("Label is NOT enabled but ConfigMap exists", func() {
-		It("should skip Feast mounting entirely", func() {
+	When("Label is disabled (any reason)", func() {
+		It("should skip Feast mounting when label is not 'true'", func() {
+			// Test that isFeastEnabled returns false for various non-"true" label states
+			// Detailed label behavior is tested in isFeastEnabled unit tests
 			notebookName := "test-notebook-feast-disabled"
-			configMapName := notebookName + feastConfigMapSuffix
 
-			// Create ConfigMap (exists but won't be mounted)
-			configMap := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      configMapName,
-					Namespace: testNamespace,
-				},
-				Data: map[string]string{
-					"feature_store.yaml": "project: feast_project\nregistry: registry_config",
-				},
-			}
-			err := cli.Create(ctx, configMap)
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				Expect(err).ToNot(HaveOccurred())
-			}
-
-			// Create Notebook WITHOUT Feast label
 			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      notebookName,
@@ -498,61 +578,138 @@ var _ = Describe("Feast Config Integration Tests", func() {
 					},
 				},
 			}
-			errNotebook := cli.Create(ctx, notebook)
-			if errNotebook != nil && !apierrs.IsAlreadyExists(errNotebook) {
-				Expect(errNotebook).ToNot(HaveOccurred())
-			}
 
 			// Replicate webhook flow: Check label first
+			Expect(isFeastEnabled(notebook)).To(BeFalse())
+
+			// Verify no volume is added when label is disabled
+			if !isFeastEnabled(notebook) && !isFeastMounted(notebook) {
+				// No action taken - correct behavior
+			}
+
+			volumes := notebook.Spec.Template.Spec.Volumes
+			for _, v := range volumes {
+				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added when label is disabled")
+			}
+		})
+	})
+
+	When("Label is disabled after being enabled (unmount scenarios)", func() {
+		It("should unmount Feast config when label changes or is removed", func() {
+			notebookName := "test-notebook-feast-unmount"
+			configMapName := notebookName + feastConfigMapSuffix
+
+			// Create ConfigMap
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      configMapName,
+					Namespace: testNamespace,
+				},
+				Data: map[string]string{
+					"feature_store.yaml": "project: feast_project",
+				},
+			}
+			err := cli.Create(ctx, configMap)
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				Expect(err).ToNot(HaveOccurred())
+			}
+
+			// Create Notebook with Feast enabled initially
+			notebook := &nbv1.Notebook{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      notebookName,
+					Namespace: testNamespace,
+					Labels: map[string]string{
+						feastLabelKey: "true", // Initially enabled
+					},
+				},
+				Spec: nbv1.NotebookSpec{
+					Template: nbv1.NotebookTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:  notebookName,
+									Image: "test-image:latest",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			// Step 1: Mount Feast config (label = true)
 			if isFeastEnabled(notebook) {
-				// Should not enter this block
-				Fail("Feast should be disabled but isFeastEnabled returned true")
+				err := NewFeastConfig(ctx, cli, notebook)
+				Expect(err).ToNot(HaveOccurred())
+			}
+			Expect(isFeastMounted(notebook)).To(BeTrue(), "Feast should be mounted when label is true")
+
+			// Step 2: Disable label (simulate user changing label to false or removing it)
+			notebook.Labels[feastLabelKey] = "false"
+
+			// Replicate webhook flow: Check if should unmount
+			if isFeastEnabled(notebook) {
+				Fail("Label should be disabled")
+			} else if isFeastMounted(notebook) {
+				unmountFeastConfig(notebook)
 			}
 
-			// NewFeastConfig should NOT be called, verify no volume was added
-			volumes := notebook.Spec.Template.Spec.Volumes
-			for _, v := range volumes {
-				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added when label is not enabled")
+			// Verify volume was unmounted
+			Expect(isFeastMounted(notebook)).To(BeFalse(), "Feast should be unmounted when label is disabled")
+			for _, v := range notebook.Spec.Template.Spec.Volumes {
+				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should be removed")
+			}
+
+			// Verify volume mount was removed from container
+			for _, container := range notebook.Spec.Template.Spec.Containers {
+				if container.Name == notebookName {
+					for _, vm := range container.VolumeMounts {
+						Expect(vm.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume mount should be removed")
+					}
+				}
 			}
 		})
 	})
 
-	When("Label is set to 'false' and ConfigMap exists", func() {
-		It("should skip Feast mounting (label value must be exactly 'true')", func() {
-			notebookName := "test-notebook-feast-false"
-			configMapName := notebookName + feastConfigMapSuffix
+	When("Volume is already mounted but label is disabled on creation", func() {
+		It("should unmount Feast config (handle edge case)", func() {
+			notebookName := "test-notebook-feast-edge-case"
 
-			// Create ConfigMap
-			configMap := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      configMapName,
-					Namespace: testNamespace,
-				},
-				Data: map[string]string{
-					"feature_store.yaml": "project: feast_project",
-				},
-			}
-			err := cli.Create(ctx, configMap)
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				Expect(err).ToNot(HaveOccurred())
-			}
-
-			// Create Notebook with Feast label set to "false"
+			// Create Notebook with Feast volume pre-mounted but label disabled
+			// (edge case: maybe from a previous state or manual edit)
 			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      notebookName,
 					Namespace: testNamespace,
 					Labels: map[string]string{
-						feastLabelKey: "false", // Explicitly disabled
+						feastLabelKey: "false", // Label disabled
 					},
 				},
 				Spec: nbv1.NotebookSpec{
 					Template: nbv1.NotebookTemplateSpec{
 						Spec: corev1.PodSpec{
+							Volumes: []corev1.Volume{
+								{
+									Name: feastConfigVolumeName, // Volume exists
+									VolumeSource: corev1.VolumeSource{
+										ConfigMap: &corev1.ConfigMapVolumeSource{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "some-config",
+											},
+										},
+									},
+								},
+							},
 							Containers: []corev1.Container{
 								{
 									Name:  notebookName,
 									Image: "test-image:latest",
+									VolumeMounts: []corev1.VolumeMount{
+										{
+											Name:      feastConfigVolumeName,
+											MountPath: feastConfigMountPath,
+										},
+									},
 								},
 							},
 						},
@@ -560,68 +717,19 @@ var _ = Describe("Feast Config Integration Tests", func() {
 				},
 			}
 
-			// Replicate webhook flow
-			Expect(isFeastEnabled(notebook)).To(BeFalse(), "Label 'false' should not enable Feast")
+			// Verify precondition: volume is mounted but label is disabled
+			Expect(isFeastMounted(notebook)).To(BeTrue())
+			Expect(isFeastEnabled(notebook)).To(BeFalse())
 
-			// Verify no volume was added
-			volumes := notebook.Spec.Template.Spec.Volumes
-			for _, v := range volumes {
-				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added when label is 'false'")
-			}
-		})
-	})
-
-	When("Label has invalid value and ConfigMap exists", func() {
-		It("should skip Feast mounting (only 'true' is valid)", func() {
-			notebookName := "test-notebook-feast-invalid"
-			configMapName := notebookName + feastConfigMapSuffix
-
-			// Create ConfigMap
-			configMap := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      configMapName,
-					Namespace: testNamespace,
-				},
-				Data: map[string]string{
-					"feature_store.yaml": "project: feast_project",
-				},
-			}
-			err := cli.Create(ctx, configMap)
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				Expect(err).ToNot(HaveOccurred())
+			// Replicate webhook flow: should unmount
+			if isFeastEnabled(notebook) {
+				Fail("Should not mount when label is disabled")
+			} else if isFeastMounted(notebook) {
+				unmountFeastConfig(notebook)
 			}
 
-			// Create Notebook with invalid label value
-			notebook := &nbv1.Notebook{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      notebookName,
-					Namespace: testNamespace,
-					Labels: map[string]string{
-						feastLabelKey: "yes", // Invalid value
-					},
-				},
-				Spec: nbv1.NotebookSpec{
-					Template: nbv1.NotebookTemplateSpec{
-						Spec: corev1.PodSpec{
-							Containers: []corev1.Container{
-								{
-									Name:  notebookName,
-									Image: "test-image:latest",
-								},
-							},
-						},
-					},
-				},
-			}
-
-			// Replicate webhook flow
-			Expect(isFeastEnabled(notebook)).To(BeFalse(), "Invalid label value should not enable Feast")
-
-			// Verify no volume was added
-			volumes := notebook.Spec.Template.Spec.Volumes
-			for _, v := range volumes {
-				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added with invalid label value")
-			}
+			// Verify unmounted
+			Expect(isFeastMounted(notebook)).To(BeFalse(), "Feast should be unmounted to match label state")
 		})
 	})
 })

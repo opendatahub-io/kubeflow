@@ -409,12 +409,17 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			}
 		}
 
-		// Mount Feast config if the label is enabled
+		// Handle Feast config mounting/unmounting based on label
 		if isFeastEnabled(notebook) {
+			// Label is enabled, mount the Feast config
 			err = NewFeastConfig(ctx, w.Client, notebook)
 			if err != nil {
 				log.Info("Unable to mount Feast config volume", "error", err)
 			}
+		} else if isFeastMounted(notebook) {
+			// Label is disabled but volume is still mounted, unmount it
+			log.Info("Feast label disabled, removing Feast config volume", "notebook", notebook.Name, "namespace", notebook.Namespace)
+			unmountFeastConfig(notebook)
 		}
 	}
 

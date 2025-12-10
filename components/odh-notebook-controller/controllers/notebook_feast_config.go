@@ -43,6 +43,16 @@ func isFeastEnabled(notebook *nbv1.Notebook) bool {
 	return labelValue == "true"
 }
 
+// isFeastMounted checks if the Feast config volume is currently mounted.
+func isFeastMounted(notebook *nbv1.Notebook) bool {
+	for _, volume := range notebook.Spec.Template.Spec.Volumes {
+		if volume.Name == feastConfigVolumeName {
+			return true
+		}
+	}
+	return false
+}
+
 // mountFeastConfig mounts the Feast config on the notebook.
 func mountFeastConfig(notebook *nbv1.Notebook, configMapName string) error {
 
@@ -109,6 +119,35 @@ func mountFeastConfig(notebook *nbv1.Notebook, configMapName string) error {
 		return fmt.Errorf("notebook image container not found %v", notebook.Name)
 	}
 	return nil
+}
+
+// unmountFeastConfig removes the Feast config volume and volume mount from the notebook.
+func unmountFeastConfig(notebook *nbv1.Notebook) {
+	// Remove feast config volume
+	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
+	for i, volume := range *notebookVolumes {
+		if volume.Name == feastConfigVolumeName {
+			*notebookVolumes = append((*notebookVolumes)[:i], (*notebookVolumes)[i+1:]...)
+			break
+		}
+	}
+
+	// Remove feast config volume mount from notebook container
+	notebookContainers := &notebook.Spec.Template.Spec.Containers
+	for i, container := range *notebookContainers {
+		if container.Name == notebook.Name {
+			for j, volumeMount := range container.VolumeMounts {
+				if volumeMount.Name == feastConfigVolumeName {
+					(*notebookContainers)[i].VolumeMounts = append(
+						container.VolumeMounts[:j],
+						container.VolumeMounts[j+1:]...,
+					)
+					break
+				}
+			}
+			break
+		}
+	}
 }
 
 // NewFeastConfig creates a new Feast config.
