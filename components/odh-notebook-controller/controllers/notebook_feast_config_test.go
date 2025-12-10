@@ -583,10 +583,6 @@ var _ = Describe("Feast Config Integration Tests", func() {
 			Expect(isFeastEnabled(notebook)).To(BeFalse())
 
 			// Verify no volume is added when label is disabled
-			if !isFeastEnabled(notebook) && !isFeastMounted(notebook) {
-				// No action taken - correct behavior
-			}
-
 			volumes := notebook.Spec.Template.Spec.Volumes
 			for _, v := range volumes {
 				Expect(v.Name).ToNot(Equal(feastConfigVolumeName), "Feast config volume should not be added when label is disabled")
