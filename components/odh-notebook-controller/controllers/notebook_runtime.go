@@ -9,14 +9,11 @@ import (
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	imagev1 "github.com/openshift/api/image/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -43,76 +40,53 @@ func getRuntimeConfigMap(ctx context.Context, cli client.Client, cfgMapName, nam
 // SyncRuntimeImagesConfigMap creates or updates the pipeline-runtime-images ConfigMap
 // in the notebook's namespace based on ImageStreams with the opendatahub.io/runtime-image label.
 // This standalone function can be called from both the webhook and the controller.
-func SyncRuntimeImagesConfigMap(ctx context.Context, cli client.Client, log logr.Logger, notebookNamespace string, controllerNamespace string, config *rest.Config) error {
-
+func SyncRuntimeImagesConfigMap(ctx context.Context, cli client.Client, log logr.Logger, notebookNamespace string, controllerNamespace string) error {
 	log = log.WithValues("namespace", notebookNamespace)
 
-	// Create a dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Error creating dynamic client")
-		return err
-	}
-
-	// Define GroupVersionResource for ImageStreams
-	ims := schema.GroupVersionResource{
-		Group:    "image.openshift.io",
-		Version:  "v1",
-		Resource: "imagestreams",
-	}
-
 	// Fetch ImageStreams from controllerNamespace namespace
-	imagestreams, err := dynamicClient.Resource(ims).Namespace(controllerNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
+	imageStreamList := &imagev1.ImageStreamList{}
+	if err := cli.List(ctx, imageStreamList, client.InNamespace(controllerNamespace)); err != nil {
 		log.Error(err, "Failed to list ImageStreams", "Namespace", controllerNamespace)
 		return err
 	}
 
 	// Prepare data for ConfigMap
 	data := make(map[string]string)
-	for _, item := range imagestreams.Items {
-		labels := item.GetLabels()
-		if labels["opendatahub.io/runtime-image"] == "true" {
-			tags, found, err := unstructured.NestedSlice(item.Object, "spec", "tags")
-			if err != nil || !found {
-				log.Error(err, "Failed to extract tags from ImageStream", "ImageStream", item.GetName())
-				continue
+	for _, imageStream := range imageStreamList.Items {
+		if imageStream.Labels["opendatahub.io/runtime-image"] != "true" {
+			continue
+		}
+
+		if len(imageStream.Spec.Tags) == 0 {
+			log.Error(nil, "ImageStream labeled as runtime-image has no tags - possible misconfiguration", "ImageStream", imageStream.Name, "Namespace", controllerNamespace)
+			continue
+		}
+
+		for _, tag := range imageStream.Spec.Tags {
+			// Extract metadata annotation
+			metadataRaw := tag.Annotations["opendatahub.io/runtime-image-metadata"]
+			if metadataRaw == "" {
+				metadataRaw = "[]"
 			}
 
-			for _, tag := range tags {
-				tagMap, ok := tag.(map[string]interface{})
-				if !ok {
-					continue
-				}
+			// Extract image URL from the tag's From reference
+			if tag.From == nil || tag.From.Name == "" {
+				log.Error(nil, "Failed to extract image URL from ImageStream", "ImageStream", imageStream.Name, "Tag", tag.Name)
+				continue
+			}
+			imageURL := tag.From.Name
 
-				// Extract metadata annotation
-				annotations, found, err := unstructured.NestedMap(tagMap, "annotations")
-				if err != nil || !found {
-					annotations = map[string]interface{}{}
-				}
-				metadataRaw, ok := annotations["opendatahub.io/runtime-image-metadata"].(string)
-				if !ok || metadataRaw == "" {
-					metadataRaw = "[]"
-				}
-				// Extract image URL
-				image_url, found, err := unstructured.NestedString(tagMap, "from", "name")
-				if err != nil || !found {
-					log.Error(err, "Failed to extract image URL from ImageStream", "ImageStream", item.GetName())
-					continue
-				}
+			// Parse metadata
+			metadataParsed := parseRuntimeImageMetadata(metadataRaw, imageURL)
+			displayName := extractDisplayName(metadataParsed)
 
-				// Parse metadata
-				metadataParsed := parseRuntimeImageMetadata(metadataRaw, image_url)
-				displayName := extractDisplayName(metadataParsed)
-
-				// Construct the key name
-				if displayName != "" {
-					formattedName := formatKeyName(displayName)
-					if formattedName != "" {
-						data[formattedName] = metadataParsed
-					} else {
-						log.Error(nil, "Failed to construct ConfigMap key name", "ImageStream", item.GetName(), "Tag", tag)
-					}
+			// Construct the key name
+			if displayName != "" {
+				formattedName := formatKeyName(displayName)
+				if formattedName != "" {
+					data[formattedName] = metadataParsed
+				} else {
+					log.Error(nil, "Failed to construct ConfigMap key name", "ImageStream", imageStream.Name, "Tag", tag.Name)
 				}
 			}
 		}
@@ -208,7 +182,7 @@ func formatKeyName(displayName string) string {
 }
 
 // parseRuntimeImageMetadata extracts the first object from the JSON array
-func parseRuntimeImageMetadata(rawJSON string, image_url string) string {
+func parseRuntimeImageMetadata(rawJSON string, imageUrl string) string {
 	var metadataArray []map[string]interface{}
 
 	err := json.Unmarshal([]byte(rawJSON), &metadataArray)
@@ -216,11 +190,11 @@ func parseRuntimeImageMetadata(rawJSON string, image_url string) string {
 		return "{}" // Return empty JSON object if parsing fails
 	}
 
-	// Insert image_url into the metadataArray
+	// Insert imageUrl into the metadataArray
 	if metadataArray[0]["metadata"] != nil {
 		metadata, ok := metadataArray[0]["metadata"].(map[string]interface{})
 		if ok {
-			metadata["image_name"] = image_url
+			metadata["image_name"] = imageUrl
 		}
 	}
 
@@ -236,7 +210,7 @@ func parseRuntimeImageMetadata(rawJSON string, image_url string) string {
 // EnsureNotebookConfigMap creates or updates the pipeline-runtime-images ConfigMap
 // in the notebook's namespace. Called from the controller reconciliation loop.
 func (r *OpenshiftNotebookReconciler) EnsureNotebookConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
-	return SyncRuntimeImagesConfigMap(ctx, r.Client, r.Log, notebook.Namespace, r.Namespace, r.Config)
+	return SyncRuntimeImagesConfigMap(ctx, r.Client, r.Log, notebook.Namespace, r.Namespace)
 }
 
 func MountPipelineRuntimeImages(ctx context.Context, client client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
