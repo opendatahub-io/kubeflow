@@ -29,13 +29,10 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 const (
@@ -68,14 +65,9 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 	return dspa, nil
 }
 
-func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, log logr.Logger) (map[string]interface{}, error) {
-	gatewayGVR := schema.GroupVersionResource{
-		Group:    "gateway.networking.k8s.io",
-		Version:  "v1",
-		Resource: "gateways",
-	}
-
-	obj, err := dynamicClient.Resource(gatewayGVR).Namespace(gatewayNamespace).Get(ctx, gatewayName, metav1.GetOptions{})
+func getGatewayInstance(ctx context.Context, k8sClient client.Client, log logr.Logger) (*gatewayv1.Gateway, error) {
+	gateway := &gatewayv1.Gateway{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: gatewayName, Namespace: gatewayNamespace}, gateway)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			// Skipping as Gateway CR not found (optional CR)
@@ -90,35 +82,19 @@ func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, lo
 		return nil, err
 	}
 
-	return obj.UnstructuredContent(), nil
+	return gateway, nil
 }
 
 // getGatewayConfigOwnerName extracts the GatewayConfig name from the Gateway's ownerReferences.
 // Returns empty string if no GatewayConfig owner is found.
-func getGatewayConfigOwnerName(gatewayInstance map[string]interface{}) string {
-	if len(gatewayInstance) == 0 {
+func getGatewayConfigOwnerName(gatewayInstance *gatewayv1.Gateway) string {
+	if gatewayInstance == nil {
 		return ""
 	}
 
-	metadata, ok := gatewayInstance["metadata"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-
-	ownerRefs, ok := metadata["ownerReferences"].([]interface{})
-	if !ok {
-		return ""
-	}
-
-	for _, ownerRef := range ownerRefs {
-		ownerMap, ok := ownerRef.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		kind, _ := ownerMap["kind"].(string)
-		if kind == "GatewayConfig" {
-			name, _ := ownerMap["name"].(string)
-			return name
+	for _, ownerRef := range gatewayInstance.OwnerReferences {
+		if ownerRef.Kind == "GatewayConfig" {
+			return ownerRef.Name
 		}
 	}
 
@@ -127,27 +103,24 @@ func getGatewayConfigOwnerName(gatewayInstance map[string]interface{}) string {
 
 // getHostnameForPublicEndpoint extracts the hostname for the public API endpoint from Gateway CR,
 // with fallback to Route if Gateway doesn't have a hostname configured.
-func getHostnameForPublicEndpoint(ctx context.Context, gatewayInstance map[string]interface{}, k8sClient client.Client, log logr.Logger) string {
+func getHostnameForPublicEndpoint(ctx context.Context, gatewayInstance *gatewayv1.Gateway, k8sClient client.Client, log logr.Logger) string {
 	var hostname string
 
-	if len(gatewayInstance) == 0 {
+	if gatewayInstance == nil {
 		log.Info("Gateway CR: not present or empty")
 		return ""
-	} else if spec, ok := gatewayInstance["spec"].(map[string]interface{}); !ok {
-		log.Info("Gateway CR: 'spec' field is missing or invalid - trying Route fallback")
-	} else if listeners, ok := spec["listeners"].([]interface{}); !ok || len(listeners) == 0 {
+	}
+
+	listeners := gatewayInstance.Spec.Listeners
+	if len(listeners) == 0 {
 		log.Info("Gateway CR: 'listeners' field is missing, invalid, or empty - trying Route fallback")
 	} else {
 		// Extract hostname from the first listener
-		if listener, ok := listeners[0].(map[string]interface{}); ok {
-			if gatewayHostname, ok := listener["hostname"].(string); ok && gatewayHostname != "" {
-				hostname = gatewayHostname
-				log.Info("Using hostname from Gateway CR", "hostname", hostname)
-			} else {
-				log.Info("Gateway CR: 'hostname' field is missing or empty in listener - trying Route fallback")
-			}
+		if listeners[0].Hostname != nil && *listeners[0].Hostname != "" {
+			hostname = string(*listeners[0].Hostname)
+			log.Info("Using hostname from Gateway CR", "hostname", hostname)
 		} else {
-			log.Info("Gateway CR: first listener has invalid format - trying Route fallback")
+			log.Info("Gateway CR: 'hostname' field is missing or empty in listener - trying Route fallback")
 		}
 	}
 
@@ -213,14 +186,14 @@ func getHostnameFromRoute(ctx context.Context, k8sClient client.Client, gatewayC
 }
 
 // extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and gateway CRs used for pipeline execution.
-func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, k8sClient client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gatewayv1.Gateway, dspaInstance *dspav1.DataSciencePipelinesApplication, k8sClient client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
 
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
 
 	// Extract info from DSPA spec
-	spec := dspaInstance.Spec
-	objectStorage := spec.ObjectStorage
+	dspaSpec := dspaInstance.Spec
+	objectStorage := dspaSpec.ObjectStorage
 	externalStorage := objectStorage.ExternalStorage
 
 	// Validate required fields
@@ -304,21 +277,11 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 // It ensures the Elyra runtime config secret exists before the webhook tries to mount it,
 // fixing the race condition (RHOAIENG-24545) where the first notebook in a namespace would
 // not have the secret mounted because it didn't exist yet.
-func SyncElyraRuntimeConfigSecret(ctx context.Context, cli client.Client, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger) error {
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Failed to create dynamic client")
-		return err
-	}
-
+func SyncElyraRuntimeConfigSecret(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 	// Gateway is optional: retrieve it, but continue even when it's absent.
-	gatewayInstance, err := getGatewayInstance(ctx, dynamicClient, log)
+	gatewayInstance, err := getGatewayInstance(ctx, cli, log)
 	if err != nil {
 		return err
-	}
-	// Gateway CR not found (optional cr)
-	if gatewayInstance == nil {
-		gatewayInstance = map[string]interface{}{}
 	}
 
 	dspaInstance, err := getDSPAInstance(ctx, cli, notebook.Namespace, log)
@@ -489,5 +452,5 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 // This function is invoked by the ODH Notebook Controller and is required for enabling Elyra functionality in notebooks.
 func (r *OpenshiftNotebookReconciler) ReconcileElyraRuntimeConfigSecret(notebook *nbv1.Notebook, ctx context.Context) error {
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
-	return SyncElyraRuntimeConfigSecret(ctx, r.Client, r.Config, notebook, log)
+	return SyncElyraRuntimeConfigSecret(ctx, r.Client, notebook, log)
 }
