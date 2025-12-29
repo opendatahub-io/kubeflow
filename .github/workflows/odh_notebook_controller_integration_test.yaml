@@ -128,6 +128,8 @@ jobs:
           EOF
           # install gateway-api
           kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
+          # install DSPA CRD (DataSciencePipelinesApplication)
+          kubectl apply -f components/odh-notebook-controller/config/crd/external/opendatahub.io_dspa.yaml
 
       - name: Build & Apply manifests
         run: |
