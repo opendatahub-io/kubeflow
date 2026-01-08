@@ -394,14 +394,33 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
+		// Ensure the pipeline-runtime-images ConfigMap exists before trying to mount it.
+		// This fixes the race condition (RHOAIENG-24545) where the first notebook in a namespace
+		// would not have the runtime images mounted because the ConfigMap didn't exist yet.
+		err = SyncRuntimeImagesConfigMap(ctx, w.Client, log, notebook.Namespace, w.Namespace, w.Config)
+		if err != nil {
+			log.Error(err, "Failed to sync runtime images ConfigMap")
+			// Don't fail the webhook on sync error - continue and try to mount if ConfigMap exists
+		}
+
 		// Mount ConfigMap pipeline-runtime-images as runtime-images
 		err = MountPipelineRuntimeImages(ctx, w.Client, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
-		// Mount Secret ds-pipeline-config
+		// Sync and mount Secret ds-pipeline-config for Elyra pipelines support
 		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+			// Ensure the ds-pipeline-config Secret exists before trying to mount it.
+			// This fixes the race condition (RHOAIENG-24545) where the first notebook in a
+			// namespace would not have the secret mounted because it didn't exist yet.
+			err = SyncElyraRuntimeConfigSecret(ctx, w.Client, w.Config, notebook, log)
+			if err != nil {
+				log.Error(err, "Failed to sync Elyra runtime config secret")
+				// Don't fail the webhook on sync error - continue and try to mount if secret exists
+			}
+
+			// Mount Secret ds-pipeline-config
 			err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
 			if err != nil {
 				log.Error(err, "Unable to mount Elyra runtime config volume")

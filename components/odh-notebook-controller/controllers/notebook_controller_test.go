@@ -1654,23 +1654,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: Namespace}, &corev1.Secret{})
 			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
 
-			// ----------------------------------------------------------------
-			// Test workaround for the RHOAIENG-24545 - we need to manually modify
-			// the workbench so that the expected resource is mounted properly
-			// kubeflow-resource-stopped: '2025-06-25T13:53:46Z'
-			By("Running the workaround for RHOAIENG-24545")
-			// Refresh the notebook to get the latest version and update it
-			// Use Eventually to handle any race conditions with controller modifications
-			Eventually(func() error {
-				if err := cli.Get(ctx, types.NamespacedName{Name: notebookName, Namespace: Namespace}, notebook); err != nil {
-					return err
-				}
-				notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-				return cli.Update(ctx, notebook)
-			}, 10*time.Second, 500*time.Millisecond).Should(Succeed())
-			// end of workaround
-			// ----------------------------------------------------------------
-
 			By("Waiting and validating for volumeMount 'elyra-dsp-details' to be injected into the Notebook")
 			Eventually(func() bool {
 				var refreshed nbv1.Notebook
@@ -1753,6 +1736,106 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				}, &fetched)
 			}, time.Second*10, time.Millisecond*250).ShouldNot(Succeed())
 
+		})
+
+		It("Should create ds-pipeline-config secret when DSPA is created after notebook exists", func() {
+			// This test verifies the DSPA watch functionality - when a DSPA is created
+			// after a notebook already exists, the controller should automatically create
+			// the ds-pipeline-config secret via the DSPA watch trigger.
+			// Note: Gateway is optional for the Elyra secret (only affects public_api_endpoint field),
+			// so we skip it here to avoid namespace cleanup timing issues.
+
+			// Use a different namespace to avoid conflicts with the first test's cleanup
+			const watchTestNamespace = "dspa-watch-test-namespace"
+			testNamespaces = append(testNamespaces, watchTestNamespace)
+
+			By("Creating the test namespace")
+			watchNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: watchTestNamespace,
+				},
+			}
+			err := cli.Create(ctx, watchNS)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).ToNot(HaveOccurred())
+			}
+
+			By("Creating the notebook first WITHOUT any DSPA in the namespace")
+			notebook := createNotebook(notebookName, watchTestNamespace)
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+
+			By("Verifying no ds-pipeline-config secret exists yet")
+			Consistently(func() bool {
+				err := cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: watchTestNamespace}, &corev1.Secret{})
+				return apierrors.IsNotFound(err)
+			}, 2*time.Second, 200*time.Millisecond).Should(BeTrue(), "Secret should not exist when no DSPA is present")
+
+			By("Creating the COS credentials Secret")
+			watchS3CredSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secretName,
+					Namespace: watchTestNamespace,
+				},
+				Data: map[string][]byte{
+					accessKeyKey: []byte("testaccesskey"),
+					secretKeyKey: []byte("testsecretkey"),
+				},
+			}
+			Expect(cli.Create(ctx, watchS3CredSecret)).To(Succeed())
+
+			By("Creating the DSPA object AFTER the notebook exists")
+			watchDspaObj := &dspav1.DataSciencePipelinesApplication{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dspa",
+					Namespace: watchTestNamespace,
+				},
+				Spec: dspav1.DSPASpec{
+					ObjectStorage: &dspav1.ObjectStorage{
+						ExternalStorage: &dspav1.ExternalStorage{
+							Host:   "minio.default.svc.cluster.local",
+							Bucket: "pipelines-watch-test",
+							S3CredentialSecret: &dspav1.S3CredentialSecret{
+								SecretName: secretName,
+								AccessKey:  accessKeyKey,
+								SecretKey:  secretKeyKey,
+							},
+						},
+					},
+				},
+			}
+			Expect(cli.Create(ctx, watchDspaObj)).To(Succeed())
+
+			By("Setting DSPA Status with an API server URL")
+			watchDspaObj.Status = dspav1.DSPAStatus{
+				Components: dspav1.ComponentStatus{
+					APIServer: dspav1.ComponentDetailStatus{
+						ExternalUrl: "https://pipeline-api-watch.example.com",
+					},
+				},
+			}
+			Expect(cli.Status().Update(ctx, watchDspaObj)).To(Succeed())
+
+			By("Waiting for ds-pipeline-config Secret to be created by the DSPA watch")
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: dsSecretName, Namespace: watchTestNamespace}, &corev1.Secret{})
+			}, 15*time.Second, 500*time.Millisecond).Should(Succeed(),
+				"Secret should be created automatically when DSPA is added after notebook exists")
+
+			By("Validating the content of the ds-pipeline-config Secret")
+			var fetchedSecret corev1.Secret
+			err = cli.Get(ctx, types.NamespacedName{
+				Name:      dsSecretName,
+				Namespace: watchTestNamespace,
+			}, &fetchedSecret)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fetchedSecret.Data).To(HaveKey("odh_dsp.json"))
+			Expect(string(fetchedSecret.Data["odh_dsp.json"])).To(ContainSubstring("pipelines-watch-test"),
+				"Secret should contain the correct bucket from the DSPA")
+
+			By("Cleaning up the test resources")
+			Expect(cli.Delete(ctx, notebook)).To(Succeed())
+			Expect(cli.Delete(ctx, watchDspaObj)).To(Succeed())
+			Expect(cli.Delete(ctx, watchS3CredSecret)).To(Succeed())
 		})
 
 		AfterEach(func() {
