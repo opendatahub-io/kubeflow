@@ -28,13 +28,10 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 const (
@@ -67,14 +64,9 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 	return dspa, nil
 }
 
-func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, log logr.Logger) (map[string]interface{}, error) {
-	gatewayGVR := schema.GroupVersionResource{
-		Group:    "gateway.networking.k8s.io",
-		Version:  "v1",
-		Resource: "gateways",
-	}
-
-	obj, err := dynamicClient.Resource(gatewayGVR).Namespace(gatewayNamespace).Get(ctx, gatewayName, metav1.GetOptions{})
+func getGatewayInstance(ctx context.Context, k8sClient client.Client, log logr.Logger) (*gatewayv1.Gateway, error) {
+	gateway := &gatewayv1.Gateway{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: gatewayName, Namespace: gatewayNamespace}, gateway)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			// Skipping as Gateway CR not found (optional CR)
@@ -89,18 +81,18 @@ func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, lo
 		return nil, err
 	}
 
-	return obj.UnstructuredContent(), nil
+	return gateway, nil
 }
 
 // extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and gateway CRs used for pipeline execution.
-func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+func extractElyraRuntimeConfigInfo(ctx context.Context, gateway *gatewayv1.Gateway, dspaInstance *dspav1.DataSciencePipelinesApplication, k8sClient client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
 
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
 
 	// Extract info from DSPA spec
-	spec := dspaInstance.Spec
-	objectStorage := spec.ObjectStorage
+	dspaSpec := dspaInstance.Spec
+	objectStorage := dspaSpec.ObjectStorage
 	externalStorage := objectStorage.ExternalStorage
 
 	// Validate required fields
@@ -128,7 +120,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 
 	// Fetch secret containing credentials
 	dspaCOSSecret := &corev1.Secret{}
-	err := client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
 	if err != nil {
 		log.Error(err, "Failed to get secret", "secretName", cosSecret)
 		return nil, fmt.Errorf("failed to get secret '%s': %w", cosSecret, err)
@@ -159,24 +151,20 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 		"cos_secret":    cosSecret,
 	}
 
-	// Extract hostname for public API endpoint from Gateway CR only
+	// Extract hostname for public API endpoint from Gateway CR
 	var hostname string
 
-	if len(gatewayInstance) == 0 {
-		log.Info("Gateway CR: not present or empty - public API endpoint will not be set")
-	} else if spec, ok := gatewayInstance["spec"].(map[string]interface{}); !ok {
-		log.Info("Gateway CR: 'spec' field is missing or invalid - public API endpoint will not be set")
-	} else if listeners, ok := spec["listeners"].([]interface{}); !ok || len(listeners) == 0 {
-		log.Info("Gateway CR: 'listeners' field is missing, invalid, or empty - public API endpoint will not be set")
+	if gateway == nil {
+		log.Info("Gateway CR: not present - public API endpoint will not be set")
+	} else if len(gateway.Spec.Listeners) == 0 {
+		log.Info("Gateway CR: 'listeners' field is empty - public API endpoint will not be set")
 	} else {
 		// Extract hostname from the first listener
-		if listener, ok := listeners[0].(map[string]interface{}); ok {
-			if gatewayHostname, ok := listener["hostname"].(string); ok && gatewayHostname != "" {
-				hostname = gatewayHostname
-				log.Info("Using hostname from Gateway CR", "hostname", hostname)
-			} else {
-				log.Info("Gateway CR: 'hostname' field is missing or empty in listener - public API endpoint will not be set")
-			}
+		if gateway.Spec.Listeners[0].Hostname != nil && *gateway.Spec.Listeners[0].Hostname != "" {
+			hostname = string(*gateway.Spec.Listeners[0].Hostname)
+			log.Info("Using hostname from Gateway CR", "hostname", hostname)
+		} else {
+			log.Info("Gateway CR: 'hostname' field is missing or empty in listener - public API endpoint will not be set")
 		}
 	}
 
@@ -196,21 +184,11 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 }
 
 // NewElyraRuntimeConfigSecret defines and handles the creation, watch and update to the desired ElyraRuntimeConfig secret object
-func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, dynamicConfig *rest.Config, c client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) error {
-	dynamicClient, err := dynamic.NewForConfig(dynamicConfig)
-	if err != nil {
-		log.Error(err, "Failed to create dynamic client")
-		return err
-	}
-
+func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Context, c client.Client, notebook *nbv1.Notebook, controllerNamespace string, log logr.Logger) error {
 	// Gateway is optional: retrieve it, but continue even when it's absent.
-	gatewayInstance, err := getGatewayInstance(ctx, dynamicClient, log)
+	gateway, err := getGatewayInstance(ctx, c, log)
 	if err != nil {
 		return err
-	}
-	// Gateway CR not found (optional cr)
-	if gatewayInstance == nil {
-		gatewayInstance = map[string]interface{}{}
 	}
 
 	dspaInstance, err := getDSPAInstance(ctx, c, notebook.Namespace, log)
@@ -223,7 +201,7 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	}
 
 	// Generate DSPA-based Elyra config
-	dspData, err := extractElyraRuntimeConfigInfo(ctx, gatewayInstance, dspaInstance, c, notebook, log)
+	dspData, err := extractElyraRuntimeConfigInfo(ctx, gateway, dspaInstance, c, notebook, log)
 	if err != nil {
 		log.Error(err, "Failed to extract Elyra runtime config info")
 		return err
@@ -380,5 +358,5 @@ func MountElyraRuntimeConfigSecret(ctx context.Context, client client.Client, no
 // This function is invoked by the ODH Notebook Controller and is required for enabling Elyra functionality in notebooks.
 func (r *OpenshiftNotebookReconciler) ReconcileElyraRuntimeConfigSecret(notebook *nbv1.Notebook, ctx context.Context) error {
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
-	return r.NewElyraRuntimeConfigSecret(ctx, r.Config, r.Client, notebook, r.Namespace, log)
+	return r.NewElyraRuntimeConfigSecret(ctx, r.Client, notebook, r.Namespace, log)
 }
