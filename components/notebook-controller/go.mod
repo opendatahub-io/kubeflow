@@ -4,7 +4,8 @@ go 1.25.3
 
 require (
 	github.com/go-logr/logr v1.4.3
-	github.com/kubeflow/kubeflow/components/common v0.0.0-20220218084159-4ad0158e955e
+	// use a dummy version as we replace the dependency with our own at the end of the file
+	github.com/kubeflow/kubeflow/components/common v0.0.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.36.1
 	github.com/prometheus/client_golang v1.23.2
@@ -72,3 +73,6 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+// use sibling kubeflow packages from this repo
+replace github.com/kubeflow/kubeflow/components/common => ../common
