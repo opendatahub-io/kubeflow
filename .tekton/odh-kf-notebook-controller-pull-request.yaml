@@ -5,16 +5,17 @@ metadata:
     build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/kubeflow?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
       == "stable"
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
-    appstudio.openshift.io/component: odh-notebook-controller
+    appstudio.openshift.io/component: odh-kf-notebook-controller
     pipelines.appstudio.openshift.io/type: build
-  name: odh-notebook-controller-on-push
+  name: odh-kf-notebook-controller-on-pull-request
   namespace: open-data-hub-tenant
 spec:
   params:
@@ -23,15 +24,18 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/odh-notebook-controller:{{revision}}
+    value: quay.io/opendatahub/kubeflow-notebook-controller:{{revision}}
   - name: dockerfile
-    value: odh-notebook-controller/Dockerfile
+    value: notebook-controller/Dockerfile
   - name: path-context
     value: components
   - name: additional-tags
     value:
     - '{{target_branch}}-{{revision}}'
-    - 'odh-stable'
+    - 'odh-pr' 
+    - 'odh-pr-{{revision}}'
+  - name: pipeline-type
+    value: pull-request
   pipelineRef:
     resolver: git
     params:
@@ -42,7 +46,7 @@ spec:
     - name: pathInRepo
       value: pipeline/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-odh-notebook-controller
+    serviceAccountName: build-pipeline-odh-kf-notebook-controller
   workspaces:
   - name: git-auth
     secret:
