@@ -104,7 +104,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // TODO kept here for the datascience pipelines application server - check whether this is final or not
-// +kubebuilder:rbac:groups="route.openshift.io",resources=routes,verbs=get
+// +kubebuilder:rbac:groups="route.openshift.io",resources=routes,verbs=get;list;watch
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications/api,verbs=get;create;update;patch;delete

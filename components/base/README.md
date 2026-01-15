@@ -87,12 +87,15 @@ EOF
 Open the notebook URL in your browser:
 
 ```shell
-NOTEBOOK_NAMESPACE="test_notebook"
+APP_NAMESPACE="redhat-ods-applications"
+NOTEBOOK_NAMESPACE="test-notebook"
 NOTEBOOK_NAME="foo"
+HTTPROUTE_NAME="nb-${NOTEBOOK_NAMESPACE}-${NOTEBOOK_NAME}"
 
-GATEWAY_URL=$(oc get gateway -n openshift-ingress data-science-gateway -o jsonpath='{.spec.listeners[0].hostname}')
+GATEWAY_URL=$(oc get gateway -n openshift-ingress data-science-gateway -o jsonpath='{.spec.listeners[0].hostname}' 2>/dev/null)
+GATEWAY_URL=${GATEWAY_URL:-$(oc get route -n openshift-ingress data-science-gateway -ojsonpath='{.spec.host}')}
 
-NOTEBOOK_PATH=$(oc get httproute -n "${NOTEBOOK_NAMESPACE}" "${NOTEBOOK_NAME}" -o jsonpath='{.spec.rules[0].matches[0].path.value}')
+NOTEBOOK_PATH=$(oc get httproute -n "${APP_NAMESPACE}" "${HTTPROUTE_NAME}" -o jsonpath='{.spec.rules[0].matches[0].path.value}')
 
 firefox "https://${GATEWAY_URL}/${NOTEBOOK_PATH}"
 ```

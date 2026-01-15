@@ -455,21 +455,6 @@ var _ = Describe("Runtime images ConfigMap should be mounted", func() {
 						Expect(configMap.GetName()).To(Equal(RuntimeImagesCMName))
 						Expect(configMap.Data).To(Equal(testCase.expectedConfigMapData))
 
-						// ----------------------------------------------------------------
-						// Test workaround for the RHOAIENG-24545 - we need to manually modify
-						// the workbench so that the expected resource is mounted properly
-						// kubeflow-resource-stopped: '2025-06-25T13:53:46Z'
-						By("Running the workaround for RHOAIENG-24545")
-						// Refresh the notebook to get the latest version to avoid conflict errors
-						Eventually(func(g Gomega) {
-							err := cli.Get(ctx, client.ObjectKey{Name: testCase.notebookName, Namespace: Namespace}, notebook)
-							g.Expect(err).ToNot(HaveOccurred())
-							notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-							g.Expect(cli.Update(ctx, notebook)).Should(Succeed())
-						}, resource_reconciliation_timeout, resource_reconciliation_check_period).Should(Succeed())
-						// end of workaround
-						// ----------------------------------------------------------------
-
 						// Check volumeMounts
 						By("Fetching the created Notebook CR as typed object and volumeMounts check")
 						typedNotebook := &nbv1.Notebook{}

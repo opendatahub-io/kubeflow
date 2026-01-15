@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -102,8 +103,13 @@ func (r *CullingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// annotations for CR objects
 	if StopAnnotationIsSet(instance.ObjectMeta) {
 		log.Info("Notebook is already stopping")
-		removeAnnotations(&instance.ObjectMeta, r.Log)
-		err = r.Update(ctx, instance)
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+				return err
+			}
+			removeAnnotations(&instance.ObjectMeta, r.Log)
+			return r.Update(ctx, instance)
+		})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -115,9 +121,13 @@ func (r *CullingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	err = r.Get(ctx, types.NamespacedName{Name: instance.Name + "-0", Namespace: instance.Namespace}, foundPod)
 	if err != nil && apierrs.IsNotFound(err) {
 		log.Info("Pod not found...Will remove last-activity annotation...")
-
-		removeAnnotations(&instance.ObjectMeta, r.Log)
-		err = r.Update(ctx, instance)
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+				return err
+			}
+			removeAnnotations(&instance.ObjectMeta, r.Log)
+			return r.Update(ctx, instance)
+		})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -130,8 +140,13 @@ func (r *CullingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Initialize culling (last-activity and last-activity-check-timestamp) annotations
 	if !annotationsExist(instance) {
 		log.Info("No annotations found. Initializing last-activity and last-activity-check-timestamp annotations")
-		initializeAnnotations(&instance.ObjectMeta)
-		err = r.Update(ctx, instance)
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+				return err
+			}
+			initializeAnnotations(&instance.ObjectMeta)
+			return r.Update(ctx, instance)
+		})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -143,28 +158,47 @@ func (r *CullingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: getRequeueTime()}, nil
 	}
 
-	// Update the LAST_ACTIVITY_ANNOTATION and LAST_ACTIVITY_CHECK_TIMESTAMP_ANNOTATION
-	updateNotebookLastActivityAnnotation(&instance.ObjectMeta, r.Log)
-	updateLastCullingCheckTimestampAnnotation(&instance.ObjectMeta, r.Log)
-	// Always keep track of the last time we checked for culling
-	err = r.Update(ctx, instance)
+	// Query notebook activity from kernels/terminals API
+	// This is done outside the retry loop as it doesn't depend on the CR state
+	nm, ns := instance.Name, instance.Namespace
+	log.Info("Updating the last-activity annotation. Checking /api/kernels")
+	kernels := getNotebookApiKernels(nm, ns, r.Log)
+	log.Info("last-activity annotation exists. Checking /api/terminals")
+	terminals := getNotebookApiTerminals(nm, ns, r.Log)
+
+	// Update annotations with retry on conflict to handle concurrent updates
+	// This consolidates all annotation updates into a single atomic operation
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Re-fetch the latest version of the Notebook CR
+		if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+			return err
+		}
+
+		// Update the LAST_ACTIVITY_ANNOTATION based on kernels/terminals activity
+		updateTimestampFromKernelsActivity(&instance.ObjectMeta, kernels, r.Log)
+		updateTimestampFromTerminalsActivity(&instance.ObjectMeta, terminals, r.Log)
+
+		// Update the LAST_ACTIVITY_CHECK_TIMESTAMP_ANNOTATION
+		updateLastCullingCheckTimestampAnnotation(&instance.ObjectMeta, r.Log)
+
+		// Check if the Notebook needs to be stopped and set stop annotation
+		if notebookIsIdle(instance.ObjectMeta, r.Log) {
+			log.Info(fmt.Sprintf(
+				"Notebook %s/%s needs culling. Updating Notebook CR Annotations...",
+				instance.Namespace, instance.Name))
+
+			// Set Stop Annotation to the Notebook CR
+			setStopAnnotation(&instance.ObjectMeta, r.Metrics, r.Log)
+		}
+
+		// Single consolidated update with all annotation changes
+		return r.Update(ctx, instance)
+	})
+
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Check if the Notebook needs to be stopped
-	if notebookIsIdle(instance.ObjectMeta, r.Log) {
-		log.Info(fmt.Sprintf(
-			"Notebook %s/%s needs culling. Updating Notebook CR Annotations...",
-			instance.Namespace, instance.Name))
-
-		// Set Stop Annotation to the Notebook CR
-		setStopAnnotation(&instance.ObjectMeta, r.Metrics, r.Log)
-		err = r.Update(ctx, instance)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
 	return ctrl.Result{RequeueAfter: getRequeueTime()}, nil
 }
 
@@ -312,26 +346,6 @@ func getNotebookRecentTime(t []string, api string, log logr.Logger) string {
 		}
 	}
 	return recentTime.Format(time.RFC3339)
-}
-
-// Update LAST_ACTIVITY_ANNOTATION
-func updateNotebookLastActivityAnnotation(meta *metav1.ObjectMeta, log logr.Logger) bool {
-
-	log.Info("Updating the last-activity annotation. Checking /api/kernels")
-	nm, ns := meta.GetName(), meta.GetNamespace()
-
-	kernels := getNotebookApiKernels(nm, ns, log)
-	log.Info("last-activity annotation exists. Checking /api/terminals")
-	terminals := getNotebookApiTerminals(nm, ns, log)
-	if kernels == nil && terminals == nil {
-		log.Info("Could not GET the notebook status. Will not update last-activity.")
-		return false
-	}
-
-	kernelsBool := updateTimestampFromKernelsActivity(meta, kernels, log)
-	terminalsBool := updateTimestampFromTerminalsActivity(meta, terminals, log)
-	return kernelsBool || terminalsBool
-
 }
 
 func compareAnnotationTimeToResource(meta *metav1.ObjectMeta, resourceTime string, log logr.Logger) bool {
