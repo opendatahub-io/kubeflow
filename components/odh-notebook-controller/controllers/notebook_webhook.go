@@ -484,9 +484,9 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		mutatedNotebook.Annotations = make(map[string]string)
 	}
 	if needsRestart != NoPendingUpdates {
-		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
+		mutatedNotebook.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {
-		delete(mutatedNotebook.ObjectMeta.Annotations, updatePendingAnnotation)
+		delete(mutatedNotebook.Annotations, updatePendingAnnotation)
 	}
 
 	// Create the mutated notebook object
@@ -860,7 +860,7 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 									sort.Slice(tag.Items, func(i, j int) bool {
 										iTime := tag.Items[i].Created
 										jTime := tag.Items[j].Created
-										return iTime.Time.After(jTime.Time) //nolint:QF1008 // Reason: We are comparing metav1.Time // Lexicographical comparison of RFC3339 timestamps
+										return iTime.After(jTime.Time)
 									})
 									// Get the most recent item
 									imageHash := tag.Items[0].DockerImageReference

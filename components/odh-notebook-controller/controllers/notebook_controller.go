@@ -112,8 +112,8 @@ type OpenshiftNotebookReconciler struct {
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
-	return reflect.DeepEqual(nb1.ObjectMeta.Labels, nb2.ObjectMeta.Labels) &&
-		reflect.DeepEqual(nb1.ObjectMeta.Annotations, nb2.ObjectMeta.Annotations) &&
+	return reflect.DeepEqual(nb1.Labels, nb2.Labels) &&
+		reflect.DeepEqual(nb1.Annotations, nb2.Annotations) &&
 		reflect.DeepEqual(nb1.Spec, nb2.Spec)
 }
 
@@ -144,7 +144,7 @@ func (r *OpenshiftNotebookReconciler) RemoveReconciliationLock(notebook *nbv1.No
 	ctx context.Context) error {
 	// Wait until the image pull secret is mounted in the notebook service
 	// account
-	retry.OnError(wait.Backoff{
+	if err := retry.OnError(wait.Backoff{
 		Steps:    3,
 		Duration: 1 * time.Second,
 		Factor:   5.0,
@@ -162,7 +162,10 @@ func (r *OpenshiftNotebookReconciler) RemoveReconciliationLock(notebook *nbv1.No
 			}
 			return nil
 		},
-	)
+	); err != nil {
+		// Log the error but don't fail - the lock removal is best-effort
+		r.Log.Info("Failed to wait for image pull secret", "error", err)
+	}
 
 	// Remove the reconciliation lock annotation
 	patch := client.RawPatch(types.MergePatchType,
