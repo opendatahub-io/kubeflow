@@ -108,6 +108,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications/api,verbs=get;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get
 // +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=gateways,verbs=get;list;watch
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
@@ -479,6 +480,18 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Call the MLflow integration reconciler
+	// This will reconcile RoleBinding based on the MLflow integration annotation
+	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
+	mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
+	if err != nil {
+		log.Error(err, "Unable to reconcile MLflow integration")
+		return ctrl.Result{}, err
+	}
+	if mlflowResult.RequeueAfter > 0 {
+		return mlflowResult, nil
 	}
 
 	// Remove the reconciliation lock annotation

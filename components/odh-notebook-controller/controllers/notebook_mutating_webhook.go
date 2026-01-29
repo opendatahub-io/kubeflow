@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/go-cmp/cmp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -44,6 +45,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,6 +59,7 @@ type NotebookWebhook struct {
 	Log                 logr.Logger
 	Client              client.Client
 	Config              *rest.Config
+	DynamicClient       dynamic.Interface
 	Decoder             admission.Decoder
 	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
@@ -442,6 +445,13 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			log.Info("Feast label disabled, removing Feast config volume")
 			unmountFeastConfig(notebook)
 		}
+
+		// Handle MLflow environment variables (ODH integration flag and tracking URI)
+		err = HandleMLflowEnvVars(ctx, w.Client, w.DynamicClient, notebook, log)
+		if err != nil {
+			log.Error(err, "Failed to handle MLflow environment variables")
+			// Don't fail the webhook - MLflow integration is optional
+		}
 	}
 
 	// Inject the kube-rbac-proxy if the annotation is present
@@ -778,6 +788,62 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 		}
 	}
 	return nil
+}
+
+// UpdatesPending is either NoPendingUpdates, or a new value providing a Reason for the update.
+type UpdatesPending struct {
+	Reason string
+}
+
+var (
+	NoPendingUpdates = &UpdatesPending{}
+)
+
+// FirstDifferenceReporter is a custom go-cmp reporter that only records the first difference.
+type FirstDifferenceReporter struct {
+	path cmp.Path
+	diff string
+}
+
+func (r *FirstDifferenceReporter) PushStep(ps cmp.PathStep) {
+	r.path = append(r.path, ps)
+}
+
+func (r *FirstDifferenceReporter) Report(rs cmp.Result) {
+	if r.diff == "" && !rs.Equal() {
+		vx, vy := r.path.Last().Values()
+		r.diff = fmt.Sprintf("%#v: %+v != %+v", r.path, vx, vy)
+	}
+}
+
+func (r *FirstDifferenceReporter) PopStep() {
+	r.path = r.path[:len(r.path)-1]
+}
+
+func (r *FirstDifferenceReporter) String() string {
+	return r.diff
+}
+
+// getStructDiff compares a and b, reporting the first difference it found in a human-readable single-line string.
+func getStructDiff(ctx context.Context, a any, b any) (result string) {
+	log := logr.FromContextOrDiscard(ctx)
+
+	// calling cmp.Equal may panic, get ready for it
+	result = "failed to compute the reason for why there is a pending restart"
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error(fmt.Errorf("failed to compute struct difference: %+v", r), "Cannot determine reason for restart")
+		}
+	}()
+
+	var comparator FirstDifferenceReporter
+	eq := cmp.Equal(a, b, cmp.Reporter(&comparator))
+	if eq {
+		log.Error(nil, "Unexpectedly attempted to diff structs that are actually equal")
+	}
+	result = comparator.String()
+
+	return
 }
 
 // SetContainerImageFromRegistry checks if there is an internal registry and takes the corresponding actions to set the container.image value.

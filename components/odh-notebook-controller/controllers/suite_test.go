@@ -40,10 +40,12 @@ import (
 	imagev1 "github.com/openshift/api/image/v1"
 	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,9 +64,10 @@ import (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var (
-	cfg     *rest.Config
-	cli     client.Client
-	envTest *envtest.Environment
+	cfg               *rest.Config
+	cli               client.Client
+	testDynamicClient dynamic.Interface
+	envTest           *envtest.Environment
 
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -140,6 +143,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
+	testDynamicClient, err = dynamic.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+
 	if kubeconfigPath, found := os.LookupEnv("DEBUG_WRITE_KUBECONFIG"); found {
 		// https://github.com/rancher/fleet/blob/main/integrationtests/utils/kubeconfig.go
 		user := envtest.User{Name: "MasterOfTheSystems", Groups: []string{"system:masters"}}
@@ -179,6 +185,17 @@ var _ = BeforeSuite(func() {
 	err = cli.Create(ctx, centralNamespace)
 	Expect(err).NotTo(HaveOccurred())
 
+	// Create the Gateway namespace used by multiple test suites (ds-pipeline-config, MLflow, HTTPRoute, etc.)
+	gatewayNamespace := &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: DefaultGatewayNamespace,
+		},
+	}
+	err = cli.Create(ctx, gatewayNamespace)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	// Setup controller manager
 	webhookInstallOptions := &envTest.WebhookInstallOptions
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -210,13 +227,16 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	// Setup notebook mutating webhook
+	dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
+	Expect(err).NotTo(HaveOccurred())
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &NotebookWebhook{
-			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
-			Client:    mgr.GetClient(),
-			Config:    mgr.GetConfig(),
-			Namespace: odhNotebookControllerTestNamespace,
+			Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
+			Client:        mgr.GetClient(),
+			Config:        mgr.GetConfig(),
+			DynamicClient: dynamicClient,
+			Namespace:     odhNotebookControllerTestNamespace,
 			KubeRbacProxyConfig: KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},
@@ -224,6 +244,16 @@ var _ = BeforeSuite(func() {
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
+
+	// Setup notebook validating webhook
+	notebookValidatingWebhook := &webhook.Admission{
+		Handler: &NotebookValidatingWebhook{
+			Log:     ctrl.Log.WithName("controllers").WithName("odh-notebook-validating-webhook"),
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(mgr.GetScheme()),
+		},
+	}
+	hookServer.Register("/validate-notebook-v1", notebookValidatingWebhook)
 
 	// Start the manager
 	go func() {
