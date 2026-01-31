@@ -149,6 +149,104 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
+		It("Should preserve extra labels (e.g., sharding) when reconciling HTTPRoute", func() {
+			const shardLabelKey = "route-shard"
+			const shardLabelValue = "blue"
+
+			By("By creating a new Notebook dedicated to this test")
+			shardedNotebookName := "test-notebook-shard-label"
+			shardedNotebook := createNotebook(shardedNotebookName, Namespace)
+			Expect(cli.Create(ctx, shardedNotebook)).Should(Succeed())
+
+			shardedHTTPRoute := &gatewayv1.HTTPRoute{}
+
+			By("By checking that the controller has created the HTTPRoute")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + shardedNotebookName, Namespace: odhNotebookControllerTestNamespace}
+				return cli.Get(ctx, key, shardedHTTPRoute)
+			}, duration, interval).Should(Succeed())
+
+			shardedHTTPRouteName := "nb-" + Namespace + "-" + shardedNotebookName
+			expectedShardedHTTPRoute := gatewayv1.HTTPRoute{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      shardedHTTPRouteName,
+					Namespace: odhNotebookControllerTestNamespace, // Central namespace
+					Labels: map[string]string{
+						"notebook-name":      shardedNotebookName,
+						"notebook-namespace": Namespace,
+					},
+				},
+				Spec: gatewayv1.HTTPRouteSpec{
+					CommonRouteSpec: gatewayv1.CommonRouteSpec{
+						ParentRefs: []gatewayv1.ParentReference{
+							{
+								Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
+								Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+								Name:      gatewayv1.ObjectName("data-science-gateway"),
+								Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+							},
+						},
+					},
+					Rules: []gatewayv1.HTTPRouteRule{
+						{
+							Matches: []gatewayv1.HTTPRouteMatch{
+								{
+									Path: &gatewayv1.HTTPPathMatch{
+										Type:  &pathPrefix,
+										Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + shardedNotebookName}[0]),
+									},
+								},
+							},
+							BackendRefs: []gatewayv1.HTTPBackendRef{
+								{
+									BackendRef: gatewayv1.BackendRef{
+										BackendObjectReference: gatewayv1.BackendObjectReference{
+											Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
+											Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+											Name:      gatewayv1.ObjectName(shardedNotebookName),
+											Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
+											Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										},
+										Weight: func() *int32 { w := int32(1); return &w }(),
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			By("By simulating a manual HTTPRoute spec modification and adding a shard label")
+			patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"`+shardLabelKey+`":"`+shardLabelValue+`"}},"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
+			Expect(cli.Patch(ctx, shardedHTTPRoute, patch)).Should(Succeed())
+
+			By("By checking that the controller restored the spec while preserving the shard label")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: "nb-" + Namespace + "-" + shardedNotebookName, Namespace: odhNotebookControllerTestNamespace}
+				err := cli.Get(ctx, key, shardedHTTPRoute)
+				if err != nil {
+					return err
+				}
+				backendName := ""
+				if len(shardedHTTPRoute.Spec.Rules) > 0 && len(shardedHTTPRoute.Spec.Rules[0].BackendRefs) > 0 {
+					backendName = string(shardedHTTPRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)
+				}
+				if backendName != shardedNotebookName {
+					return fmt.Errorf("expected backend name %q, got %q", shardedNotebookName, backendName)
+				}
+				if shardedHTTPRoute.Labels[shardLabelKey] != shardLabelValue {
+					return fmt.Errorf("expected %s=%q, got %q", shardLabelKey, shardLabelValue, shardedHTTPRoute.Labels[shardLabelKey])
+				}
+				return nil
+			}, duration, interval).Should(Succeed())
+
+			Expect(shardedHTTPRoute.GetLabels()).To(HaveKeyWithValue(shardLabelKey, shardLabelValue))
+			Expect(*shardedHTTPRoute).To(BeMatchingK8sResource(expectedShardedHTTPRoute, CompareNotebookHTTPRoutes))
+
+			By("By deleting the Notebook created for this test")
+			Expect(cli.Delete(ctx, shardedNotebook)).Should(Succeed())
+		})
+
 		It("Should recreate the HTTPRoute when deleted", func() {
 			By("By deleting the notebook HTTPRoute")
 			Expect(cli.Delete(ctx, httpRoute)).Should(Succeed())
@@ -258,7 +356,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Update(ctx, referenceGrant)
 			}, duration, interval).Should(Succeed())
 
-			By("By checking that the controller has restored the ReferenceGrant labels")
+			By("By checking that the controller has restored the managed ReferenceGrant labels (without removing extra labels)")
 			Eventually(func() map[string]string {
 				if err := cli.Get(ctx, referenceGrantKey, referenceGrant); err != nil {
 					return nil
@@ -267,6 +365,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(And(
 				HaveKeyWithValue("app.kubernetes.io/managed-by", "odh-notebook-controller"),
 				HaveKeyWithValue("opendatahub.io/component", "notebook-controller"),
+				HaveKeyWithValue("wrong-label", "wrong-value"),
 			))
 		})
 

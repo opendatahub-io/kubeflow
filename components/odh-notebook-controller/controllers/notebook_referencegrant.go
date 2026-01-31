@@ -70,9 +70,21 @@ func NewNotebookReferenceGrant(namespace string, centralNamespace string) *gatew
 
 // CompareNotebookReferenceGrants checks if two ReferenceGrants are equal, if not return false
 func CompareNotebookReferenceGrants(rg1 gatewayv1beta1.ReferenceGrant, rg2 gatewayv1beta1.ReferenceGrant) bool {
-	// Two ReferenceGrants will be equal if the labels and specs are identical
-	return reflect.DeepEqual(rg1.Labels, rg2.Labels) &&
-		reflect.DeepEqual(rg1.Spec, rg2.Spec)
+	// Only compare controller-managed labels. Extra labels (e.g., added for
+	// sharding / policy / ops tooling) should not cause perpetual reconciliation.
+	managedLabelKeys := []string{
+		"app.kubernetes.io/managed-by",
+		"opendatahub.io/component",
+	}
+	for _, k := range managedLabelKeys {
+		v1, ok1 := rg1.Labels[k]
+		v2, ok2 := rg2.Labels[k]
+		if ok1 != ok2 || v1 != v2 {
+			return false
+		}
+	}
+
+	return reflect.DeepEqual(rg1.Spec, rg2.Spec)
 }
 
 // ReconcileReferenceGrant ensures a ReferenceGrant exists in the Notebook's namespace
@@ -112,7 +124,19 @@ func (r *OpenshiftNotebookReconciler) ReconcileReferenceGrant(notebook *nbv1.Not
 		if !CompareNotebookReferenceGrants(*desiredRefGrant, *foundRefGrant) {
 			log.Info("Updating ReferenceGrant to match desired spec and labels")
 			foundRefGrant.Spec = desiredRefGrant.Spec
-			foundRefGrant.Labels = desiredRefGrant.Labels
+
+			if foundRefGrant.Labels == nil {
+				foundRefGrant.Labels = map[string]string{}
+			}
+			// Only reconcile controller-managed labels; preserve any others.
+			for _, k := range []string{"app.kubernetes.io/managed-by", "opendatahub.io/component"} {
+				if desiredRefGrant.Labels != nil {
+					if v, ok := desiredRefGrant.Labels[k]; ok {
+						foundRefGrant.Labels[k] = v
+					}
+				}
+			}
+
 			err = r.Update(ctx, foundRefGrant)
 			if err != nil {
 				log.Error(err, "Unable to update ReferenceGrant")
