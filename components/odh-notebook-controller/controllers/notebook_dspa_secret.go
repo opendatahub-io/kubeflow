@@ -394,8 +394,12 @@ func SyncElyraRuntimeConfigSecret(ctx context.Context, cli client.Client, config
 
 	if requiresUpdate {
 		log.Info("Updating existing Elyra runtime config secret", "name", elyraRuntimeSecretName)
-		// Set correct label and data
-		existingSecret.Labels = desiredSecret.Labels
+		// Set controller-managed label and data. Preserve any other labels that
+		// may have been added by external tooling.
+		if existingSecret.Labels == nil {
+			existingSecret.Labels = map[string]string{}
+		}
+		existingSecret.Labels[managedByKey] = managedByValue
 		existingSecret.Data = desiredSecret.Data
 
 		if err := cli.Update(ctx, existingSecret); err != nil {
