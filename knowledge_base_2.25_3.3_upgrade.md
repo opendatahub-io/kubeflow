@@ -1267,6 +1267,38 @@ jupyterdatascience251-aadmin-created-namespace-oauth-client # DELETE
 jupyterdatascience252-aadmin-created-namespace-oauth-client # DELETE
 ```
 
+### Confirmed: OAuthClients NOT Cleaned Up After Notebook Deletion (2026-02-05)
+
+**Test performed:** Deleted all notebooks in `aadmin-created-namespace`, then checked remaining resources.
+
+**What was properly cleaned up:**
+| Resource Type | Status |
+|---------------|--------|
+| ServiceAccounts | ✅ Cleaned (only default OpenShift SAs remain) |
+| Secrets | ✅ Cleaned (only default ones remain) |
+| Services | ✅ Cleaned (all notebook services deleted) |
+| Routes | ✅ Cleaned (all notebook routes deleted) |
+| RoleBindings | ✅ Cleaned (only default OpenShift ones remain) |
+| PVCs | ✅ Preserved intentionally (user data) |
+| ConfigMaps | ✅ Expected (namespace-wide ODH configs, not notebook-specific) |
+
+**What was NOT cleaned up (ORPHANED):**
+```bash
+$ oc get oauthclients | grep aadmin-created-namespace
+codeserver251-aadmin-created-namespace-oauth-client
+codeserver252-aadmin-created-namespace-oauth-client
+jupyterdatascience251-aadmin-created-namespace-oauth-client
+jupyterdatascience252-aadmin-created-namespace-oauth-client
+```
+
+**Root cause:** During migration, we removed the `notebook-oauth-client-finalizer.opendatahub.io` finalizer. Without this finalizer, the controller doesn't clean up the OAuthClient when the notebook is deleted.
+
+**Required manual cleanup:**
+```bash
+# Delete orphaned OAuthClients for a namespace
+oc get oauthclients -o name | grep "<NAMESPACE>-oauth-client" | xargs oc delete
+```
+
 ### Complete Cleanup Script
 
 ```bash
@@ -1417,19 +1449,42 @@ oc get csv <NAME> -n redhat-ods-operator -o jsonpath='{.spec.replaces}'
 
 ### Cleanup Commands
 
+**Scenario 1: Notebook still exists (migrated but running)**
+
+These resources remain while notebook is running and need manual cleanup:
+
 ```bash
-# Delete old Route (manual - controller can't do this)
+# Delete old Route (controller doesn't clean this)
 oc delete route <NOTEBOOK> -n <NAMESPACE>
 
-# Delete TLS service
+# Delete TLS service (now unused)
 oc delete svc <NOTEBOOK>-tls -n <NAMESPACE>
 
-# Delete OAuthClient
+# Delete OAuthClient (cluster-scoped, finalizer was removed)
 oc delete oauthclient <NOTEBOOK>-<NAMESPACE>-oauth-client
 
-# Delete secrets
+# Delete oauth secrets (now unused)
 oc delete secret <NOTEBOOK>-tls -n <NAMESPACE>
 oc delete secret <NOTEBOOK>-oauth-config -n <NAMESPACE>
+oc delete secret <NOTEBOOK>-oauth-client -n <NAMESPACE>
+```
+
+**Scenario 2: Notebook deleted entirely**
+
+When notebook is deleted, most resources are cleaned up via owner references. Only OAuthClients remain orphaned:
+
+```bash
+# These are AUTOMATICALLY cleaned up when notebook is deleted:
+# - Routes
+# - Services (including -tls)
+# - Secrets (oauth-related)
+# - ServiceAccount
+
+# These remain ORPHANED (must delete manually):
+oc delete oauthclient <NOTEBOOK>-<NAMESPACE>-oauth-client
+
+# Bulk cleanup for a namespace:
+oc get oauthclients -o name | grep "<NAMESPACE>-oauth-client" | xargs oc delete
 ```
 
 ### Debugging
@@ -1699,3 +1754,5 @@ listen tcp 0.0.0.0:8443: bind: address already in use
 | 2026-02-05 | Jiri Daněk | **CRITICAL CORRECTION:** Discovered port 8443 conflict - oauth-proxy and kube-rbac-proxy cannot coexist. Migration must be atomic (annotations + container removal) on STOPPED workbenches only. Updated all scripts. |
 | 2026-02-05 | Jiri Daněk | Discovered Dashboard auto-migration: editing workbench description triggers proper migration (webhook replaces oauth-proxy). Dashboard URL bug: shows wrong path. |
 | 2026-02-05 | Jiri Daněk | Documented RStudio/CodeServer redirect issue - this is expected behavior per migration notes. RStudio requires BuildConfig rebuild, CodeServer needs 2025.2 from 3.x. |
+| 2026-02-05 | Jiri Daněk | Confirmed OAuthClients are NOT cleaned up after notebook deletion (finalizer was removed during migration). Added cleanup instructions. |
+| 2026-02-05 | Jiri Daněk | Tested cluster-wide migration script: correctly skips running workbenches, migrates stopped ones. |
