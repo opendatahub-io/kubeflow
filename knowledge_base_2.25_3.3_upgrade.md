@@ -544,6 +544,26 @@ A phased approach allows admins to prepare migrations ahead of time and coordina
 
 **IMPORTANT:** Just adding `inject-auth: true` to a running pod won't inject kube-rbac-proxy - the webhook only runs on pod creation. The full migration requires a pod restart.
 
+**What happens if user restarts after Phase 1, before Phase 2?**
+
+If Phase 2 (container removal) is skipped and user restarts the workbench:
+
+| Component | State |
+|-----------|-------|
+| oauth-proxy container | Still present (from stored spec) |
+| kube-rbac-proxy container | **Injected** (by webhook on restart) |
+| Pod containers | **3 total** (notebook + oauth-proxy + kube-rbac-proxy) |
+| New Gateway route | **Works** (via kube-rbac-proxy) |
+| Old OpenShift route | **Works** (via oauth-proxy, if not deleted) |
+
+**This is a valid intermediate state:**
+- Both auth mechanisms work simultaneously
+- Users can access via either old or new URLs
+- Extra resource usage (two proxy containers)
+- Orphaned resources still need cleanup (Phase 3)
+
+**Recommendation:** Phase 2 can be done opportunistically after user restarts. The workbench functions correctly, just with extra overhead. Clean up when convenient.
+
 #### Phase 1: Preparation Script (Admin - Safe While Running)
 
 This phase prepares notebooks for migration but doesn't restart them. Old oauth-proxy routes continue working.
