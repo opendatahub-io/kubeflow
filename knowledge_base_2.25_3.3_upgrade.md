@@ -448,6 +448,46 @@ https://<notebook>-<namespace>.apps.<cluster>/
 https://<notebook>-<namespace>.apps.<cluster>/notebook/<namespace>/<notebook>
 ```
 
+### 6. Dashboard Auto-Migration on Edit (Discovered Behavior)
+
+**Scenario:** User edits workbench description via Dashboard after RHOAI 3.x upgrade.
+
+**What happens:**
+1. Dashboard adds `inject-auth: true` annotation
+2. Triggers pod restart
+3. Webhook injects kube-rbac-proxy AND **removes** oauth-proxy from spec
+4. Pod starts successfully (2/2) - no port conflict
+5. Old Route/Service become orphaned (no endpoints)
+
+**Confirmed on `rstudioon225`:**
+```
+Before edit:
+  inject-auth: <not set>
+  inject-oauth: true
+  Containers: rstudioon225 oauth-proxy
+
+After edit (description changed):
+  inject-auth: true
+  inject-oauth: true (still present - bug?)
+  Containers: rstudioon225 kube-rbac-proxy
+  Pod: 2/2 Running
+```
+
+**Issues with auto-migration:**
+
+| Issue | Details |
+|-------|---------|
+| **Wrong Dashboard URL** | Shows `/rstudio/` instead of `/notebook/auser-created-project/rstudioon225` |
+| **Old Route broken** | Points to `-tls` service which has no endpoints (oauth-proxy removed) |
+| **inject-oauth not cleaned** | Old annotation remains even though oauth-proxy is gone |
+
+**Correct Gateway URL format:**
+```
+https://data-science-gateway.apps.<CLUSTER>/notebook/<namespace>/<notebook-name>
+```
+
+**Impact:** This is actually a **cleaner migration** than manual Phase 1+2 because Dashboard triggers webhook which properly replaces oauth-proxy instead of adding alongside.
+
 ---
 
 ## Migration Guide
@@ -1557,3 +1597,4 @@ listen tcp 0.0.0.0:8443: bind: address already in use
 | 2026-02-05 | Jiri Daněk | Added Case Study appendix: live migration of medium-pytorch-gpu-later with exact commands and outputs                                                                                                   |
 | 2026-02-05 | Jiri Daněk | Sanitized document and git history: replaced internal cluster domain with `<CLUSTER_DOMAIN>` using `git filter-repo --replace-text <(echo "xxxyyyzzz==><CLUSTER_DOMAIN>") --refs HEAD~10..HEAD --force` |
 | 2026-02-05 | Jiri Daněk | **CRITICAL CORRECTION:** Discovered port 8443 conflict - oauth-proxy and kube-rbac-proxy cannot coexist. Migration must be atomic (annotations + container removal) on STOPPED workbenches only. Updated all scripts. |
+| 2026-02-05 | Jiri Daněk | Discovered Dashboard auto-migration: editing workbench description triggers proper migration (webhook replaces oauth-proxy). Dashboard URL bug: shows wrong path. |
