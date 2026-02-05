@@ -557,10 +557,24 @@ oc patch notebook <NAME> -n <NAMESPACE> --type='json' -p="[
 | **Combined 1+2** | Per-workbench | ⚠️ **MUST be stopped** | Coordinate with users |
 | **Phase 3** | Cluster-wide | Safe anytime | After workbenches restarted |
 
-**What happens if Phase 1 is done on running workbench and user restarts:**
+**What happens to UNMIGRATED workbenches when stopped/started:**
 
 | Component | State | Result |
 |-----------|-------|--------|
+| inject-auth annotation | Not set | Controller doesn't inject kube-rbac-proxy |
+| inject-oauth annotation | true | Old 2.x auth style |
+| oauth-proxy container | Present (from stored spec) | Binds port 8443 |
+| Pod status | ✅ **Running (2/2)** | Only oauth-proxy, no conflict |
+| Old Route URL | ✅ Works | oauth-proxy handles auth |
+| Gateway URL | ❌ 500 error | Points to non-existent kube-rbac-proxy service |
+
+**Confirmed:** `rstudioon225` was stopped and started after upgrade without migration - works fine because `inject-auth` is not set.
+
+**What happens if Phase 1 is done on running workbench and user restarts (DANGEROUS):**
+
+| Component | State | Result |
+|-----------|-------|--------|
+| inject-auth annotation | true | Controller injects kube-rbac-proxy |
 | oauth-proxy container | Still present (from stored spec) | Binds port 8443 first |
 | kube-rbac-proxy container | Injected (by webhook) | **FAILS: port 8443 in use** |
 | Pod status | **CrashLoopBackOff** | kube-rbac-proxy crashes repeatedly |
