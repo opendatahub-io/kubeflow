@@ -571,203 +571,276 @@ oc patch notebook <NAME> -n <NAMESPACE> --type='json' -p="[
 
 #### Combined Phase 1+2: Migrate Stopped Workbenches
 
-**CRITICAL:** Only run on **STOPPED** workbenches. Both annotation update and oauth-proxy removal must happen together.
+#### Single Workbench Migration Script
+
+Use this to migrate one workbench at a time. **Workbench must be STOPPED.**
 
 ```bash
 #!/bin/bash
-# phase1_cluster_wide_migration.sh
-# SAFE to run on ALL workbenches cluster-wide - no restarts triggered
-# Run this immediately after RHOAI 3.3 upgrade
+# migrate_workbench.sh
+# Migrate a single workbench from 2.x (oauth-proxy) to 3.x (kube-rbac-proxy)
+# CRITICAL: Workbench MUST be stopped before running this script!
 
 set -euo pipefail
 
-LOG_FILE="migration_phase1_$(date +%Y%m%d_%H%M%S).log"
+NAMESPACE="${1:?Usage: $0 <namespace> <notebook-name>}"
+NAME="${2:?Usage: $0 <namespace> <notebook-name>}"
+
+LOG_FILE="migrate_${NAMESPACE}_${NAME}_$(date +%Y%m%d_%H%M%S).log"
 
 echo "================================================================" | tee -a "$LOG_FILE"
-echo "RHOAI 3.3 Migration - Phase 1: Cluster-Wide Annotation Update" | tee -a "$LOG_FILE"
+echo "RHOAI 3.3 Migration: $NAMESPACE/$NAME" | tee -a "$LOG_FILE"
 echo "Started: $(date)" | tee -a "$LOG_FILE"
 echo "================================================================" | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
-echo "This phase is SAFE - no workbenches will restart" | tee -a "$LOG_FILE"
-echo "Workbenches will self-migrate when users restart them" | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
 
-# Count totals
+# Step 1: Verify workbench is STOPPED
+echo "" | tee -a "$LOG_FILE"
+echo "Step 1: Checking workbench status..." | tee -a "$LOG_FILE"
+REPLICAS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+if [ "${REPLICAS:-0}" != "0" ]; then
+    echo "ERROR: Workbench is RUNNING (replicas=$REPLICAS)" | tee -a "$LOG_FILE"
+    echo "" | tee -a "$LOG_FILE"
+    echo "You MUST stop the workbench first:" | tee -a "$LOG_FILE"
+    echo "  oc patch notebook $NAME -n $NAMESPACE --type='merge' \\" | tee -a "$LOG_FILE"
+    echo "    -p '{\"metadata\":{\"annotations\":{\"kubeflow-resource-stopped\":\"yes\"}}}'" | tee -a "$LOG_FILE"
+    echo "" | tee -a "$LOG_FILE"
+    echo "Then wait for pod to terminate and re-run this script." | tee -a "$LOG_FILE"
+    exit 1
+fi
+echo "  ✓ Workbench is stopped" | tee -a "$LOG_FILE"
+
+# Step 2: Check current state
+echo "" | tee -a "$LOG_FILE"
+echo "Step 2: Checking current state..." | tee -a "$LOG_FILE"
+HAS_INJECT_OAUTH=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth}' 2>/dev/null || echo "")
+HAS_INJECT_AUTH=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-auth}' 2>/dev/null || echo "")
+HAS_OAUTH_PROXY=$(oc get notebook "$NAME" -n "$NAMESPACE" -o json | jq -e '.spec.template.spec.containers | map(.name) | any(. == "oauth-proxy")' 2>/dev/null || echo "false")
+
+echo "  inject-oauth: ${HAS_INJECT_OAUTH:-<not set>}" | tee -a "$LOG_FILE"
+echo "  inject-auth: ${HAS_INJECT_AUTH:-<not set>}" | tee -a "$LOG_FILE"
+echo "  oauth-proxy container: $HAS_OAUTH_PROXY" | tee -a "$LOG_FILE"
+
+if [ "$HAS_INJECT_AUTH" = "true" ] && [ -z "$HAS_INJECT_OAUTH" ] && [ "$HAS_OAUTH_PROXY" = "false" ]; then
+    echo "" | tee -a "$LOG_FILE"
+    echo "Workbench is already fully migrated. Nothing to do." | tee -a "$LOG_FILE"
+    exit 0
+fi
+
+# Step 3: Update annotations
+echo "" | tee -a "$LOG_FILE"
+echo "Step 3: Updating annotations..." | tee -a "$LOG_FILE"
+
+if oc annotate notebook "$NAME" -n "$NAMESPACE" \
+    notebooks.opendatahub.io/inject-auth="true" \
+    --overwrite 2>>"$LOG_FILE"; then
+    echo "  ✓ Added inject-auth=true" | tee -a "$LOG_FILE"
+else
+    echo "  ✗ Failed to add inject-auth annotation" | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+oc annotate notebook "$NAME" -n "$NAMESPACE" \
+    notebooks.opendatahub.io/inject-oauth- \
+    notebooks.opendatahub.io/oauth-logout-url- \
+    2>/dev/null || true
+echo "  ✓ Removed legacy annotations" | tee -a "$LOG_FILE"
+
+# Step 4: Remove OAuth finalizer
+echo "" | tee -a "$LOG_FILE"
+echo "Step 4: Removing OAuth finalizer..." | tee -a "$LOG_FILE"
+FINALIZERS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.finalizers}' 2>/dev/null || echo "[]")
+if echo "$FINALIZERS" | grep -q "notebook-oauth-client-finalizer"; then
+    NEW_FINALIZERS=$(echo "$FINALIZERS" | jq -c '[.[] | select(. != "notebook-oauth-client-finalizer.opendatahub.io")]')
+    
+    if oc patch notebook "$NAME" -n "$NAMESPACE" --type='merge' \
+        -p "{\"metadata\":{\"finalizers\":$NEW_FINALIZERS}}" 2>>"$LOG_FILE"; then
+        echo "  ✓ Removed OAuth finalizer" | tee -a "$LOG_FILE"
+    else
+        echo "  ✗ Failed to remove OAuth finalizer" | tee -a "$LOG_FILE"
+    fi
+else
+    echo "  ✓ No OAuth finalizer present" | tee -a "$LOG_FILE"
+fi
+
+# Step 5: Remove oauth-proxy container (CRITICAL - prevents port conflict)
+echo "" | tee -a "$LOG_FILE"
+echo "Step 5: Removing oauth-proxy container..." | tee -a "$LOG_FILE"
+OAUTH_INDEX=$(oc get notebook "$NAME" -n "$NAMESPACE" -o json | \
+    jq '.spec.template.spec.containers | to_entries | .[] | select(.value.name == "oauth-proxy") | .key' 2>/dev/null || echo "")
+
+if [ -n "$OAUTH_INDEX" ]; then
+    echo "  Found oauth-proxy at container index $OAUTH_INDEX" | tee -a "$LOG_FILE"
+    
+    if oc patch notebook "$NAME" -n "$NAMESPACE" --type='json' -p="[
+      {\"op\":\"test\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX/name\",\"value\":\"oauth-proxy\"},
+      {\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX\"}
+    ]" 2>>"$LOG_FILE"; then
+        echo "  ✓ Removed oauth-proxy container" | tee -a "$LOG_FILE"
+    else
+        echo "  ✗ Failed to remove oauth-proxy container" | tee -a "$LOG_FILE"
+        echo "" | tee -a "$LOG_FILE"
+        echo "WARNING: If you start the workbench now, it will CrashLoopBackOff!" | tee -a "$LOG_FILE"
+        echo "Both oauth-proxy and kube-rbac-proxy try to bind port 8443." | tee -a "$LOG_FILE"
+        exit 1
+    fi
+else
+    echo "  ✓ No oauth-proxy container present" | tee -a "$LOG_FILE"
+fi
+
+# Done
+echo "" | tee -a "$LOG_FILE"
+echo "================================================================" | tee -a "$LOG_FILE"
+echo "Migration Complete: $(date)" | tee -a "$LOG_FILE"
+echo "Log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
+echo "================================================================" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "NEXT STEPS:" | tee -a "$LOG_FILE"
+echo "1. Start the workbench:" | tee -a "$LOG_FILE"
+echo "   oc patch notebook $NAME -n $NAMESPACE --type='merge' \\" | tee -a "$LOG_FILE"
+echo "     -p '{\"metadata\":{\"annotations\":{\"kubeflow-resource-stopped\":null}}}'" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "2. Verify pod has 2 containers (notebook + kube-rbac-proxy):" | tee -a "$LOG_FILE"
+echo "   oc get pod ${NAME}-0 -n $NAMESPACE" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "3. Test Gateway URL works:" | tee -a "$LOG_FILE"
+echo "   https://data-science-gateway.<CLUSTER>/notebook/$NAMESPACE/$NAME" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+echo "4. Run cleanup script to remove orphaned resources (OAuthClient, Route, etc.)" | tee -a "$LOG_FILE"
+```
+
+---
+
+#### Cluster-Wide Migration Script (Stopped Workbenches Only)
+
+This script migrates ALL stopped workbenches across the cluster. Running workbenches are **skipped** - coordinate with users to stop them first.
+
+```bash
+#!/bin/bash
+# migrate_all_stopped.sh
+# Migrate all STOPPED workbenches cluster-wide
+# Running workbenches are SKIPPED - coordinate with users to stop them first
+
+set -euo pipefail
+
+LOG_FILE="migration_cluster_$(date +%Y%m%d_%H%M%S).log"
+
+echo "================================================================" | tee -a "$LOG_FILE"
+echo "RHOAI 3.3 Migration - Cluster-Wide (Stopped Workbenches Only)" | tee -a "$LOG_FILE"
+echo "Started: $(date)" | tee -a "$LOG_FILE"
+echo "================================================================" | tee -a "$LOG_FILE"
+
 TOTAL=0
 MIGRATED=0
-ALREADY_DONE=0
+SKIPPED_RUNNING=0
+SKIPPED_DONE=0
 ERRORS=0
 
-# Get all notebooks with inject-oauth annotation (unmigrated 2.x workbenches)
+# Find all unmigrated workbenches (have inject-oauth OR have oauth-proxy container)
+echo "" | tee -a "$LOG_FILE"
 echo "Scanning for unmigrated workbenches..." | tee -a "$LOG_FILE"
 
-# Process all notebooks
-oc get notebooks -A -o json | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name)"' | while read NB; do
+oc get notebooks -A -o json | jq -r '
+    .items[] |
+    select(
+        .metadata.annotations["notebooks.opendatahub.io/inject-oauth"] == "true" or
+        (.spec.template.spec.containers | map(.name) | any(. == "oauth-proxy"))
+    ) |
+    "\(.metadata.namespace)/\(.metadata.name)"
+' | while read NB; do
     NAMESPACE=$(echo "$NB" | cut -d'/' -f1)
     NAME=$(echo "$NB" | cut -d'/' -f2)
     
-    # Check current state
-    HAS_INJECT_OAUTH=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth}' 2>/dev/null || echo "")
+    ((TOTAL++)) || true
+    
+    echo "" | tee -a "$LOG_FILE"
+    echo "Processing: $NAMESPACE/$NAME" | tee -a "$LOG_FILE"
+    
+    # Check if already fully migrated
     HAS_INJECT_AUTH=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-auth}' 2>/dev/null || echo "")
+    HAS_INJECT_OAUTH=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth}' 2>/dev/null || echo "")
+    HAS_OAUTH_PROXY=$(oc get notebook "$NAME" -n "$NAMESPACE" -o json | jq -e '.spec.template.spec.containers | map(.name) | any(. == "oauth-proxy")' 2>/dev/null || echo "false")
     
-    # Skip if already migrated
-    if [ "$HAS_INJECT_AUTH" = "true" ] && [ -z "$HAS_INJECT_OAUTH" ]; then
-        echo "SKIP: $NAMESPACE/$NAME (already migrated)" | tee -a "$LOG_FILE"
+    if [ "$HAS_INJECT_AUTH" = "true" ] && [ -z "$HAS_INJECT_OAUTH" ] && [ "$HAS_OAUTH_PROXY" = "false" ]; then
+        echo "  SKIP: Already fully migrated" | tee -a "$LOG_FILE"
+        ((SKIPPED_DONE++)) || true
         continue
     fi
-    
-    # Skip if no oauth annotation (not a 2.x workbench)
-    if [ -z "$HAS_INJECT_OAUTH" ] && [ -z "$HAS_INJECT_AUTH" ]; then
-        echo "SKIP: $NAMESPACE/$NAME (no auth annotations - custom workbench?)" | tee -a "$LOG_FILE"
-        continue
-    fi
-    
-    echo "MIGRATE: $NAMESPACE/$NAME" | tee -a "$LOG_FILE"
     
     # Check if running
     REPLICAS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
     if [ "${REPLICAS:-0}" != "0" ]; then
-        echo "  Status: RUNNING (will self-migrate on next restart)" | tee -a "$LOG_FILE"
-    else
-        echo "  Status: STOPPED (will migrate on next start)" | tee -a "$LOG_FILE"
+        echo "  SKIP: Workbench is RUNNING - must be stopped first" | tee -a "$LOG_FILE"
+        ((SKIPPED_RUNNING++)) || true
+        continue
     fi
     
-    # Add inject-auth annotation
+    echo "  Status: Stopped - proceeding with migration" | tee -a "$LOG_FILE"
+    
+    # Update annotations
     if oc annotate notebook "$NAME" -n "$NAMESPACE" \
         notebooks.opendatahub.io/inject-auth="true" \
         --overwrite 2>>"$LOG_FILE"; then
-        echo "  ✓ Added inject-auth annotation" | tee -a "$LOG_FILE"
+        echo "  ✓ Added inject-auth=true" | tee -a "$LOG_FILE"
     else
-        echo "  ✗ Failed to add inject-auth annotation" | tee -a "$LOG_FILE"
+        echo "  ✗ Failed to add inject-auth" | tee -a "$LOG_FILE"
+        ((ERRORS++)) || true
+        continue
     fi
     
-    # Remove old annotations (ignore errors if not present)
     oc annotate notebook "$NAME" -n "$NAMESPACE" \
         notebooks.opendatahub.io/inject-oauth- \
         notebooks.opendatahub.io/oauth-logout-url- \
         2>/dev/null || true
     echo "  ✓ Removed legacy annotations" | tee -a "$LOG_FILE"
     
-    # Remove OAuth finalizer if present
-    FINALIZERS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.finalizers}' 2>/dev/null || echo "")
+    # Remove OAuth finalizer
+    FINALIZERS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.finalizers}' 2>/dev/null || echo "[]")
     if echo "$FINALIZERS" | grep -q "notebook-oauth-client-finalizer"; then
-        # Find finalizer index
-        FINALIZER_JSON=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.finalizers}')
-        # Use jq to find and remove the specific finalizer
-        NEW_FINALIZERS=$(echo "$FINALIZER_JSON" | jq -c '[.[] | select(. != "notebook-oauth-client-finalizer.opendatahub.io")]')
-        
-        if oc patch notebook "$NAME" -n "$NAMESPACE" --type='merge' \
-            -p "{\"metadata\":{\"finalizers\":$NEW_FINALIZERS}}" 2>>"$LOG_FILE"; then
-            echo "  ✓ Removed OAuth finalizer" | tee -a "$LOG_FILE"
-        else
-            echo "  ✗ Failed to remove OAuth finalizer" | tee -a "$LOG_FILE"
-        fi
+        NEW_FINALIZERS=$(echo "$FINALIZERS" | jq -c '[.[] | select(. != "notebook-oauth-client-finalizer.opendatahub.io")]')
+        oc patch notebook "$NAME" -n "$NAMESPACE" --type='merge' \
+            -p "{\"metadata\":{\"finalizers\":$NEW_FINALIZERS}}" 2>>"$LOG_FILE" || true
+        echo "  ✓ Removed OAuth finalizer" | tee -a "$LOG_FILE"
     fi
     
-    echo "" | tee -a "$LOG_FILE"
+    # Remove oauth-proxy container (CRITICAL - prevents port 8443 conflict)
+    OAUTH_INDEX=$(oc get notebook "$NAME" -n "$NAMESPACE" -o json | \
+        jq '.spec.template.spec.containers | to_entries | .[] | select(.value.name == "oauth-proxy") | .key' 2>/dev/null || echo "")
+    
+    if [ -n "$OAUTH_INDEX" ]; then
+        if oc patch notebook "$NAME" -n "$NAMESPACE" --type='json' -p="[
+          {\"op\":\"test\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX/name\",\"value\":\"oauth-proxy\"},
+          {\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX\"}
+        ]" 2>>"$LOG_FILE"; then
+            echo "  ✓ Removed oauth-proxy container" | tee -a "$LOG_FILE"
+            ((MIGRATED++)) || true
+        else
+            echo "  ✗ Failed to remove oauth-proxy container" | tee -a "$LOG_FILE"
+            ((ERRORS++)) || true
+        fi
+    else
+        echo "  ✓ No oauth-proxy container (already removed)" | tee -a "$LOG_FILE"
+        ((MIGRATED++)) || true
+    fi
 done
 
+echo "" | tee -a "$LOG_FILE"
 echo "================================================================" | tee -a "$LOG_FILE"
-echo "Phase 1 Complete: $(date)" | tee -a "$LOG_FILE"
-echo "Log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
+echo "Cluster-Wide Migration Complete: $(date)" | tee -a "$LOG_FILE"
 echo "================================================================" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
-echo "NEXT STEPS:" | tee -a "$LOG_FILE"
-echo "1. Notify users that workbenches will auto-upgrade on restart" | tee -a "$LOG_FILE"
-echo "2. Users can continue working - no immediate action required" | tee -a "$LOG_FILE"
-echo "3. When users restart, both old and new URLs will work" | tee -a "$LOG_FILE"
-echo "4. Run Phase 2 (optional) to remove legacy oauth-proxy containers" | tee -a "$LOG_FILE"
-echo "5. Run Phase 3 to cleanup orphaned resources" | tee -a "$LOG_FILE"
-```
-
----
-
-#### Phase 2: Remove Legacy oauth-proxy Container (OPTIONAL)
-
-This is **optional** - workbenches function correctly with both proxies. Run this to reduce resource usage. Only works on stopped workbenches.
-
-```bash
-#!/bin/bash
-# phase2_remove_oauth_proxy.sh
-# OPTIONAL: Remove legacy oauth-proxy container to reduce resource usage
-# Only works on STOPPED workbenches
-
-set -euo pipefail
-
-MODE="${1:-single}"  # "single" for one workbench, "all-stopped" for all stopped workbenches
-
-if [ "$MODE" = "single" ]; then
-    NAMESPACE=$2
-    NAME=$3
-    if [ -z "$NAMESPACE" ] || [ -z "$NAME" ]; then
-        echo "Usage: $0 single <namespace> <notebook-name>"
-        echo "   or: $0 all-stopped"
-        exit 1
-    fi
-    NOTEBOOKS="$NAMESPACE/$NAME"
-elif [ "$MODE" = "all-stopped" ]; then
-    echo "Finding all stopped workbenches with oauth-proxy container..."
-    NOTEBOOKS=$(oc get notebooks -A -o json | jq -r '
-        .items[] | 
-        select(.status.readyReplicas == 0 or .status.readyReplicas == null) |
-        select(.spec.template.spec.containers | map(.name) | any(. == "oauth-proxy")) |
-        "\(.metadata.namespace)/\(.metadata.name)"
-    ')
-    if [ -z "$NOTEBOOKS" ]; then
-        echo "No stopped workbenches with oauth-proxy found."
-        exit 0
-    fi
-    echo "Found workbenches:"
-    echo "$NOTEBOOKS"
-    echo ""
-    read -p "Remove oauth-proxy from all these workbenches? (y/N) " confirm
-    if [ "$confirm" != "y" ]; then
-        echo "Aborted."
-        exit 0
-    fi
-else
-    echo "Usage: $0 single <namespace> <notebook-name>"
-    echo "   or: $0 all-stopped"
-    exit 1
+echo "Summary:" | tee -a "$LOG_FILE"
+echo "  Total workbenches found: $TOTAL" | tee -a "$LOG_FILE"
+echo "  Migrated: $MIGRATED" | tee -a "$LOG_FILE"
+echo "  Skipped (running): $SKIPPED_RUNNING" | tee -a "$LOG_FILE"
+echo "  Skipped (already done): $SKIPPED_DONE" | tee -a "$LOG_FILE"
+echo "  Errors: $ERRORS" | tee -a "$LOG_FILE"
+echo "" | tee -a "$LOG_FILE"
+if [ "$SKIPPED_RUNNING" -gt 0 ]; then
+    echo "WARNING: $SKIPPED_RUNNING running workbenches were skipped." | tee -a "$LOG_FILE"
+    echo "Coordinate with users to stop them, then re-run this script." | tee -a "$LOG_FILE"
 fi
-
-for NB in $NOTEBOOKS; do
-    NAMESPACE=$(echo "$NB" | cut -d'/' -f1)
-    NAME=$(echo "$NB" | cut -d'/' -f2)
-    
-    echo "Processing: $NAMESPACE/$NAME"
-    
-    # Verify workbench is stopped
-    REPLICAS=$(oc get notebook "$NAME" -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-    if [ "${REPLICAS:-0}" != "0" ]; then
-        echo "  SKIP: Workbench is running (replicas=$REPLICAS)"
-        continue
-    fi
-    
-    # Find oauth-proxy container index
-    OAUTH_INDEX=$(oc get notebook "$NAME" -n "$NAMESPACE" -o json | \
-        jq '.spec.template.spec.containers | to_entries | .[] | select(.value.name == "oauth-proxy") | .key')
-    
-    if [ -z "$OAUTH_INDEX" ]; then
-        echo "  SKIP: No oauth-proxy container found"
-        continue
-    fi
-    
-    echo "  Found oauth-proxy at index $OAUTH_INDEX"
-    
-    # Remove oauth-proxy container using test+remove
-    if oc patch notebook "$NAME" -n "$NAMESPACE" --type='json' -p="[
-      {\"op\":\"test\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX/name\",\"value\":\"oauth-proxy\"},
-      {\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/$OAUTH_INDEX\"}
-    ]" 2>/dev/null; then
-        echo "  ✓ Removed oauth-proxy container"
-    else
-        echo "  ✗ Failed to remove oauth-proxy container"
-    fi
-done
-
-echo ""
-echo "Phase 2 complete. Workbenches will start with only kube-rbac-proxy."
+echo "" | tee -a "$LOG_FILE"
+echo "Log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
 ```
 
 ---
@@ -1413,18 +1486,35 @@ oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
   --type='merge' -p '{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}'
 ```
 
-**After restart:**
-- Pod will have 3 containers: `notebook`, `oauth-proxy`, `kube-rbac-proxy`
-- Gateway URL will work (kube-rbac-proxy receives traffic)
-- Old Route URL will still work (oauth-proxy still present)
+### What Happened After Restart (Port Conflict!)
 
-### Key Observations
+After stopping and starting the workbench:
 
-1. **Annotation changes are safe on running workbenches** - no restart triggered
+```bash
+$ oc get pod medium-pytorch-gpu-later-0 -n auser-created-project
+NAME                         READY   STATUS             RESTARTS      AGE
+medium-pytorch-gpu-later-0   2/3     CrashLoopBackOff   5 (59s ago)   11m
+```
+
+**kube-rbac-proxy crashed** with:
+```
+listen tcp 0.0.0.0:8443: bind: address already in use
+```
+
+**Root cause:** Both `oauth-proxy` and `kube-rbac-proxy` try to bind port 8443:
+- `oauth-proxy`: `--https-address=:8443` (starts first, succeeds)
+- `kube-rbac-proxy`: `--secure-listen-address=0.0.0.0:8443` (fails, crashes)
+
+**This invalidates the "Phase 1 safe on running workbenches" approach!**
+
+### Key Observations (Corrected)
+
+1. **Annotation changes on running workbenches are DANGEROUS** - leaves workbench in broken state after restart
 2. **Controller immediately creates kube-rbac-proxy resources** - Service, updates HTTPRoute
-3. **Gateway URL transitions from 500 → "no healthy upstream"** - indicates progress (correct routing, missing backend)
-4. **Old Route continues to work** - users can keep working during migration
-5. **kube-rbac-proxy is added alongside oauth-proxy** - not a replacement, both coexist after restart
+3. **Gateway URL transitions from 500 → "no healthy upstream"** - indicates HTTPRoute is updated but backend missing
+4. **Old Route continues to work** - during transitional state only
+5. **Port 8443 conflict** - oauth-proxy and kube-rbac-proxy cannot coexist in same pod
+6. **Migration must be atomic** - annotations AND oauth-proxy removal must happen together on STOPPED workbenches
 
 ---
 
@@ -1452,3 +1542,4 @@ oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
 | 2026-02-05 | Jiri Daněk | Added real-world upgrade behavior findings (500 errors, working URLs, Dashboard UX issue)                                                                                                               |
 | 2026-02-05 | Jiri Daněk | Added Case Study appendix: live migration of medium-pytorch-gpu-later with exact commands and outputs                                                                                                   |
 | 2026-02-05 | Jiri Daněk | Sanitized document and git history: replaced internal cluster domain with `<CLUSTER_DOMAIN>` using `git filter-repo --replace-text <(echo "xxxyyyzzz==><CLUSTER_DOMAIN>") --refs HEAD~10..HEAD --force` |
+| 2026-02-05 | Jiri Daněk | **CRITICAL CORRECTION:** Discovered port 8443 conflict - oauth-proxy and kube-rbac-proxy cannot coexist. Migration must be atomic (annotations + container removal) on STOPPED workbenches only. Updated all scripts. |
