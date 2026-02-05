@@ -4,6 +4,8 @@ bin/
 vendor/
 
 .vscode/
+.cursor/
+.reports/
 
 # Compiled python files.
 *.pyc
