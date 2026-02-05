@@ -448,16 +448,24 @@ https://<notebook>-<namespace>.apps.<cluster>/
 https://<notebook>-<namespace>.apps.<cluster>/notebook/<namespace>/<notebook>
 ```
 
-### 6. Dashboard Auto-Migration on Edit (Discovered Behavior)
+### 6. Dashboard Auto-Migration on Edit (Recommended for JupyterLab)
 
 **Scenario:** User edits workbench description via Dashboard after RHOAI 3.x upgrade.
 
 **What happens:**
 1. Dashboard adds `inject-auth: true` annotation
-2. Triggers pod restart
+2. Dashboard restarts the workbench
 3. Webhook injects kube-rbac-proxy AND **removes** oauth-proxy from spec
 4. Pod starts successfully (2/2) - no port conflict
 5. Old Route/Service become orphaned (no endpoints)
+
+**Confirmed working for JupyterLab (2026-02-05):**
+- Edited description on `jupyterdatascience252` workbench
+- Dashboard restarted the workbench automatically
+- Workbench migrated successfully
+- Gateway URL works: `https://data-science-gateway.../notebook/aadmin-created-namespace/jupyterdatascience252/lab`
+
+**This is the EASIEST migration method for JupyterLab workbenches** - users just edit description, Dashboard handles the rest.
 
 **Confirmed on `rstudioon225`:**
 ```
@@ -488,20 +496,108 @@ https://data-science-gateway.apps.<CLUSTER>/notebook/<namespace>/<notebook-name>
 
 **Impact:** This is actually a **cleaner migration** than manual Phase 1+2 because Dashboard triggers webhook which properly replaces oauth-proxy instead of adding alongside.
 
+**Confirmed working after Dashboard auto-migration:**
+```
+NB_PREFIX: /notebook/auser-created-project/rstudioon225  ✅
+HTTPRoute: /notebook/auser-created-project/rstudioon225  ✅
+kube-rbac-proxy upstream: http://127.0.0.1:8888/         ✅
+Gateway URL works: https://data-science-gateway.../notebook/auser-created-project/rstudioon225  ✅
+```
+
+The Dashboard auto-migration correctly sets `NB_PREFIX` via the webhook injection.
+
+### 7. RStudio/CodeServer Images Redirect to Wrong Path (Expected - Requires User Action)
+
+**Confirmed 2026-02-05:** Even after successful migration, RStudio and CodeServer images from RHOAI 2.25 redirect to wrong paths.
+
+**Symptom:**
+- Dashboard "Open" link is **correct**: `https://data-science-gateway.../notebook/<namespace>/<name>`
+- But browser is **redirected** to: `https://data-science-gateway.../rstudio/` or `/codeserver/`
+- Result: 404 error (path not routed)
+
+**This is DOCUMENTED EXPECTED BEHAVIOR** - not a bug. Per migration notes:
+
+**For RStudio:**
+> "RStudio workbench images are made available through a BuildConfig in OpenShift and always tagged as `latest`.
+> Users currently utilizing RStudio must run a new Build to update RStudio ImageStream to contain all necessary changes for Red Hat OpenShift AI 3.x"
+
+**For CodeServer:**
+> "2025.2 represents the latest image, updated with all necessary changes for Red Hat OpenShift AI 3.x.
+> 2025.1 is deprecated and no longer supported and does not start properly in Red Hat OpenShift AI 3.x."
+
+**Required actions:**
+
+| Image Type | Action Required |
+|------------|-----------------|
+| **RStudio** | Trigger new Build via BuildConfig to update ImageStream |
+| **CodeServer 2025.1** | Must update workbench to use 2025.2 tag |
+| **CodeServer 2025.2** | Should work if ImageStream was updated by operator |
+| **JupyterLab** | No action required |
+
+**To rebuild RStudio ImageStream:**
+```bash
+# Find the BuildConfig
+oc get buildconfig -n redhat-ods-applications | grep rstudio
+
+# Trigger a new build
+oc start-build <buildconfig-name> -n redhat-ods-applications
+
+# Wait for build to complete
+oc logs -f bc/<buildconfig-name> -n redhat-ods-applications
+```
+
+**After rebuild:** Users need to restart their workbenches to pick up the new image.
+
 ---
 
 ## Migration Guide
 
 ### Pre-Upgrade Checklist
 
-- [ ] Verify all workbench images are 2025.2 from RHOAI 3.0+
+- [ ] Verify all workbench images are 2025.2 from **RHOAI 3.0+** (NOT 2.25!)
 - [ ] Ensure custom images support path-based routing (`${NB_PREFIX}`)
 - [ ] Stop all notebooks in all namespaces
 - [ ] Document current notebook state
 
-### Migration Commands
+> **⚠️ CRITICAL IMAGE COMPATIBILITY ISSUE (Confirmed 2026-02-05):**
+> 
+> **RStudio and CodeServer 2025.2 images from RHOAI 2.25 do NOT work with Gateway API!**
+> 
+> **Symptoms:**
+> - Dashboard "Open" link is correct: `/notebook/<namespace>/<name>`
+> - But browser gets redirected to `/rstudio/` or `/codeserver/` → 404 error
+> - The workbench images themselves contain hardcoded redirects to their internal paths
+> 
+> **Root cause:** The 2025.2 tag in RHOAI 2.25 was built before Gateway API path-based routing existed.
+> The images don't respect `NB_PREFIX` for redirects.
+> 
+> **Affected images:**
+> - `rstudio-rhel9:2025.2` (from RHOAI 2.25) → Redirects to `/rstudio/`
+> - `codeserver-*:2025.2` (from RHOAI 2.25) → Redirects to `/codeserver/`
+> - JupyterLab appears to work (respects NB_PREFIX)
+> 
+> **Required action:** Must rebuild or update RStudio/CodeServer ImageStreams to use RHOAI 3.x compatible images.
 
-**Option 1: Delete and Recreate (Recommended)**
+### Migration Methods
+
+**Option 1: Dashboard Edit (Easiest - Recommended for JupyterLab)**
+
+Simply edit the workbench description in Dashboard:
+1. Go to Projects → select project → Workbenches
+2. Click the workbench kebab menu → Edit
+3. Change the description (any change works)
+4. Save
+
+Dashboard will:
+- Add `inject-auth: true` annotation
+- Restart the workbench
+- Webhook will properly migrate the auth (replaces oauth-proxy with kube-rbac-proxy)
+
+**Note:** This works for JupyterLab. For RStudio/CodeServer, you must first rebuild the ImageStream.
+
+---
+
+**Option 2: Delete and Recreate**
 
 ```bash
 # Delete notebook (PVC preserved)
@@ -510,7 +606,9 @@ oc delete notebook <NAME> -n <NAMESPACE>
 # Recreate via Dashboard or CLI with same PVC
 ```
 
-**Option 2: In-Place Patch (Original - RISKY)**
+---
+
+**Option 3: In-Place Patch via CLI (RISKY)**
 
 ```bash
 oc patch notebook <NAME> -n <NAMESPACE> --type='json' -p='[
@@ -1578,7 +1676,9 @@ listen tcp 0.0.0.0:8443: bind: address already in use
 
 | Issue | Summary | Label |
 |-------|---------|-------|
+| **RHOAIENG-48761** | [KNOWN DOCUMENTED ISSUE] RStudio/CodeServer redirect to /rstudio/ or /codeserver/ instead of NB_PREFIX | `rhoai-3.3_migration` |
 | **RHOAIENG-48747** | Dashboard shows broken Gateway URLs for unmigrated 2.x workbenches after upgrade to 3.x | `rhoai-3.3_migration` |
+| **RHOAIENG-48077** | N-1 CodeServer and RStudio workbench images do not start in RHOAI 3.x (proposes fix in 2.25.3) | `migration` |
 | **RHOAIENG-39253** | Port mismatch in unauthenticated HTTPRoute | |
 | **RHOAIENG-38009** | HTTPRoute hijacking vulnerability | |
 | **RHOAIENG-38217** | ReferenceGrant too permissive | |
@@ -1598,3 +1698,4 @@ listen tcp 0.0.0.0:8443: bind: address already in use
 | 2026-02-05 | Jiri Daněk | Sanitized document and git history: replaced internal cluster domain with `<CLUSTER_DOMAIN>` using `git filter-repo --replace-text <(echo "xxxyyyzzz==><CLUSTER_DOMAIN>") --refs HEAD~10..HEAD --force` |
 | 2026-02-05 | Jiri Daněk | **CRITICAL CORRECTION:** Discovered port 8443 conflict - oauth-proxy and kube-rbac-proxy cannot coexist. Migration must be atomic (annotations + container removal) on STOPPED workbenches only. Updated all scripts. |
 | 2026-02-05 | Jiri Daněk | Discovered Dashboard auto-migration: editing workbench description triggers proper migration (webhook replaces oauth-proxy). Dashboard URL bug: shows wrong path. |
+| 2026-02-05 | Jiri Daněk | Documented RStudio/CodeServer redirect issue - this is expected behavior per migration notes. RStudio requires BuildConfig rebuild, CodeServer needs 2025.2 from 3.x. |
