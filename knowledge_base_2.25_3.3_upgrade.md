@@ -530,35 +530,48 @@ oc patch notebook <NAME> -n <NAMESPACE> --type='json' -p="[
 - Strategic merge patch ignores missing annotations instead of failing
 - Each step can be verified before proceeding
 
-### Cluster-Wide Migration Scripts (Simplified Workflow)
+### Cluster-Wide Migration Scripts (Corrected Workflow)
 
-This workflow takes advantage of a key insight: after updating annotations (Phase 1), workbenches will **self-migrate** when users naturally restart them. The webhook injects kube-rbac-proxy on pod creation.
+> **⚠️ CRITICAL CORRECTION (2026-02-05):**
+> 
+> Previous documentation incorrectly stated Phase 1 (annotations) could be run safely on running 
+> workbenches. **This is WRONG.** After Phase 1, if a user restarts their workbench:
+> - `oauth-proxy` remains in the notebook spec (port 8443)
+> - `kube-rbac-proxy` is injected by webhook (also port 8443)
+> - **Both try to bind port 8443 → CrashLoopBackOff**
+>
+> See [Case Study](#appendix-case-study---live-migration-of-medium-pytorch-gpu-later) for evidence.
 
-**Understanding the workflow:**
+**The Safe Migration Process:**
 
-| Phase | Scope | Safe While Running? | When to Run |
-|-------|-------|---------------------|-------------|
-| **Phase 1** | Cluster-wide | ✅ Yes | Immediately after upgrade |
-| **Phase 2** | Optional cleanup | ✅ Yes (metadata only) | Anytime after Phase 1 |
-| **Phase 3** | Per-namespace | ✅ Yes | After users restart |
+| Requirement | Reason |
+|-------------|--------|
+| Workbench **MUST be stopped** before migration | Port conflict if both proxies are present |
+| Phase 1 + Phase 2 must be done **atomically** | Cannot leave workbench in half-migrated state |
+| User cannot restart between phases | Would cause CrashLoopBackOff |
 
-**What happens after Phase 1 when user restarts:**
+**Corrected workflow:**
 
-| Component | State |
-|-----------|-------|
-| oauth-proxy container | Still present (from stored spec) |
-| kube-rbac-proxy container | **Injected** (by webhook on restart) |
-| Pod containers | **3 total** (notebook + oauth-proxy + kube-rbac-proxy) |
-| New Gateway route | **Works** (via kube-rbac-proxy) |
-| Old OpenShift route | **Works** (via oauth-proxy, if not deleted) |
+| Phase | Scope | Requirements | When to Run |
+|-------|-------|--------------|-------------|
+| **Combined 1+2** | Per-workbench | ⚠️ **MUST be stopped** | Coordinate with users |
+| **Phase 3** | Cluster-wide | Safe anytime | After workbenches restarted |
 
-**This is a valid intermediate state** - both auth mechanisms work simultaneously until cleanup.
+**What happens if Phase 1 is done on running workbench and user restarts:**
+
+| Component | State | Result |
+|-----------|-------|--------|
+| oauth-proxy container | Still present (from stored spec) | Binds port 8443 first |
+| kube-rbac-proxy container | Injected (by webhook) | **FAILS: port 8443 in use** |
+| Pod status | **CrashLoopBackOff** | kube-rbac-proxy crashes repeatedly |
+| Gateway URL | "no healthy upstream" | kube-rbac-proxy not running |
+| Old Route URL | Still works | oauth-proxy is healthy |
 
 ---
 
-#### Phase 1: Cluster-Wide Annotation Update (SAFE - Run Immediately)
+#### Combined Phase 1+2: Migrate Stopped Workbenches
 
-Run this once after upgrade. Safe for hundreds of workbenches - no restarts triggered.
+**CRITICAL:** Only run on **STOPPED** workbenches. Both annotation update and oauth-proxy removal must happen together.
 
 ```bash
 #!/bin/bash
