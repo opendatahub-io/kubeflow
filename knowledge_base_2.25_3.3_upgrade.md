@@ -1235,6 +1235,186 @@ oc get svc <NAME>-kube-rbac-proxy -n <NAMESPACE>
 
 ---
 
+## Appendix: Case Study - Live Migration of medium-pytorch-gpu-later
+
+This section documents a real migration performed on cluster `<CLUSTER_DOMAIN>` on 2026-02-03/05.
+
+### Initial State (Pre-Migration)
+
+**Workbench:** `auser-created-project/medium-pytorch-gpu-later`
+
+```bash
+$ oc get notebook medium-pytorch-gpu-later -n auser-created-project -o jsonpath='
+Annotations:
+  inject-auth: {.metadata.annotations.notebooks\.opendatahub\.io/inject-auth}
+  inject-oauth: {.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth}
+Finalizers: {.metadata.finalizers}
+Containers: {.spec.template.spec.containers[*].name}
+Replicas: {.status.readyReplicas}
+'
+```
+
+**Output:**
+```
+Annotations:
+  inject-auth: 
+  inject-oauth: true
+Finalizers: ["notebook-oauth-client-finalizer.opendatahub.io","notebook.opendatahub.io/httproute-cleanup","notebook.opendatahub.io/referencegrant-cleanup"]
+Containers: medium-pytorch-gpu-later oauth-proxy
+Replicas: 1
+```
+
+**Analysis:**
+- `inject-oauth: true` → 2.x auth style
+- `inject-auth:` → not set (no 3.x auth)
+- 2 containers: notebook + oauth-proxy
+- Running (1 replica)
+- Has legacy OAuth finalizer plus new 3.x finalizers (added by upgraded controller)
+
+### Phase 1: Update Annotations (No Restart Required)
+
+**Step 1: Add inject-auth annotation**
+```bash
+$ oc annotate notebook medium-pytorch-gpu-later -n auser-created-project \
+    notebooks.opendatahub.io/inject-auth="true" --overwrite
+```
+**Output:**
+```
+notebook.kubeflow.org/medium-pytorch-gpu-later annotated
+```
+
+**Step 2: Remove legacy annotations**
+```bash
+$ oc annotate notebook medium-pytorch-gpu-later -n auser-created-project \
+    notebooks.opendatahub.io/inject-oauth- \
+    notebooks.opendatahub.io/oauth-logout-url-
+```
+**Output:**
+```
+notebook.kubeflow.org/medium-pytorch-gpu-later annotated
+```
+
+**Step 3: Remove OAuth finalizer (keep others)**
+```bash
+$ CURRENT_FINALIZERS=$(oc get notebook medium-pytorch-gpu-later -n auser-created-project \
+    -o jsonpath='{.metadata.finalizers}')
+$ echo "Current: $CURRENT_FINALIZERS"
+Current: ["notebook-oauth-client-finalizer.opendatahub.io","notebook.opendatahub.io/httproute-cleanup","notebook.opendatahub.io/referencegrant-cleanup","notebook.opendatahub.io/kube-rbac-proxy-cleanup"]
+
+$ NEW_FINALIZERS=$(echo "$CURRENT_FINALIZERS" | jq -c '[.[] | select(. != "notebook-oauth-client-finalizer.opendatahub.io")]')
+$ echo "New: $NEW_FINALIZERS"
+New: ["notebook.opendatahub.io/httproute-cleanup","notebook.opendatahub.io/referencegrant-cleanup","notebook.opendatahub.io/kube-rbac-proxy-cleanup"]
+
+$ oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
+    --type='merge' -p "{\"metadata\":{\"finalizers\":$NEW_FINALIZERS}}"
+```
+**Output:**
+```
+notebook.kubeflow.org/medium-pytorch-gpu-later patched
+```
+
+### State After Phase 1
+
+```bash
+$ oc get notebook medium-pytorch-gpu-later -n auser-created-project -o jsonpath='
+Annotations:
+  inject-auth: {.metadata.annotations.notebooks\.opendatahub\.io/inject-auth}
+  inject-oauth: {.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth}
+Finalizers: {.metadata.finalizers}
+Containers: {.spec.template.spec.containers[*].name}
+Replicas: {.status.readyReplicas}
+'
+```
+**Output:**
+```
+Annotations:
+  inject-auth: true
+  inject-oauth: 
+Finalizers: ["notebook.opendatahub.io/httproute-cleanup","notebook.opendatahub.io/referencegrant-cleanup","notebook.opendatahub.io/kube-rbac-proxy-cleanup"]
+Containers: medium-pytorch-gpu-later oauth-proxy
+Replicas: 1
+```
+
+**Controller Immediate Reactions (No Pod Restart):**
+
+The controller detected the annotation change and immediately created resources:
+
+```bash
+$ oc get httproute nb-auser-created-project-medium-pytorch-gpu-later -n redhat-ods-applications \
+    -o jsonpath='Backend: {.spec.rules[0].backendRefs[0].name}:{.spec.rules[0].backendRefs[0].port}'
+```
+**Output:**
+```
+Backend: medium-pytorch-gpu-later-kube-rbac-proxy:8443
+```
+
+```bash
+$ oc get svc medium-pytorch-gpu-later-kube-rbac-proxy -n auser-created-project
+```
+**Output:**
+```
+NAME                                       TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+medium-pytorch-gpu-later-kube-rbac-proxy   ClusterIP   172.30.17.87   <none>        8443/TCP   56s
+```
+
+### Transitional State (Phase 1 Complete, Pending Restart)
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `inject-auth` annotation | ✅ `true` | 3.x auth enabled |
+| `inject-oauth` annotation | ✅ removed | Legacy disabled |
+| OAuth finalizer | ✅ removed | Won't try cleanup on delete |
+| New finalizers | ✅ present | httproute, referencegrant, kube-rbac-proxy |
+| kube-rbac-proxy Service | ✅ created | Port 8443 |
+| HTTPRoute | ✅ updated | Points to kube-rbac-proxy:8443 |
+| **Pod containers** | ⚠️ Still old | `oauth-proxy` only, no `kube-rbac-proxy` |
+
+### URL Behavior in Transitional State
+
+**Gateway URL (shown in Dashboard):**
+```
+https://data-science-gateway.apps.<CLUSTER_DOMAIN>/notebook/auser-created-project/medium-pytorch-gpu-later
+```
+**Result:** `no healthy upstream` (changed from HTTP 500 before Phase 1)
+
+**Explanation:** HTTPRoute now correctly points to `kube-rbac-proxy:8443` service, but the pod doesn't have the kube-rbac-proxy container yet. The service has no healthy endpoints to route to.
+
+**Old Route URL:**
+```
+https://medium-pytorch-gpu-later-auser-created-project.apps.<CLUSTER_DOMAIN>/notebook/auser-created-project/medium-pytorch-gpu-later
+```
+**Result:** Still works - oauth-proxy container is still running and accepting traffic.
+
+### To Complete Migration: Restart Workbench
+
+```bash
+# Stop workbench
+oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
+  --type='merge' -p '{"metadata":{"annotations":{"kubeflow-resource-stopped":"yes"}}}'
+
+# Wait for pod to terminate
+oc wait --for=delete pod -l notebook-name=medium-pytorch-gpu-later -n auser-created-project --timeout=60s
+
+# Start workbench
+oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
+  --type='merge' -p '{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}'
+```
+
+**After restart:**
+- Pod will have 3 containers: `notebook`, `oauth-proxy`, `kube-rbac-proxy`
+- Gateway URL will work (kube-rbac-proxy receives traffic)
+- Old Route URL will still work (oauth-proxy still present)
+
+### Key Observations
+
+1. **Annotation changes are safe on running workbenches** - no restart triggered
+2. **Controller immediately creates kube-rbac-proxy resources** - Service, updates HTTPRoute
+3. **Gateway URL transitions from 500 → "no healthy upstream"** - indicates progress (correct routing, missing backend)
+4. **Old Route continues to work** - users can keep working during migration
+5. **kube-rbac-proxy is added alongside oauth-proxy** - not a replacement, both coexist after restart
+
+---
+
 ## Related Jira Issues
 
 **Label:** All migration-related bugs should use label `rhoai-3.3_migration` (no spaces).
@@ -1257,3 +1437,4 @@ oc get svc <NAME>-kube-rbac-proxy -n <NAMESPACE>
 | 2026-02-05 | Jiri Daněk | Initial investigation and documentation |
 | 2026-02-05 | Jiri Daněk | Added Orphaned Resources Reference section with cleanup scripts |
 | 2026-02-05 | Jiri Daněk | Added real-world upgrade behavior findings (500 errors, working URLs, Dashboard UX issue) |
+| 2026-02-05 | Jiri Daněk | Added Case Study appendix: live migration of medium-pytorch-gpu-later with exact commands and outputs |
