@@ -530,6 +530,224 @@ oc patch notebook <NAME> -n <NAMESPACE> --type='json' -p="[
 - Strategic merge patch ignores missing annotations instead of failing
 - Each step can be verified before proceeding
 
+### Cluster-Wide Migration Script (Phased Approach)
+
+A phased approach allows admins to prepare migrations ahead of time and coordinate container changes with users.
+
+**Understanding restart triggers:**
+
+| Change | Restarts Pod? | Can Do While Running? |
+|--------|--------------|----------------------|
+| Annotations (add/remove) | No | Yes |
+| Finalizers (remove) | No | Yes |
+| Container spec changes | **YES** | **NO - data loss risk** |
+
+**IMPORTANT:** Just adding `inject-auth: true` to a running pod won't inject kube-rbac-proxy - the webhook only runs on pod creation. The full migration requires a pod restart.
+
+#### Phase 1: Preparation Script (Admin - Safe While Running)
+
+This phase prepares notebooks for migration but doesn't restart them. Old oauth-proxy routes continue working.
+
+```bash
+#!/bin/bash
+# phase1_prepare_migration.sh
+# Safe to run on running workbenches - no restarts triggered
+
+set -e
+
+echo "=== Phase 1: Preparing notebooks for migration ==="
+echo "This phase is SAFE - no workbenches will restart"
+echo ""
+
+# Get all notebooks with inject-oauth (unmigrated)
+NOTEBOOKS=$(oc get notebooks -A -o jsonpath='{range .items[?(@.metadata.annotations.notebooks\.opendatahub\.io/inject-oauth)]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}')
+
+if [ -z "$NOTEBOOKS" ]; then
+    echo "No unmigrated notebooks found."
+    exit 0
+fi
+
+echo "Found unmigrated notebooks:"
+echo "$NOTEBOOKS"
+echo ""
+
+for NB in $NOTEBOOKS; do
+    NAMESPACE=$(echo $NB | cut -d'/' -f1)
+    NAME=$(echo $NB | cut -d'/' -f2)
+    
+    echo "Preparing: $NAME in $NAMESPACE"
+    
+    # Check if running
+    REPLICAS=$(oc get notebook $NAME -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    if [ "$REPLICAS" != "0" ]; then
+        echo "  Status: RUNNING - will need Phase 2 after user stops"
+    else
+        echo "  Status: STOPPED - ready for Phase 2"
+    fi
+    
+    # Add inject-auth annotation (won't take effect until restart)
+    oc annotate notebook $NAME -n $NAMESPACE \
+        notebooks.opendatahub.io/inject-auth="true" \
+        --overwrite
+    
+    # Remove old annotations (safe, no restart)
+    oc annotate notebook $NAME -n $NAMESPACE \
+        notebooks.opendatahub.io/inject-oauth- \
+        notebooks.opendatahub.io/oauth-logout-url- \
+        2>/dev/null || true
+    
+    # Remove OAuth finalizer if present
+    FINALIZERS=$(oc get notebook $NAME -n $NAMESPACE -o jsonpath='{.metadata.finalizers}')
+    if echo "$FINALIZERS" | grep -q "notebook-oauth-client-finalizer"; then
+        echo "  Removing OAuth finalizer..."
+        oc patch notebook $NAME -n $NAMESPACE --type='json' -p='[
+          {"op":"remove","path":"/metadata/finalizers","value":"notebook-oauth-client-finalizer.opendatahub.io"}
+        ]' 2>/dev/null || true
+    fi
+    
+    echo "  Phase 1 complete for $NAME"
+    echo ""
+done
+
+echo "=== Phase 1 Complete ==="
+echo ""
+echo "Next steps:"
+echo "1. Notify users their workbenches need to be restarted"
+echo "2. Users save work and stop workbenches"
+echo "3. Run Phase 2 on stopped workbenches"
+echo ""
+echo "Stopped workbenches ready for Phase 2:"
+oc get notebooks -A -o jsonpath='{range .items[?(@.metadata.annotations.notebooks\.opendatahub\.io/inject-auth)]}{.metadata.namespace}/{.metadata.name} replicas={.status.readyReplicas}{"\n"}{end}' | grep "replicas=0" || echo "None currently stopped"
+```
+
+#### Phase 2: Container Migration (Requires Stopped Workbench)
+
+This phase removes the oauth-proxy container. Only run on stopped workbenches!
+
+```bash
+#!/bin/bash
+# phase2_migrate_container.sh
+# ONLY run on STOPPED workbenches - will modify container spec
+
+set -e
+
+NAMESPACE=$1
+NAME=$2
+
+if [ -z "$NAMESPACE" ] || [ -z "$NAME" ]; then
+    echo "Usage: $0 <namespace> <notebook-name>"
+    exit 1
+fi
+
+echo "=== Phase 2: Migrating container for $NAME in $NAMESPACE ==="
+
+# Verify workbench is stopped
+REPLICAS=$(oc get notebook $NAME -n $NAMESPACE -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+if [ "$REPLICAS" != "0" ]; then
+    echo "ERROR: Workbench is running! Please stop it first."
+    echo "User must save work and stop the workbench before migration."
+    exit 1
+fi
+
+# Verify inject-auth is set (Phase 1 completed)
+INJECT_AUTH=$(oc get notebook $NAME -n $NAMESPACE -o jsonpath='{.metadata.annotations.notebooks\.opendatahub\.io/inject-auth}')
+if [ "$INJECT_AUTH" != "true" ]; then
+    echo "ERROR: inject-auth annotation not set. Run Phase 1 first."
+    exit 1
+fi
+
+# Find oauth-proxy container index
+echo "Finding oauth-proxy container..."
+CONTAINERS=$(oc get notebook $NAME -n $NAMESPACE -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}')
+OAUTH_INDEX=-1
+INDEX=0
+while IFS= read -r container; do
+    if [ "$container" = "oauth-proxy" ]; then
+        OAUTH_INDEX=$INDEX
+        break
+    fi
+    INDEX=$((INDEX + 1))
+done <<< "$CONTAINERS"
+
+if [ $OAUTH_INDEX -eq -1 ]; then
+    echo "No oauth-proxy container found - may already be migrated"
+else
+    echo "Found oauth-proxy at index $OAUTH_INDEX, removing..."
+    oc patch notebook $NAME -n $NAMESPACE --type='json' -p="[
+      {\"op\":\"test\",\"path\":\"/spec/template/spec/containers/${OAUTH_INDEX}/name\",\"value\":\"oauth-proxy\"},
+      {\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/${OAUTH_INDEX}\"}
+    ]"
+    echo "Container removed."
+fi
+
+echo ""
+echo "=== Phase 2 Complete for $NAME ==="
+echo ""
+echo "Next steps:"
+echo "1. User can now start the workbench"
+echo "2. kube-rbac-proxy will be injected automatically"
+echo "3. Run Phase 3 to cleanup orphaned resources"
+```
+
+#### Phase 3: Cleanup Orphaned Resources
+
+```bash
+#!/bin/bash
+# phase3_cleanup.sh
+# Cleanup orphaned OAuth resources after migration
+
+set -e
+
+NAMESPACE=$1
+NAME=$2
+
+if [ -z "$NAMESPACE" ] || [ -z "$NAME" ]; then
+    echo "Usage: $0 <namespace> <notebook-name>"
+    exit 1
+fi
+
+echo "=== Phase 3: Cleaning up orphaned resources for $NAME in $NAMESPACE ==="
+
+# Delete OpenShift Route
+echo "Deleting Route..."
+oc delete route $NAME -n $NAMESPACE --ignore-not-found
+
+# Delete TLS Service
+echo "Deleting TLS Service..."
+oc delete svc ${NAME}-tls -n $NAMESPACE --ignore-not-found
+
+# Delete OAuth secrets
+echo "Deleting OAuth secrets..."
+oc delete secret ${NAME}-oauth-client ${NAME}-oauth-config ${NAME}-tls -n $NAMESPACE --ignore-not-found
+
+# Delete OAuthClient
+echo "Deleting OAuthClient..."
+oc delete oauthclient ${NAME}-${NAMESPACE}-oauth-client --ignore-not-found
+
+echo ""
+echo "=== Phase 3 Complete ==="
+echo "Workbench $NAME in $NAMESPACE is fully migrated."
+```
+
+#### User Communication Template
+
+```
+Subject: Action Required: Workbench Migration for RHOAI 3.3
+
+Your workbench [NAME] needs to be migrated to the new authentication system.
+
+What you need to do:
+1. Save all your work to persistent storage (your PVC)
+2. Stop your workbench from the Dashboard
+3. Notify admin that your workbench is ready for migration
+4. Wait for admin confirmation
+5. Start your workbench - it will use the new authentication
+
+Timeline: Please complete by [DATE]
+
+Note: Your data in persistent storage is safe. Only the running environment needs to restart.
+```
+
 ### Post-Migration Cleanup
 
 ```bash
