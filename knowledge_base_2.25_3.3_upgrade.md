@@ -1432,9 +1432,10 @@ oc patch notebook medium-pytorch-gpu-later -n auser-created-project \
 
 ## Document History
 
-| Date | Author | Changes |
-|------|--------|---------|
-| 2026-02-05 | Jiri Daněk | Initial investigation and documentation |
-| 2026-02-05 | Jiri Daněk | Added Orphaned Resources Reference section with cleanup scripts |
-| 2026-02-05 | Jiri Daněk | Added real-world upgrade behavior findings (500 errors, working URLs, Dashboard UX issue) |
-| 2026-02-05 | Jiri Daněk | Added Case Study appendix: live migration of medium-pytorch-gpu-later with exact commands and outputs |
+| Date       | Author     | Changes                                                                                                                                                                                                 |
+|------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-02-05 | Jiri Daněk | Initial investigation and documentation                                                                                                                                                                 |
+| 2026-02-05 | Jiri Daněk | Added Orphaned Resources Reference section with cleanup scripts                                                                                                                                         |
+| 2026-02-05 | Jiri Daněk | Added real-world upgrade behavior findings (500 errors, working URLs, Dashboard UX issue)                                                                                                               |
+| 2026-02-05 | Jiri Daněk | Added Case Study appendix: live migration of medium-pytorch-gpu-later with exact commands and outputs                                                                                                   |
+| 2026-02-05 | Jiri Daněk | Sanitized document and git history: replaced internal cluster domain with `<CLUSTER_DOMAIN>` using `git filter-repo --replace-text <(echo "xxxyyyzzz==><CLUSTER_DOMAIN>") --refs HEAD~10..HEAD --force` |
