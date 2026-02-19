@@ -53,10 +53,6 @@ oc delete --wait=true --ignore-not-found=true project "${TEST_NAMESPACE}" || ech
 # setup and deploy the controller
 oc new-project "${TEST_NAMESPACE}"
 
-# Wait for the controller to be ready
-echo "Waiting for odh-notebook-controller to be ready..."
-oc wait --for=condition=available --timeout=120s deployment/odh-notebook-controller-manager -n "${TEST_NAMESPACE}"
-
 # deploy and run e2e tests
 make deploy
 make e2e-test
