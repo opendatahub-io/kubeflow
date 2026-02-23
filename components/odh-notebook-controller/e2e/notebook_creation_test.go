@@ -409,7 +409,15 @@ func (tc *testContext) validateHTTPRouteConfiguration(nbMeta *metav1.ObjectMeta)
 	return nil
 }
 
-func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
+func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) (retErr error) {
+	// Get the deployment first so we have its ObjectMeta for the cleanup defer.
+	// This avoids leaking the ConfigMap if the Get fails after Create.
+	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
+		"notebook-controller-deployment", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("error getting deployment notebook-controller-deployment: %v", err)
+	}
+
 	// Create Configmap with culling configuration
 	cullingConfigMap := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -423,19 +431,21 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		},
 	}
 
-	_, err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Create(tc.ctx, cullingConfigMap,
+	_, err = tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Create(tc.ctx, cullingConfigMap,
 		metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("error creating configmapnotebook-controller-culler-config: %v", err)
-	}
-	// Restart the deployment to get changes from configmap
-	controllerDeployment, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx,
-		"notebook-controller-deployment", metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("error getting deployment %v: %v", controllerDeployment.Name, err)
+		return fmt.Errorf("error creating configmap notebook-controller-culler-config: %v", err)
 	}
 
-	defer tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta, nbMeta)
+	defer func() {
+		if revertErr := tc.revertCullingConfiguration(cullingConfigMap.ObjectMeta, controllerDeployment.ObjectMeta); revertErr != nil {
+			if retErr == nil {
+				retErr = fmt.Errorf("error reverting culling configuration: %v", revertErr)
+			} else {
+				retErr = fmt.Errorf("%v; additionally, error reverting culling configuration: %v", retErr, revertErr)
+			}
+		}
+	}()
 
 	err = tc.rolloutDeployment(controllerDeployment.ObjectMeta)
 	if err != nil {

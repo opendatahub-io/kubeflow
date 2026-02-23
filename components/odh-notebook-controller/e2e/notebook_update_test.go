@@ -16,6 +16,10 @@ func updateTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
 	for _, nbContext := range testCtx.testNotebooks {
+		// Ensure notebook is running before update tests (may have been stopped by culling)
+		err = testCtx.ensureNotebookRunning(nbContext.nbObjectMeta)
+		require.NoError(t, err, "notebook %s is not ready for update tests", nbContext.nbObjectMeta.Name)
+
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Update Notebook instance", func(t *testing.T) {

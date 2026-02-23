@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -150,17 +151,35 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 	// Scale deployment to 0
 	err := tc.scaleDeployment(depMeta, int32(0))
 	if err != nil {
-		return fmt.Errorf("error while scaling down the deployment %v", err)
+		return fmt.Errorf("error while scaling down the deployment: %v", err)
 	}
-	// Wait for deployment to scale down
-	time.Sleep(5 * time.Second)
+	// Wait for deployment to fully scale down
+	err = tc.waitForDeploymentReplicas(depMeta, 0)
+	if err != nil {
+		return fmt.Errorf("error waiting for deployment to scale down: %v", err)
+	}
 
 	// Scale deployment to 1
 	err = tc.scaleDeployment(depMeta, int32(1))
 	if err != nil {
-		return fmt.Errorf("error while scaling up the deployment %v", err)
+		return fmt.Errorf("error while scaling up the deployment: %v", err)
+	}
+	// Wait for deployment to be available
+	err = tc.waitForControllerDeployment(depMeta.Name, 1)
+	if err != nil {
+		return fmt.Errorf("error waiting for deployment to become available: %v", err)
 	}
 	return nil
+}
+
+func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, replicas int32) error {
+	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		deployment, err := tc.kubeClient.AppsV1().Deployments(depMeta.Namespace).Get(ctx, depMeta.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return deployment.Status.Replicas == replicas && deployment.Status.ReadyReplicas == replicas, nil
+	})
 }
 
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
@@ -186,28 +205,33 @@ func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableRe
 	return err
 }
 
-func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depMeta metav1.ObjectMeta, nbMeta *metav1.ObjectMeta) {
+func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depMeta metav1.ObjectMeta) error {
 	// Delete the culling configuration Configmap once the test is completed
 	err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Delete(tc.ctx,
 		cmMeta.Name, metav1.DeleteOptions{})
-	if err != nil {
-		log.Printf("error deleting configmap notebook-controller-culler-config: %v ", err)
+	if apierrors.IsNotFound(err) {
+		log.Printf("Configmap %s already deleted, continuing with cleanup", cmMeta.Name)
+	} else if err != nil {
+		return fmt.Errorf("error deleting configmap %s: %v", cmMeta.Name, err)
 	}
 	// Roll out the controller deployment
 	err = tc.rolloutDeployment(depMeta)
 	if err != nil {
-		log.Printf("error rolling out the deployment %v: %v ", depMeta.Name, err)
+		return fmt.Errorf("error rolling out the deployment %s: %v", depMeta.Name, err)
 	}
 
 	// IMPORTANT: Culling affects ALL notebooks in the namespace, not just the test target
-	// The restartAllCulledNotebooks function will handle restarting this notebook and any others that were culled
+	// The restartAllCulledNotebooks function will handle restarting any notebooks that were culled
 	err = tc.restartAllCulledNotebooks()
 	if err != nil {
-		log.Printf("Warning: Failed to restart other culled notebooks: %v", err)
+		return fmt.Errorf("failed to restart culled notebooks: %v", err)
 	}
+	return nil
 }
 
-// restartAllCulledNotebooks finds all notebooks with kubeflow-resource-stopped annotation and restarts them
+// restartAllCulledNotebooks finds all notebooks with kubeflow-resource-stopped annotation and restarts them.
+// Phase 1: Patches all culled notebooks to remove the annotation.
+// Phase 2: Waits for all StatefulSets to reach 1/1 ready in parallel.
 func (tc *testContext) restartAllCulledNotebooks() error {
 	// List all notebooks in the test namespace
 	notebookList := &nbv1.NotebookList{}
@@ -216,7 +240,7 @@ func (tc *testContext) restartAllCulledNotebooks() error {
 		return fmt.Errorf("failed to list notebooks: %v", err)
 	}
 
-	culledNotebooks := []nbv1.Notebook{}
+	var culledNotebooks []nbv1.Notebook
 	for _, notebook := range notebookList.Items {
 		if _, exists := notebook.Annotations["kubeflow-resource-stopped"]; exists {
 			culledNotebooks = append(culledNotebooks, notebook)
@@ -227,9 +251,11 @@ func (tc *testContext) restartAllCulledNotebooks() error {
 		return nil
 	}
 
-	// Restart each culled notebook
+	// Phase 1: Patch ALL culled notebooks to remove the stopped annotation.
+	// Collect errors instead of returning early so remaining notebooks still get patched.
+	var patchErrors []string
+	var patchedNotebooks []nbv1.Notebook
 	for _, notebook := range culledNotebooks {
-		// Remove the kubeflow-resource-stopped annotation
 		patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
 		notebookForPatch := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
@@ -240,16 +266,72 @@ func (tc *testContext) restartAllCulledNotebooks() error {
 
 		if err := tc.customClient.Patch(tc.ctx, notebookForPatch, patch); err != nil {
 			log.Printf("Failed to patch notebook %s: %v", notebook.Name, err)
+			patchErrors = append(patchErrors, fmt.Sprintf("%s: %v", notebook.Name, err))
 			continue
 		}
+		log.Printf("Patched notebook %s to remove kubeflow-resource-stopped annotation", notebook.Name)
+		patchedNotebooks = append(patchedNotebooks, notebook)
+	}
 
-		// Wait for the notebook to become ready
-		nbMeta := &metav1.ObjectMeta{Name: notebook.Name, Namespace: notebook.Namespace}
-		if waitErr := tc.waitForStatefulSet(nbMeta, 1, 1); waitErr != nil {
-			log.Printf("Warning: Notebook %s didn't become ready within 2 minutes: %v", notebook.Name, waitErr)
+	// Phase 2: Wait for all successfully patched StatefulSets to reach 1/1 ready in parallel
+	var waitErrors []string
+	if len(patchedNotebooks) > 0 {
+		recoveryTimeout := 3 * time.Minute
+		type result struct {
+			name string
+			err  error
+		}
+		results := make(chan result, len(patchedNotebooks))
+
+		for _, notebook := range patchedNotebooks {
+			go func(nb nbv1.Notebook) {
+				waitErr := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, recoveryTimeout, false, func(ctx context.Context) (done bool, err error) {
+					sts, err := tc.kubeClient.AppsV1().StatefulSets(nb.Namespace).Get(ctx, nb.Name, metav1.GetOptions{})
+					if err != nil {
+						return false, nil
+					}
+					return sts.Status.AvailableReplicas == 1 && sts.Status.ReadyReplicas == 1, nil
+				})
+				results <- result{name: nb.Name, err: waitErr}
+			}(notebook)
+		}
+
+		for range patchedNotebooks {
+			r := <-results
+			if r.err != nil {
+				waitErrors = append(waitErrors, fmt.Sprintf("%s: %v", r.name, r.err))
+			}
 		}
 	}
 
+	allFailures := append(patchErrors, waitErrors...)
+	if len(allFailures) > 0 {
+		return fmt.Errorf("failed to restart culled notebooks: %s", strings.Join(allFailures, "; "))
+	}
+	return nil
+}
+
+// ensureNotebookRunning verifies a notebook's StatefulSet is running. If the notebook
+// has a kubeflow-resource-stopped annotation (e.g. left over from culling), it removes
+// the annotation and waits for the StatefulSet to reach 1/1 ready replicas.
+func (tc *testContext) ensureNotebookRunning(nbMeta *metav1.ObjectMeta) error {
+	notebook := &nbv1.Notebook{}
+	err := tc.customClient.Get(tc.ctx, types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}, notebook)
+	if err != nil {
+		return fmt.Errorf("failed to get notebook %s: %v", nbMeta.Name, err)
+	}
+
+	if _, stopped := notebook.Annotations["kubeflow-resource-stopped"]; stopped {
+		patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
+		if err := tc.customClient.Patch(tc.ctx, notebook, patch); err != nil {
+			return fmt.Errorf("failed to remove kubeflow-resource-stopped annotation from notebook %s: %v", nbMeta.Name, err)
+		}
+		log.Printf("Removed kubeflow-resource-stopped annotation from notebook %s", nbMeta.Name)
+	}
+
+	if err := tc.waitForStatefulSet(nbMeta, 1, 1); err != nil {
+		return fmt.Errorf("notebook %s StatefulSet is not ready: %v", nbMeta.Name, err)
+	}
 	return nil
 }
 
