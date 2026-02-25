@@ -236,10 +236,11 @@ func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depM
 // restartNotebook removes the kubeflow-resource-stopped annotation from a notebook
 // and waits for its StatefulSet to reach 1/1 ready replicas with a dedicated recovery timeout.
 func (tc *testContext) restartNotebook(name, namespace string) error {
-	// Use strategic merge patch with null value so the operation is idempotent —
+	// Use JSON merge patch (RFC 7396) with null value so the operation is idempotent —
 	// if the annotation is already absent (e.g. removed by a concurrent goroutine),
 	// the patch is a no-op instead of returning a 422 error.
-	patch := client.RawPatch(types.StrategicMergePatchType, []byte(`{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}`))
+	// MergePatchType is used instead of StrategicMergePatchType because Notebook is a CRD.
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}`))
 	notebookForPatch := &nbv1.Notebook{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
