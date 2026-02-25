@@ -176,6 +176,10 @@ func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, repl
 	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		deployment, err := tc.kubeClient.AppsV1().Deployments(depMeta.Namespace).Get(ctx, depMeta.Name, metav1.GetOptions{})
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			log.Printf("Failed to get %s deployment", depMeta.Name)
 			return false, err
 		}
 		return deployment.Status.Replicas == replicas && deployment.Status.ReadyReplicas == replicas, nil
@@ -232,7 +236,10 @@ func (tc *testContext) revertCullingConfiguration(cmMeta metav1.ObjectMeta, depM
 // restartNotebook removes the kubeflow-resource-stopped annotation from a notebook
 // and waits for its StatefulSet to reach 1/1 ready replicas with a dedicated recovery timeout.
 func (tc *testContext) restartNotebook(name, namespace string) error {
-	patch := client.RawPatch(types.JSONPatchType, []byte(`[{"op": "remove", "path": "/metadata/annotations/kubeflow-resource-stopped"}]`))
+	// Use strategic merge patch with null value so the operation is idempotent —
+	// if the annotation is already absent (e.g. removed by a concurrent goroutine),
+	// the patch is a no-op instead of returning a 422 error.
+	patch := client.RawPatch(types.StrategicMergePatchType, []byte(`{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}`))
 	notebookForPatch := &nbv1.Notebook{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
