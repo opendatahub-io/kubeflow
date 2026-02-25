@@ -33,7 +33,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 			if apierrors.IsNotFound(err) {
 				return false, nil
 			}
-			log.Printf("Failed to get %s controller deployment", name)
+			log.Printf("Failed to get %s controller deployment, retrying", name)
 			return false, err
 		}
 
@@ -45,7 +45,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 			}
 		}
 
-		log.Printf("Error in %s deployment", name)
+		log.Printf("Deployment %s not yet available, retrying", name)
 		return false, nil
 
 	})
@@ -61,7 +61,7 @@ func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gateway
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		routeErr := tc.customClient.List(ctx, &nbHTTPRouteList, opts...)
 		if routeErr != nil {
-			log.Printf("error retrieving Notebook HTTPRoute %v", err)
+			log.Printf("error retrieving Notebook HTTPRoute %v, retrying", err)
 			return false, nil
 		} else {
 			return true, nil
@@ -84,7 +84,7 @@ func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name 
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if npErr != nil {
-			log.Printf("error retrieving Notebook Network policy %v: %v", name, err)
+			log.Printf("error retrieving Notebook Network policy %v: %v, retrying", name, err)
 			return false, nil
 		} else {
 			nbNetworkPolicy = np
@@ -176,11 +176,8 @@ func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, repl
 	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		deployment, err := tc.kubeClient.AppsV1().Deployments(depMeta.Namespace).Get(ctx, depMeta.Name, metav1.GetOptions{})
 		if err != nil {
-			if apierrors.IsNotFound(err) {
-				return false, nil
-			}
-			log.Printf("Failed to get %s deployment", depMeta.Name)
-			return false, err
+			log.Printf("Failed to get %s deployment: %v, retrying", depMeta.Name, err)
+			return false, nil
 		}
 		return deployment.Status.Replicas == replicas && deployment.Status.ReadyReplicas == replicas, nil
 	})
@@ -196,7 +193,7 @@ func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableRe
 			if apierrors.IsNotFound(err1) {
 				return false, nil
 			} else {
-				log.Printf("Failed to get %s statefulset", nbMeta.Name)
+				log.Printf("Failed to get %s statefulset, retrying", nbMeta.Name)
 				return false, err1
 			}
 		}
@@ -258,6 +255,7 @@ func (tc *testContext) restartNotebook(name, namespace string) error {
 	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, recoveryTimeout, false, func(ctx context.Context) (done bool, err error) {
 		sts, err := tc.kubeClient.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
+			log.Printf("Failed to get %s/%s statefulset: %v, retrying", namespace, name, err)
 			return false, nil
 		}
 		return sts.Status.AvailableReplicas == 1 && sts.Status.ReadyReplicas == 1, nil
