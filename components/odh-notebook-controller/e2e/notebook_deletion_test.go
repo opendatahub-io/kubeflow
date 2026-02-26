@@ -21,6 +21,11 @@ import (
 func deletionTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if t.Failed() {
+			testCtx.dumpControllerLogs(t)
+		}
+	})
 	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {

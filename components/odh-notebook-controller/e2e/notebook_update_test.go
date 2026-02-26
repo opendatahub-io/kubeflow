@@ -15,6 +15,11 @@ import (
 func updateTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if t.Failed() {
+			testCtx.dumpControllerLogs(t)
+		}
+	})
 	for _, nbContext := range testCtx.testNotebooks {
 		// Ensure notebook is running before update tests (may have been stopped by culling)
 		err = testCtx.ensureNotebookRunning(nbContext.nbObjectMeta)

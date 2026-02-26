@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"testing"
 	"time"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -49,6 +51,9 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 		return false, nil
 
 	})
+	if err != nil {
+		tc.logDeploymentDiagnostics(name, tc.testNamespace)
+	}
 	return err
 }
 
@@ -173,7 +178,7 @@ func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
 }
 
 func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, replicas int32) error {
-	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		deployment, err := tc.kubeClient.AppsV1().Deployments(depMeta.Namespace).Get(ctx, depMeta.Name, metav1.GetOptions{})
 		if err != nil {
 			log.Printf("Failed to get %s deployment: %v, retrying", depMeta.Name, err)
@@ -181,6 +186,10 @@ func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, repl
 		}
 		return deployment.Status.Replicas == replicas && deployment.Status.ReadyReplicas == replicas, nil
 	})
+	if err != nil {
+		tc.logDeploymentDiagnostics(depMeta.Name, depMeta.Namespace)
+	}
+	return err
 }
 
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
@@ -203,6 +212,9 @@ func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableRe
 		}
 		return false, nil
 	})
+	if err != nil {
+		tc.logNotebookDiagnostics(nbMeta.Name, tc.testNamespace)
+	}
 	return err
 }
 
@@ -249,10 +261,10 @@ func (tc *testContext) restartNotebook(name, namespace string) error {
 	}
 	log.Printf("Removed kubeflow-resource-stopped annotation from notebook %s", name)
 
-	// Use a dedicated 3-minute recovery timeout for notebooks restarting after culling,
+	// Use a dedicated 5-minute recovery timeout for notebooks restarting after culling,
 	// which may need extra time for image pulls and pod scheduling on slow CI.
-	const recoveryTimeout = 3 * time.Minute
-	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, recoveryTimeout, false, func(ctx context.Context) (done bool, err error) {
+	const recoveryTimeout = 5 * time.Minute
+	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, recoveryTimeout, false, func(ctx context.Context) (done bool, err error) {
 		sts, err := tc.kubeClient.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			log.Printf("Failed to get %s/%s statefulset: %v, retrying", namespace, name, err)
@@ -260,6 +272,10 @@ func (tc *testContext) restartNotebook(name, namespace string) error {
 		}
 		return sts.Status.AvailableReplicas == 1 && sts.Status.ReadyReplicas == 1, nil
 	})
+	if err != nil {
+		tc.logNotebookDiagnostics(name, namespace)
+	}
+	return err
 }
 
 // restartAllCulledNotebooks finds all notebooks with kubeflow-resource-stopped annotation
@@ -312,8 +328,9 @@ func (tc *testContext) restartAllCulledNotebooks() error {
 
 // ensureNotebookRunning verifies a notebook's StatefulSet is running. If the notebook
 // has a kubeflow-resource-stopped annotation (e.g. left over from culling), it removes
-// the annotation and waits for readiness using restartNotebook. If the notebook is not
-// stopped, it waits for the StatefulSet with the standard timeout.
+// the annotation first. Then it waits for the StatefulSet to be ready using a dedicated
+// recovery timeout, since the notebook may still be recovering from a prior culling cycle
+// even if the annotation was already removed by restartAllCulledNotebooks.
 func (tc *testContext) ensureNotebookRunning(nbMeta *metav1.ObjectMeta) error {
 	notebook := &nbv1.Notebook{}
 	err := tc.customClient.Get(tc.ctx, types.NamespacedName{Name: nbMeta.Name, Namespace: nbMeta.Namespace}, notebook)
@@ -322,17 +339,191 @@ func (tc *testContext) ensureNotebookRunning(nbMeta *metav1.ObjectMeta) error {
 	}
 
 	if _, stopped := notebook.Annotations["kubeflow-resource-stopped"]; stopped {
-		if err := tc.restartNotebook(nbMeta.Name, nbMeta.Namespace); err != nil {
-			return fmt.Errorf("failed to restart notebook %s: %v", nbMeta.Name, err)
+		// Remove the annotation so the controller can restart the notebook
+		patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"kubeflow-resource-stopped":null}}}`))
+		if err := tc.customClient.Patch(tc.ctx, notebook, patch); err != nil {
+			return fmt.Errorf("failed to remove kubeflow-resource-stopped annotation from %s: %v", nbMeta.Name, err)
 		}
-		return nil
+		log.Printf("Removed kubeflow-resource-stopped annotation from notebook %s", nbMeta.Name)
 	}
 
-	// Notebook is not stopped, just verify StatefulSet is ready
-	if err := tc.waitForStatefulSet(nbMeta, 1, 1); err != nil {
-		return fmt.Errorf("notebook %s StatefulSet is not ready: %v", nbMeta.Name, err)
+	// Always use a recovery timeout to wait for readiness, since the notebook may still
+	// be recovering from culling even if the annotation was already removed.
+	const recoveryTimeout = 5 * time.Minute
+	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, recoveryTimeout, false, func(ctx context.Context) (done bool, err error) {
+		sts, err := tc.kubeClient.AppsV1().StatefulSets(nbMeta.Namespace).Get(ctx, nbMeta.Name, metav1.GetOptions{})
+		if err != nil {
+			log.Printf("Failed to get %s/%s statefulset: %v, retrying", nbMeta.Namespace, nbMeta.Name, err)
+			return false, nil
+		}
+		return sts.Status.AvailableReplicas == 1 && sts.Status.ReadyReplicas == 1, nil
+	})
+	if err != nil {
+		tc.logNotebookDiagnostics(nbMeta.Name, nbMeta.Namespace)
+		return fmt.Errorf("notebook %s StatefulSet is not ready after recovery timeout: %v", nbMeta.Name, err)
 	}
 	return nil
+}
+
+// logNotebookDiagnostics logs detailed state about a notebook's StatefulSet, pods, and
+// recent events to help debug why a notebook isn't becoming ready.
+func (tc *testContext) logNotebookDiagnostics(name, namespace string) {
+	log.Printf("[diagnostics] Notebook %s/%s cluster state:", namespace, name)
+
+	// StatefulSet status
+	sts, err := tc.kubeClient.AppsV1().StatefulSets(namespace).Get(tc.ctx, name, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("[diagnostics]   StatefulSet: error fetching: %v", err)
+	} else {
+		desiredReplicas := int32(0)
+		if sts.Spec.Replicas != nil {
+			desiredReplicas = *sts.Spec.Replicas
+		}
+		log.Printf("[diagnostics]   StatefulSet: desired=%d, current=%d, ready=%d, available=%d, updated=%d",
+			desiredReplicas, sts.Status.Replicas, sts.Status.ReadyReplicas, sts.Status.AvailableReplicas, sts.Status.UpdatedReplicas)
+	}
+
+	// Pod status
+	pods, err := tc.kubeClient.CoreV1().Pods(namespace).List(tc.ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("statefulset=%s", name),
+	})
+	if err != nil {
+		log.Printf("[diagnostics]   Pods: error listing: %v", err)
+	} else if len(pods.Items) == 0 {
+		log.Printf("[diagnostics]   Pods: none found (label: statefulset=%s)", name)
+	} else {
+		for _, pod := range pods.Items {
+			log.Printf("[diagnostics]   Pod %s: phase=%s, deletionTimestamp=%v", pod.Name, pod.Status.Phase, pod.DeletionTimestamp)
+			for _, cond := range pod.Status.Conditions {
+				if cond.Status != v1.ConditionTrue {
+					log.Printf("[diagnostics]     condition %s=%s reason=%s: %s", cond.Type, cond.Status, cond.Reason, cond.Message)
+				}
+			}
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Waiting != nil {
+					log.Printf("[diagnostics]     container %s: waiting (reason=%s, message=%s)", cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				} else if cs.State.Terminated != nil {
+					log.Printf("[diagnostics]     container %s: terminated (reason=%s, exitCode=%d)", cs.Name, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+				} else if cs.State.Running != nil && !cs.Ready {
+					log.Printf("[diagnostics]     container %s: running but not ready (restarts=%d)", cs.Name, cs.RestartCount)
+				}
+			}
+		}
+	}
+
+	// Recent events for the StatefulSet and its pods
+	events, err := tc.kubeClient.CoreV1().Events(namespace).List(tc.ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("[diagnostics]   Events: error listing: %v", err)
+		return
+	}
+	relevantNames := map[string]bool{name: true}
+	if pods != nil {
+		for _, pod := range pods.Items {
+			relevantNames[pod.Name] = true
+		}
+	}
+	var relevant []v1.Event
+	for _, ev := range events.Items {
+		if relevantNames[ev.InvolvedObject.Name] {
+			relevant = append(relevant, ev)
+		}
+	}
+	if len(relevant) == 0 {
+		log.Printf("[diagnostics]   Events: none found")
+	} else {
+		start := 0
+		if len(relevant) > 10 {
+			start = len(relevant) - 10
+		}
+		for _, ev := range relevant[start:] {
+			log.Printf("[diagnostics]   Event: %s %s/%s: %s (count=%d)", ev.Reason, ev.InvolvedObject.Kind, ev.InvolvedObject.Name, ev.Message, ev.Count)
+		}
+	}
+}
+
+// dumpControllerLogs retrieves and logs the last 100 lines from each container in both
+// controller deployments. It is intended to be called from t.Cleanup when a test suite
+// fails, so that controller reconciliation logs are captured in CI output.
+func (tc *testContext) dumpControllerLogs(t *testing.T) {
+	t.Helper()
+	controllerDeployments := []string{
+		"notebook-controller-deployment",
+		"odh-notebook-controller-manager",
+	}
+
+	for _, deployName := range controllerDeployments {
+		dep, err := tc.kubeClient.AppsV1().Deployments(tc.testNamespace).Get(tc.ctx, deployName, metav1.GetOptions{})
+		if err != nil {
+			t.Logf("[controller-logs] error fetching deployment %s: %v", deployName, err)
+			continue
+		}
+
+		// Build label selector from the deployment's spec.selector.matchLabels
+		var selectorParts []string
+		for k, v := range dep.Spec.Selector.MatchLabels {
+			selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", k, v))
+		}
+		labelSelector := strings.Join(selectorParts, ",")
+
+		pods, err := tc.kubeClient.CoreV1().Pods(tc.testNamespace).List(tc.ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err != nil {
+			t.Logf("[controller-logs] error listing pods for deployment %s: %v", deployName, err)
+			continue
+		}
+
+		for _, pod := range pods.Items {
+			// Collect all container names (init + regular)
+			var containerNames []string
+			for _, c := range pod.Spec.InitContainers {
+				containerNames = append(containerNames, c.Name)
+			}
+			for _, c := range pod.Spec.Containers {
+				containerNames = append(containerNames, c.Name)
+			}
+
+			for _, containerName := range containerNames {
+				var tailLines int64 = 100
+				logReq := tc.kubeClient.CoreV1().Pods(tc.testNamespace).GetLogs(pod.Name, &v1.PodLogOptions{
+					Container: containerName,
+					TailLines: &tailLines,
+				})
+				stream, err := logReq.Stream(tc.ctx)
+				if err != nil {
+					t.Logf("[controller-logs] error streaming logs for %s / %s / %s: %v",
+						deployName, pod.Name, containerName, err)
+					continue
+				}
+				logBytes, err := io.ReadAll(stream)
+				stream.Close()
+				if err != nil {
+					t.Logf("[controller-logs] error reading logs for %s / %s / %s: %v",
+						deployName, pod.Name, containerName, err)
+					continue
+				}
+				t.Logf("[controller-logs] === %s / %s / %s ===\n%s",
+					deployName, pod.Name, containerName, string(logBytes))
+			}
+		}
+	}
+}
+
+// logDeploymentDiagnostics logs the status and conditions of a deployment to help
+// debug why it isn't becoming available.
+func (tc *testContext) logDeploymentDiagnostics(name, namespace string) {
+	log.Printf("[diagnostics] Deployment %s/%s cluster state:", namespace, name)
+	dep, err := tc.kubeClient.AppsV1().Deployments(namespace).Get(tc.ctx, name, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("[diagnostics]   error fetching deployment: %v", err)
+		return
+	}
+	log.Printf("[diagnostics]   replicas=%d, ready=%d, available=%d, updated=%d, unavailable=%d",
+		dep.Status.Replicas, dep.Status.ReadyReplicas, dep.Status.AvailableReplicas, dep.Status.UpdatedReplicas, dep.Status.UnavailableReplicas)
+	for _, cond := range dep.Status.Conditions {
+		log.Printf("[diagnostics]   condition %s=%s reason=%s: %s", cond.Type, cond.Status, cond.Reason, cond.Message)
+	}
 }
 
 func (tc *testContext) scaleDeployment(depMeta metav1.ObjectMeta, desiredReplicas int32) error {

@@ -11,6 +11,11 @@ import (
 func testNotebookControllerValidation(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if t.Failed() {
+			testCtx.dumpControllerLogs(t)
+		}
+	})
 	t.Run("Validate Kubeflow notebook controller", testCtx.testKubeflowNotebookController)
 	t.Run("Validate ODH notebook controller", testCtx.testODHNotebookController)
 }
