@@ -579,12 +579,12 @@ func setupThothMinimalRbacNotebook() notebookContext {
 							},
 							Resources: v1.ResourceRequirements{
 								Limits: map[v1.ResourceName]resource.Quantity{
-									v1.ResourceCPU:    resource.MustParse("1"),
-									v1.ResourceMemory: resource.MustParse("1Gi"),
+									v1.ResourceCPU:    resource.MustParse("400m"),
+									v1.ResourceMemory: resource.MustParse("256Mi"),
 								},
 								Requests: map[v1.ResourceName]resource.Quantity{
-									v1.ResourceCPU:    resource.MustParse("1"),
-									v1.ResourceMemory: resource.MustParse("1Gi"),
+									v1.ResourceCPU:    resource.MustParse("200m"),
+									v1.ResourceMemory: resource.MustParse("128Mi"),
 								},
 							},
 							LivenessProbe: &v1.Probe{
@@ -658,12 +658,12 @@ func setupThothRbacCustomResourcesNotebook() notebookContext {
 							},
 							Resources: v1.ResourceRequirements{
 								Limits: v1.ResourceList{
-									v1.ResourceCPU:    resource.MustParse("1"),
-									v1.ResourceMemory: resource.MustParse("1Gi"),
+									v1.ResourceCPU:    resource.MustParse("500m"),
+									v1.ResourceMemory: resource.MustParse("384Mi"),
 								},
 								Requests: v1.ResourceList{
-									v1.ResourceCPU:    resource.MustParse("1"),
-									v1.ResourceMemory: resource.MustParse("1Gi"),
+									v1.ResourceCPU:    resource.MustParse("250m"),
+									v1.ResourceMemory: resource.MustParse("192Mi"),
 								},
 							},
 						},
