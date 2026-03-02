@@ -35,8 +35,8 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 			if apierrors.IsNotFound(err) {
 				return false, nil
 			}
-			log.Printf("Failed to get %s controller deployment, retrying", name)
-			return false, err
+			log.Printf("Failed to get %s controller deployment: %v, retrying", name, err)
+			return false, nil
 		}
 
 		for _, condition := range controllerDeployment.Status.Conditions {
@@ -66,7 +66,7 @@ func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gateway
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		routeErr := tc.customClient.List(ctx, &nbHTTPRouteList, opts...)
 		if routeErr != nil {
-			log.Printf("error retrieving Notebook HTTPRoute %v, retrying", err)
+			log.Printf("error retrieving Notebook HTTPRoute %v, retrying", routeErr)
 			return false, nil
 		} else {
 			return true, nil
@@ -89,7 +89,7 @@ func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name 
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		np, npErr := tc.kubeClient.NetworkingV1().NetworkPolicies(nbMeta.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if npErr != nil {
-			log.Printf("error retrieving Notebook Network policy %v: %v, retrying", name, err)
+			log.Printf("error retrieving Notebook Network policy %v: %v, retrying", name, npErr)
 			return false, nil
 		} else {
 			nbNetworkPolicy = np
@@ -497,7 +497,10 @@ func (tc *testContext) dumpControllerLogs(t *testing.T) {
 					continue
 				}
 				logBytes, err := io.ReadAll(stream)
-				stream.Close()
+				closeErr := stream.Close()
+				if err == nil {
+					err = closeErr
+				}
 				if err != nil {
 					t.Logf("[controller-logs] error reading logs for %s / %s / %s: %v",
 						deployName, pod.Name, containerName, err)
