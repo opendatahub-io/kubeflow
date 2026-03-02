@@ -195,15 +195,15 @@ func (tc *testContext) waitForDeploymentReplicas(depMeta metav1.ObjectMeta, repl
 func (tc *testContext) waitForStatefulSet(nbMeta *metav1.ObjectMeta, availableReplicas int32, readyReplicas int32) error {
 	// Verify StatefulSet is running expected number of replicas
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		notebookStatefulSet, err1 := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
+		notebookStatefulSet, stsErr := tc.kubeClient.AppsV1().StatefulSets(tc.testNamespace).Get(ctx,
 			nbMeta.Name, metav1.GetOptions{})
 
-		if err1 != nil {
-			if apierrors.IsNotFound(err1) {
+		if stsErr != nil {
+			if apierrors.IsNotFound(stsErr) {
 				return false, nil
 			} else {
-				log.Printf("Failed to get %s statefulset, retrying", nbMeta.Name)
-				return false, err1
+				log.Printf("Failed to get %s statefulset: %v, retrying", nbMeta.Name, stsErr)
+				return false, nil
 			}
 		}
 		if notebookStatefulSet.Status.AvailableReplicas == availableReplicas &&
