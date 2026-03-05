@@ -229,12 +229,6 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 		portName = KubeRbacProxyServicePortName
 	}
 
-	// Store the port name as an annotation for service reconciliation
-	if notebook.Annotations == nil {
-		notebook.Annotations = make(map[string]string)
-	}
-	notebook.Annotations[AnnotationProxyPortName] = portName
-
 	// Convert config to ResourceRequirements
 	resourceRequirements := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
@@ -515,15 +509,16 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			if isKueueManagedNamespace(ctx, w.Client, notebook.Namespace) {
 				log.Info("Notebook is in kueue-managed namespace, checking for existing proxy port name")
 				oldNotebook := &nbv1.Notebook{}
-				if err := w.Decoder.DecodeRaw(req.OldObject, oldNotebook); err == nil {
-					existingPortName := getExistingProxyPortName(oldNotebook)
-					if existingPortName != "" && existingPortName != KubeRbacProxyServicePortName {
-						log.Info("Preserving legacy proxy port name for kueue compatibility",
-							"existingPortName", existingPortName)
-						portName = existingPortName
-					}
-				} else {
-					log.Error(err, "Failed to decode old notebook object")
+				if err := w.Decoder.DecodeRaw(req.OldObject, oldNotebook); err != nil {
+					log.Error(err, "Failed to decode old notebook object in kueue-managed namespace")
+					return admission.Errored(http.StatusInternalServerError,
+						fmt.Errorf("failed to decode old notebook object: %w", err))
+				}
+				existingPortName := getExistingProxyPortName(oldNotebook)
+				if existingPortName != "" && existingPortName != KubeRbacProxyServicePortName {
+					log.Info("Preserving legacy proxy port name for kueue compatibility",
+						"existingPortName", existingPortName)
+					portName = existingPortName
 				}
 			}
 		}
@@ -565,6 +560,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	if mutatedNotebook.Annotations == nil {
 		mutatedNotebook.Annotations = make(map[string]string)
 	}
+
+	// Set port name annotation based on final admitted spec to ensure sync with container spec
+	if finalPortName := getExistingProxyPortName(mutatedNotebook); finalPortName != "" {
+		mutatedNotebook.Annotations[AnnotationProxyPortName] = finalPortName
+	}
+
 	if needsRestart != NoPendingUpdates {
 		mutatedNotebook.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {
