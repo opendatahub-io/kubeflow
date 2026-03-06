@@ -28,26 +28,19 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var _ = Describe("getGatewayConfigOwnerName", func() {
-	It("should return empty string when gateway instance is empty", func() {
-		result := getGatewayConfigOwnerName(map[string]interface{}{})
-		Expect(result).To(Equal(""))
-	})
-
-	It("should return empty string when gateway has no metadata", func() {
-		gatewayInstance := map[string]interface{}{
-			"spec": map[string]interface{}{},
-		}
-		result := getGatewayConfigOwnerName(gatewayInstance)
+	It("should return empty string when gateway instance is nil", func() {
+		result := getGatewayConfigOwnerName(nil)
 		Expect(result).To(Equal(""))
 	})
 
 	It("should return empty string when gateway has no ownerReferences", func() {
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"name": "test-gateway",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-gateway",
 			},
 		}
 		result := getGatewayConfigOwnerName(gatewayInstance)
@@ -55,12 +48,12 @@ var _ = Describe("getGatewayConfigOwnerName", func() {
 	})
 
 	It("should return empty string when ownerReferences has no GatewayConfig", func() {
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "SomeOtherKind",
-						"name": "other-owner",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "SomeOtherKind",
+						Name: "other-owner",
 					},
 				},
 			},
@@ -70,12 +63,12 @@ var _ = Describe("getGatewayConfigOwnerName", func() {
 	})
 
 	It("should return GatewayConfig name when found in ownerReferences", func() {
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
@@ -85,16 +78,16 @@ var _ = Describe("getGatewayConfigOwnerName", func() {
 	})
 
 	It("should return GatewayConfig name even with multiple owners", func() {
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "SomeOtherKind",
-						"name": "other-owner",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "SomeOtherKind",
+						Name: "other-owner",
 					},
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
@@ -117,66 +110,26 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 		Expect(routev1.AddToScheme(testScheme)).To(Succeed())
 	})
 
-	It("should return empty string when gateway instance is empty", func() {
+	It("should return empty string when gateway instance is nil", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
-		result := getHostnameForPublicEndpoint(testCtx, map[string]interface{}{}, fakeClient, log)
-		Expect(result).To(Equal(""))
-	})
-
-	It("should return empty string when gateway instance is nil map", func() {
-		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
-		var nilMap map[string]interface{}
-		result := getHostnameForPublicEndpoint(testCtx, nilMap, fakeClient, log)
+		result := getHostnameForPublicEndpoint(testCtx, nil, fakeClient, log)
 		Expect(result).To(Equal(""))
 	})
 
 	It("should return hostname from Gateway CR when spec.listeners[0].hostname is valid", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
-		gatewayInstance := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "gateway.example.com",
+		hostname := gatewayv1.Hostname("gateway.example.com")
+		gatewayInstance := &gatewayv1.Gateway{
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &hostname,
 					},
 				},
 			},
 		}
 		result := getHostnameForPublicEndpoint(testCtx, gatewayInstance, fakeClient, log)
 		Expect(result).To(Equal("gateway.example.com"))
-	})
-
-	It("should try Route fallback when Gateway spec is missing", func() {
-		// Create a route that will be found during fallback
-		route := &routev1.Route{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-route",
-				Namespace: gatewayNamespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						Kind: "GatewayConfig",
-						Name: "my-gateway-config",
-					},
-				},
-			},
-			Spec: routev1.RouteSpec{
-				Host: "route.example.com",
-			},
-		}
-		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
-
-		// Gateway with metadata (for GatewayConfig owner) but no spec
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
-					},
-				},
-			},
-		}
-		result := getHostnameForPublicEndpoint(testCtx, gatewayInstance, fakeClient, log)
-		Expect(result).To(Equal("route.example.com"))
 	})
 
 	It("should try Route fallback when Gateway listeners is empty", func() {
@@ -197,17 +150,56 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
 
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{},
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{},
+			},
+		}
+		result := getHostnameForPublicEndpoint(testCtx, gatewayInstance, fakeClient, log)
+		Expect(result).To(Equal("route.example.com"))
+	})
+
+	It("should try Route fallback when Gateway listener hostname is nil", func() {
+		route := &routev1.Route{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-route",
+				Namespace: gatewayNamespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
+					},
+				},
+			},
+			Spec: routev1.RouteSpec{
+				Host: "route.example.com",
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
+
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
+					},
+				},
+			},
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: nil, // Nil hostname
+					},
+				},
 			},
 		}
 		result := getHostnameForPublicEndpoint(testCtx, gatewayInstance, fakeClient, log)
@@ -232,32 +224,9 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
 
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
-					},
-				},
-			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "", // Empty hostname
-					},
-				},
-			},
-		}
-		result := getHostnameForPublicEndpoint(testCtx, gatewayInstance, fakeClient, log)
-		Expect(result).To(Equal("route.example.com"))
-	})
-
-	It("should try Route fallback when Gateway first listener has invalid format", func() {
-		route := &routev1.Route{
+		emptyHostname := gatewayv1.Hostname("")
+		gatewayInstance := &gatewayv1.Gateway{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-route",
-				Namespace: gatewayNamespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						Kind: "GatewayConfig",
@@ -265,24 +234,11 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 					},
 				},
 			},
-			Spec: routev1.RouteSpec{
-				Host: "route.example.com",
-			},
-		}
-		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
-
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &emptyHostname, // Empty hostname
 					},
-				},
-			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					"invalid-listener-format", // Not a map
 				},
 			},
 		}
@@ -293,15 +249,16 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 	It("should return empty string when no GatewayConfig owner and no hostname in Gateway", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
 
+		emptyHostname := gatewayv1.Hostname("")
 		// Gateway with no ownerReferences (can't determine GatewayConfig for Route fallback)
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"name": "test-gateway",
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-gateway",
 			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "", // Empty hostname
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &emptyHostname, // Empty hostname
 					},
 				},
 			},
@@ -313,19 +270,20 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 	It("should return empty string when Route fallback finds no matching route", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
 
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+		emptyHostname := gatewayv1.Hostname("")
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "", // Empty hostname, triggers Route fallback
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &emptyHostname, // Empty hostname, triggers Route fallback
 					},
 				},
 			},
@@ -354,19 +312,20 @@ var _ = Describe("getHostnameForPublicEndpoint", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(route).Build()
 
 		// Gateway with valid hostname - should be preferred
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+		hostname := gatewayv1.Hostname("gateway.example.com")
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "gateway.example.com",
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &hostname,
 					},
 				},
 			},
@@ -590,11 +549,10 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should return error when DSPA host is empty", func() {
 		dspa := createTestDSPA("", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("missing or invalid 'host'"))
 		Expect(result).To(BeNil())
@@ -603,11 +561,10 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should return error when DSPA bucket is empty", func() {
 		dspa := createTestDSPA("minio.example.com", "", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("missing or invalid 'bucket'"))
 		Expect(result).To(BeNil())
@@ -616,12 +573,11 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should return error when COS secret is not found", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		// No secret created
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to get secret"))
 		Expect(result).To(BeNil())
@@ -630,7 +586,6 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should return error when access key is missing from secret", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		// Secret without access key
 		secret := &corev1.Secret{
@@ -645,7 +600,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("missing key 'accesskey'"))
 		Expect(result).To(BeNil())
@@ -654,7 +609,6 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should return error when secret key is missing from secret", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		// Secret without secret key
 		secret := &corev1.Secret{
@@ -669,7 +623,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("missing key 'secretkey'"))
 		Expect(result).To(BeNil())
@@ -678,7 +632,6 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should use default https scheme when not specified", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -692,7 +645,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil())
 
@@ -703,7 +656,6 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should use custom scheme when specified", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "http")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -717,7 +669,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil())
 
@@ -728,11 +680,12 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should set public_api_endpoint when gateway has hostname", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "gateway.example.com",
+		hostname := gatewayv1.Hostname("gateway.example.com")
+		gatewayInstance := &gatewayv1.Gateway{
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &hostname,
 					},
 				},
 			},
@@ -758,10 +711,9 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		Expect(metadata["public_api_endpoint"]).To(Equal("https://gateway.example.com/external/elyra/test-namespace"))
 	})
 
-	It("should not set public_api_endpoint when gateway is empty", func() {
+	It("should not set public_api_endpoint when gateway is nil", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -775,7 +727,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil())
 
@@ -789,19 +741,20 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		notebook := createTestNotebook("notebook", "test-namespace")
 
 		// Gateway with ownerReferences to GatewayConfig but no hostname in listeners
-		gatewayInstance := map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"ownerReferences": []interface{}{
-					map[string]interface{}{
-						"kind": "GatewayConfig",
-						"name": "my-gateway-config",
+		emptyHostname := gatewayv1.Hostname("")
+		gatewayInstance := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						Kind: "GatewayConfig",
+						Name: "my-gateway-config",
 					},
 				},
 			},
-			"spec": map[string]interface{}{
-				"listeners": []interface{}{
-					map[string]interface{}{
-						"hostname": "", // Empty hostname triggers Route fallback
+			Spec: gatewayv1.GatewaySpec{
+				Listeners: []gatewayv1.Listener{
+					{
+						Hostname: &emptyHostname, // Empty hostname triggers Route fallback
 					},
 				},
 			},
@@ -849,7 +802,6 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 	It("should populate all required Elyra config fields", func() {
 		dspa := createTestDSPA("minio.example.com", "my-bucket", "cos-secret", "accesskey", "secretkey", "")
 		notebook := createTestNotebook("notebook", "test-namespace")
-		gatewayInstance := map[string]interface{}{}
 
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -863,7 +815,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		}
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(secret).Build()
 
-		result, err := extractElyraRuntimeConfigInfo(testCtx, gatewayInstance, dspa, fakeClient, notebook, log)
+		result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil())
 
