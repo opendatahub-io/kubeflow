@@ -133,7 +133,7 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 // CompareNotebookHTTPRoutes checks if two HTTPRoutes are equal, if not return false
 func CompareNotebookHTTPRoutes(r1 gatewayv1.HTTPRoute, r2 gatewayv1.HTTPRoute) bool {
 	// Two HTTPRoutes will be equal if the labels and spec are identical
-	return reflect.DeepEqual(r1.ObjectMeta.Labels, r2.ObjectMeta.Labels) &&
+	return reflect.DeepEqual(r1.Labels, r2.Labels) &&
 		reflect.DeepEqual(r1.Spec, r2.Spec)
 }
 

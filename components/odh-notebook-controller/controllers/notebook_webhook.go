@@ -484,9 +484,9 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		mutatedNotebook.Annotations = make(map[string]string)
 	}
 	if needsRestart != NoPendingUpdates {
-		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
+		mutatedNotebook.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {
-		delete(mutatedNotebook.ObjectMeta.Annotations, updatePendingAnnotation)
+		delete(mutatedNotebook.Annotations, updatePendingAnnotation)
 	}
 
 	// Create the mutated notebook object

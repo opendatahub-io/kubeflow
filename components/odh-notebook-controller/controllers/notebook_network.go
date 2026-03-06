@@ -109,7 +109,7 @@ func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desiredNetworkPolic
 			}
 			// Reconcile labels and spec field
 			foundNetworkPolicy.Spec = desiredNetworkPolicy.Spec
-			foundNetworkPolicy.ObjectMeta.Labels = desiredNetworkPolicy.ObjectMeta.Labels
+			foundNetworkPolicy.Labels = desiredNetworkPolicy.Labels
 			return r.Update(ctx, foundNetworkPolicy)
 		})
 		if err != nil {
@@ -124,7 +124,7 @@ func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desiredNetworkPolic
 // CompareNotebookNetworkPolicies checks if two services are equal, if not return false
 func CompareNotebookNetworkPolicies(np1 netv1.NetworkPolicy, np2 netv1.NetworkPolicy) bool {
 	// Two network policies will be equal if the labels and specs are identical
-	return reflect.DeepEqual(np1.ObjectMeta.Labels, np2.ObjectMeta.Labels) &&
+	return reflect.DeepEqual(np1.Labels, np2.Labels) &&
 		reflect.DeepEqual(np1.Spec, np2.Spec)
 }
 
