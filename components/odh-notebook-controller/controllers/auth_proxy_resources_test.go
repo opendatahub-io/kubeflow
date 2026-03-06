@@ -93,7 +93,7 @@ func TestInjectKubeRbacProxyWithResourceValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := InjectKubeRbacProxy(tt.notebook, kubeRbacProxyImage)
+			err := InjectKubeRbacProxy(tt.notebook, kubeRbacProxyImage, "")
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")

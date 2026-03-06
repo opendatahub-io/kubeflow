@@ -73,6 +73,10 @@ var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
 
 const (
 	ContainerNameKubeRbacProxy = "kube-rbac-proxy"
+	// LegacyContainerNameOAuthProxy is the old sidecar container name from before kube-rbac-proxy migration
+	LegacyContainerNameOAuthProxy = "oauth-proxy"
+	// LegacyOAuthProxyPortName is the old port name used by oauth-proxy sidecar
+	LegacyOAuthProxyPortName = "oauth-proxy"
 
 	KubeRbacProxyConfigVolumeName = "kube-rbac-proxy-config"
 	KubeRbacProxyConfigMountPath  = "/etc/kube-rbac-proxy"
@@ -93,6 +97,14 @@ const (
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 
 	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
+
+	// KueueManagedNamespaceLabel is the label used by Kueue on OpenShift to mark a namespace as managed
+	KueueManagedNamespaceLabel = "kueue.openshift.io/managed"
+
+	// AnnotationProxyPortName stores the port name used by the auth proxy sidecar.
+	// This is used to preserve the legacy oauth-proxy port name in kueue-managed namespaces
+	// where container port names are immutable.
+	AnnotationProxyPortName = "notebooks.opendatahub.io/proxy-port-name"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -111,6 +123,36 @@ func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 		})
 	}
 	return nil
+}
+
+// isKueueManagedNamespace checks if the given namespace is managed by Kueue
+// by looking for the kueue.openshift.io/managed: 'true' label
+func isKueueManagedNamespace(ctx context.Context, c client.Client, namespace string) bool {
+	ns := &corev1.Namespace{}
+	if err := c.Get(ctx, types.NamespacedName{Name: namespace}, ns); err != nil {
+		return false
+	}
+	return ns.Labels[KueueManagedNamespaceLabel] == "true"
+}
+
+// getExistingProxyPortName extracts the port name from an existing auth sidecar container
+// in the old notebook. It checks for both kube-rbac-proxy and legacy oauth-proxy containers.
+// Returns the port name if found, or empty string if no sidecar exists.
+func getExistingProxyPortName(oldNotebook *nbv1.Notebook) string {
+	if oldNotebook == nil {
+		return ""
+	}
+
+	for _, container := range oldNotebook.Spec.Template.Spec.Containers {
+		if container.Name == ContainerNameKubeRbacProxy || container.Name == LegacyContainerNameOAuthProxy {
+			for _, port := range container.Ports {
+				if port.ContainerPort == NotebookKubeRbacProxyPort {
+					return port.Name
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // resourceConfig holds parsed and validated OAuth proxy resource configuration
@@ -173,12 +215,18 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 }
 
 // InjectKubeRbacProxy injects the kube-rbac-proxy proxy sidecar container in the Notebook
-// spec
-func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacProxyConfig) error {
+// spec. The portName parameter allows preserving the legacy port name in kueue-managed
+// namespaces where port names are immutable. If empty, uses the default KubeRbacProxyServicePortName.
+func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacProxyConfig, portName string) error {
 	// Parse and validate kube-rbac-proxy resource annotations
 	config, err := parseAndValidateAuthSidecarResources(notebook)
 	if err != nil {
 		return fmt.Errorf("invalid kube-rbac-proxy resource configuration: %w", err)
+	}
+
+	// Use default port name if not specified
+	if portName == "" {
+		portName = KubeRbacProxyServicePortName
 	}
 
 	// Convert config to ResourceRequirements
@@ -212,7 +260,7 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 			"--auth-header-groups-field-name=X-Auth-Request-Groups",
 		},
 		Ports: []corev1.ContainerPort{{
-			Name:          KubeRbacProxyServicePortName,
+			Name:          portName,
 			ContainerPort: NotebookKubeRbacProxyPort,
 			Protocol:      corev1.ProtocolTCP,
 		}},
@@ -257,17 +305,24 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 		},
 	}
 
-	// Add the sidecar container to the notebook
+	// Add or replace the sidecar container in the notebook.
+	// Also handles migration from legacy oauth-proxy to kube-rbac-proxy.
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
-	proxyContainerExists := false
+	proxyContainerIndex := -1
+
+	// First, find any existing proxy container (either kube-rbac-proxy or legacy oauth-proxy)
 	for index, container := range *notebookContainers {
-		if container.Name == ContainerNameKubeRbacProxy {
-			(*notebookContainers)[index] = proxyContainer
-			proxyContainerExists = true
+		if container.Name == ContainerNameKubeRbacProxy || container.Name == LegacyContainerNameOAuthProxy {
+			proxyContainerIndex = index
 			break
 		}
 	}
-	if !proxyContainerExists {
+
+	if proxyContainerIndex >= 0 {
+		// Replace existing proxy container
+		(*notebookContainers)[proxyContainerIndex] = proxyContainer
+	} else {
+		// Append new proxy container
 		*notebookContainers = append(*notebookContainers, proxyContainer)
 	}
 
@@ -446,8 +501,30 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	// Inject the kube-rbac-proxy if the annotation is present
 	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
-		// Inject kube-rbac-proxy
-		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig)
+		// Determine the port name to use.
+		// For UPDATE operations in kueue-managed namespaces, preserve the existing port name
+		// to avoid kueue admission webhook rejecting the change (ports are immutable).
+		portName := ""
+		if req.Operation == admissionv1.Update {
+			if isKueueManagedNamespace(ctx, w.Client, notebook.Namespace) {
+				log.Info("Notebook is in kueue-managed namespace, checking for existing proxy port name")
+				oldNotebook := &nbv1.Notebook{}
+				if err := w.Decoder.DecodeRaw(req.OldObject, oldNotebook); err != nil {
+					log.Error(err, "Failed to decode old notebook object in kueue-managed namespace")
+					return admission.Errored(http.StatusInternalServerError,
+						fmt.Errorf("failed to decode old notebook object: %w", err))
+				}
+				existingPortName := getExistingProxyPortName(oldNotebook)
+				if existingPortName != "" && existingPortName != KubeRbacProxyServicePortName {
+					log.Info("Preserving legacy proxy port name for kueue compatibility",
+						"existingPortName", existingPortName)
+					portName = existingPortName
+				}
+			}
+		}
+
+		// Inject kube-rbac-proxy with the determined port name
+		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig, portName)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -483,10 +560,16 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	if mutatedNotebook.Annotations == nil {
 		mutatedNotebook.Annotations = make(map[string]string)
 	}
+
+	// Set port name annotation based on final admitted spec to ensure sync with container spec
+	if finalPortName := getExistingProxyPortName(mutatedNotebook); finalPortName != "" {
+		mutatedNotebook.Annotations[AnnotationProxyPortName] = finalPortName
+	}
+
 	if needsRestart != NoPendingUpdates {
-		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
+		mutatedNotebook.Annotations[updatePendingAnnotation] = needsRestart.Reason
 	} else {
-		delete(mutatedNotebook.ObjectMeta.Annotations, updatePendingAnnotation)
+		delete(mutatedNotebook.Annotations, updatePendingAnnotation)
 	}
 
 	// Create the mutated notebook object
