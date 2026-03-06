@@ -36,7 +36,7 @@ spec:
     value:
     - 'on-pr-{{revision}}'
   - name: pipeline-type
-    description: "The type of pipeline to run - we can't use push to avoid triggering unwanted tasks in a referenced pipeline"
+    description: "The type of pipeline to run - we can't use push to avoid triggering trigger-operator-build task in a referenced pipeline"
     value: custom
   - name: enable-group-testing
     value: "true"
@@ -44,6 +44,8 @@ spec:
     value: "false"
   - name: skip-checks
     value: "true"
+  - name: enable-slack-failure-notification
+    value: "false"
   pipelineRef:
     resolver: git
     params:
