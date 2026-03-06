@@ -25,7 +25,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/open-data-hub-tenant/odh-notebook-controller-ci-main:on-pr-{{revision}}
+    value: quay.io/opendatahub/odh-notebook-controller:on-pr-{{revision}}
   - name: image-expires-after
     value: 5d
   - name: dockerfile
