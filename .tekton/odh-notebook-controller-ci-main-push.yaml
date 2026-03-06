@@ -29,6 +29,13 @@ spec:
     value: odh-notebook-controller/Dockerfile
   - name: path-context
     value: components
+  - name: pipeline-type
+    description: "The type of pipeline to run - we can't use push to avoid triggering unwanted tasks in a referenced pipeline"
+    value: custom
+  - name: build-source-image
+    value: "false"
+  - name: skip-checks
+    value: "true"
   pipelineRef:
     resolver: git
     params:

@@ -34,10 +34,15 @@ spec:
     value: components
   - name: additional-tags
     value:
-    - 'odh-pr-{{revision}}'
+    - 'on-pr-{{revision}}'
   - name: pipeline-type
-    value: pull-request
+    description: "The type of pipeline to run - we can't use push to avoid triggering unwanted tasks in a referenced pipeline"
+    value: custom
   - name: enable-group-testing
+    value: "true"
+  - name: build-source-image
+    value: "false"
+  - name: skip-checks
     value: "true"
   pipelineRef:
     resolver: git
