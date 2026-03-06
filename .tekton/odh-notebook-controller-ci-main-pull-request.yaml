@@ -39,7 +39,7 @@ spec:
     description: "The type of pipeline to run - we can't use push to avoid triggering trigger-operator-build task in a referenced pipeline"
     value: custom
   - name: enable-group-testing
-    value: "true"
+    value: "false"
   - name: build-source-image
     value: "false"
   - name: skip-checks
