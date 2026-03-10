@@ -1,0 +1,44 @@
+---
+name: Update go.mod go directive
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-go-directive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/notebook-controller/go.mod
+
+      - name: Update go.mod go directives to latest patch
+        id: update-go
+        run: ./ci/bump-go-mod-go-version.sh
+
+      - name: Create pull request
+        if: ${{ steps.update-go.outputs.updated == 'true' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(go): bump go directive patch versions"
+          title: "chore(go): bump go directive patch versions"
+          body: |
+            Automated update of the `go` directive patch versions in `go.mod` files.
+
+            This keeps the minimum required Go version aligned with upstream patch releases (including security fixes) while avoiding automatic minor/major jumps.
+          branch: automation/go-directive-patch-bump
+          delete-branch: true
+          labels: |
+            dependencies
+            go
