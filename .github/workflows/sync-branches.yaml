@@ -52,6 +52,28 @@ jobs:
         git fetch origin ${{ env.SOURCE_BRANCH }}:${{ env.SOURCE_BRANCH }}
         git merge --no-commit origin/${{ env.SOURCE_BRANCH }} || true
 
+        #########################################################################
+        # Always keep target branch state for .tekton
+        # (do not propagate any .tekton changes from source branch).
+        # Caveats:
+        # - This applies to any source/target pair using this workflow.
+        # - If target does not contain .tekton, any merged .tekton content from
+        #   source will be removed.
+        # - This guard exists only in this workflow; manual merges can still
+        #   propagate .tekton unless handled similarly.
+
+        # Reset .tekton completely to target (HEAD) state
+        git rm -r -f --cached --ignore-unmatch -- ':/.tekton'
+        rm -rf -- "$(git rev-parse --show-toplevel)/.tekton"
+
+        # Re-checkout .tekton only if it exists on target
+        if git rev-parse --verify HEAD:.tekton >/dev/null 2>&1; then
+          echo "Keeping target branch version of .tekton."
+          git checkout HEAD -- ':/.tekton'
+          git add -A -- ':/.tekton'
+        fi
+        #########################################################################
+
         # Known files to resolve the conflicts
         FILES=(
           "components/notebook-controller/config/overlays/openshift/params.env"
