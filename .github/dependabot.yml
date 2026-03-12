@@ -37,3 +37,14 @@ updates:
     groups:
       go:
         applies-to: security-updates
+
+  - package-ecosystem: "gomod"
+    open-pull-requests-limit: 0
+    directory: "/components/common"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "fix(deps)"
+    groups:
+      go:
+        applies-to: security-updates
