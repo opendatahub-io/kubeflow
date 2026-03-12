@@ -40,6 +40,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -150,24 +151,31 @@ func main() {
 	}
 	setupLog.Info("Controller is running in namespace", "namespace", namespace)
 	if err = (&controllers.OpenshiftNotebookReconciler{
-		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
-		Namespace: namespace,
-		Scheme:    mgr.GetScheme(),
-		Config:    mgr.GetConfig(),
+		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
+		Namespace:     namespace,
+		Scheme:        mgr.GetScheme(),
+		Config:        mgr.GetConfig(),
+		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "odh-notebook-controller")
 		os.Exit(1)
 	}
 
 	// Setup notebook mutating webhook
+	dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to create dynamic client")
+		os.Exit(1)
+	}
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &controllers.NotebookWebhook{
-			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
-			Client:    mgr.GetClient(),
-			Config:    mgr.GetConfig(),
-			Namespace: namespace,
+			Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
+			Client:        mgr.GetClient(),
+			Config:        mgr.GetConfig(),
+			DynamicClient: dynamicClient,
+			Namespace:     namespace,
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},
@@ -175,6 +183,16 @@ func main() {
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
+
+	// Setup notebook validating webhook
+	notebookValidatingWebhook := &webhook.Admission{
+		Handler: &controllers.NotebookValidatingWebhook{
+			Log:     ctrl.Log.WithName("controllers").WithName("odh-notebook-validating-webhook"),
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(mgr.GetScheme()),
+		},
+	}
+	hookServer.Register("/validate-notebook-v1", notebookValidatingWebhook)
 
 	//+kubebuilder:scaffold:builder
 
