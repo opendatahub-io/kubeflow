@@ -251,9 +251,13 @@ func TestNotebookIsIdle(t *testing.T) {
 	for _, c := range testCases {
 		t.Run(c.testName, func(t *testing.T) {
 			for envVar, val := range c.env {
-				os.Setenv(envVar, val)
+				if err := os.Setenv(envVar, val); err != nil {
+					t.Fatalf("Failed to set env var %s: %v", envVar, err)
+				}
 			}
-			initGlobalVars()
+			if err := initGlobalVars(); err != nil {
+				t.Fatalf("Failed to initialize global vars: %v", err)
+			}
 			if notebookIsIdle(c.meta, TestLogger) != c.result {
 				t.Errorf("ENV VAR: %+v\n", c.env)
 				t.Errorf("Wrong result for case object: %+v\n", c.meta)
