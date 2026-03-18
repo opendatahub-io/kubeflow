@@ -42,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,10 +82,11 @@ const (
 // OpenshiftNotebookReconciler holds the controller configuration.
 type OpenshiftNotebookReconciler struct {
 	client.Client
-	Namespace string
-	Scheme    *runtime.Scheme
-	Log       logr.Logger
-	Config    *rest.Config
+	Namespace     string
+	Scheme        *runtime.Scheme
+	Log           logr.Logger
+	Config        *rest.Config
+	EventRecorder record.EventRecorder
 }
 
 // ClusterRole permissions
@@ -108,7 +110,9 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups="image.openshift.io",resources=imagestreams,verbs=list;get;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups="datasciencepipelinesapplications.opendatahub.io",resources=datasciencepipelinesapplications/api,verbs=get;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get
 // +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
@@ -482,6 +486,18 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Call the MLflow integration reconciler
+	// This will reconcile RoleBinding based on the MLflow integration annotation
+	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
+	mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
+	if err != nil {
+		log.Error(err, "Unable to reconcile MLflow integration")
+		return ctrl.Result{}, err
+	}
+	if mlflowResult.RequeueAfter > 0 {
+		return mlflowResult, nil
 	}
 
 	// Remove the reconciliation lock annotation

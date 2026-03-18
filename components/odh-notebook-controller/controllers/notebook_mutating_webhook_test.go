@@ -16,11 +16,15 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"fmt"
+	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	imagev1 "github.com/openshift/api/image/v1"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -671,4 +675,43 @@ func toMetav1Time(timeString string) metav1.Time {
 	parsedTime, err := time.Parse(time.RFC3339, timeString)
 	Expect(err).ToNot(HaveOccurred())
 	return metav1.NewTime(parsedTime)
+}
+
+func TestFirstDifferenceReporter(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		a    any
+		b    any
+		diff string
+	}{
+		{"", 42, 42, ""},
+		{"", corev1.Pod{Spec: corev1.PodSpec{NodeName: "node1"}}, corev1.Pod{Spec: corev1.PodSpec{NodeName: "node2"}}, "{v1.Pod}.Spec.NodeName: node1 != node2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var reporter FirstDifferenceReporter
+			eq := cmp.Equal(tt.a, tt.b, cmp.Reporter(&reporter))
+			assert.Equal(t, tt.diff == "", eq)
+			assert.Equal(t, tt.diff, reporter.String())
+		})
+	}
+}
+
+func TestGetStructDiff(t *testing.T) {
+	var tests = []struct {
+		name     string
+		a        any
+		b        any
+		expected string
+	}{
+		{"simple numbers", 42, 42, ""},
+		{"differing pods", corev1.Pod{Spec: corev1.PodSpec{NodeName: "node1"}}, corev1.Pod{Spec: corev1.PodSpec{NodeName: "node2"}}, "{v1.Pod}.Spec.NodeName: node1 != node2"},
+	}
+
+	for _, v := range tests {
+		t.Run(v.name, func(t *testing.T) {
+			// global context isn´t used here (tests were failing)
+			diff := getStructDiff(context.Background(), v.a, v.b)
+			assert.Equal(t, diff, v.expected)
+		})
+	}
 }

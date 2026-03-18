@@ -208,12 +208,13 @@ jobs:
             sed 's|registry.redhat.io/openshift4/ose-kube-rbac-proxy.*|quay.io/brancz/kube-rbac-proxy:v0.20.0|g' | \
             kubectl apply -f -
 
-          # patch the webhook with our self-signed CA
+          # patch the webhooks with our self-signed CA
           bundlePatch=$(cat <<END
           [{"op": "replace", "path": "/webhooks/0/clientConfig/caBundle", "value": "$(cat ca-cert.pem | base64 | tr -d '\n')" }]
           END
           )
           kubectl patch MutatingWebhookConfiguration/odh-notebook-controller-mutating-webhook-configuration --type=json -p="$bundlePatch"
+          kubectl patch ValidatingWebhookConfiguration/odh-notebook-controller-validating-webhook-configuration --type=json -p="$bundlePatch"
 
           # wait for the good result
           kubectl wait pods -n opendatahub -l app=odh-notebook-controller --for=condition=Ready --timeout=100s

@@ -1589,7 +1589,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					},
 				},
 			}
-			// Update only the status subresource
 			Expect(cli.Status().Update(ctx, dspaObj)).To(Succeed())
 
 			By("Creating a COS3 credentials Secret")
@@ -1604,14 +1603,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				},
 			}
 			Expect(cli.Create(ctx, s3CredSecret)).To(Succeed())
-
-			By("Creating openshift-ingress namespace for Gateway")
-			openshiftIngressNS := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "openshift-ingress",
-				},
-			}
-			Expect(cli.Create(ctx, openshiftIngressNS)).To(Succeed())
 
 			By("Creating a Gateway CR")
 			gateway = &unstructured.Unstructured{
@@ -1764,21 +1755,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				_ = cli.Delete(ctx, s3CredSecret)
 			}
 
-			// Delete Gateway
+			// Delete Gateway (do not delete openshift-ingress namespace; it is shared with MLflow and other tests)
 			if gateway != nil {
 				_ = cli.Delete(ctx, gateway)
 				Eventually(func() error {
 					return cli.Get(ctx, client.ObjectKeyFromObject(gateway), gateway)
 				}, time.Second*5, time.Millisecond*250).ShouldNot(Succeed())
 			}
-
-			// Delete openshift-ingress namespace
-			openshiftIngressNS := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "openshift-ingress",
-				},
-			}
-			_ = cli.Delete(ctx, openshiftIngressNS)
 
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
