@@ -133,7 +133,7 @@ func SetStopAnnotation(meta *metav1.ObjectMeta, m *metrics.Metrics) {
 		m.NotebookCullingTimestamp.WithLabelValues(meta.Namespace, meta.Name).Set(float64(t.Unix()))
 	}
 
-	delete(meta.GetAnnotations(), "notebooks.kubeflow.org/last_activity")
+	delete(meta.GetAnnotations(), LAST_ACTIVITY_ANNOTATION)
 }
 
 func StopAnnotationIsSet(meta metav1.ObjectMeta) bool {
