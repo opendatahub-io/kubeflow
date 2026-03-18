@@ -184,16 +184,16 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// Copy the pod template labels, but reconcilation is not required
-	// exclusively based on ths pod template labels
-	if ss.Spec.Replicas != nil && foundStateful.Spec.Replicas != nil && *ss.Spec.Replicas != *foundStateful.Spec.Replicas {
-		if !reflect.DeepEqual(foundStateful.Spec.Template.Labels, ss.Spec.Template.Labels) {
-			foundStateful.Spec.Template.Labels = ss.Spec.Template.Labels
-		}
+	// Sync pod template labels unconditionally so that label-only updates are
+	// not missed when replicas are unchanged. Template.Labels are not covered
+	// by CopyStatefulSetFields, so track the delta here to drive the update.
+	templateLabelsChanged := !reflect.DeepEqual(foundStateful.Spec.Template.Labels, ss.Spec.Template.Labels)
+	if templateLabelsChanged {
+		foundStateful.Spec.Template.Labels = ss.Spec.Template.Labels
 	}
 
 	// Update the foundStateful object and write the result back if there are any changes
-	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful) {
+	if !justCreated && (templateLabelsChanged || reconcilehelper.CopyStatefulSetFields(ss, foundStateful)) {
 		log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
 		err = r.Update(ctx, foundStateful)
 		if err != nil {
