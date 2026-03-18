@@ -35,7 +35,7 @@ import (
 
 const (
 	MLflowIdentifier           = "mlflow"
-	MLflowClusterRoleName      = MLflowIdentifier
+	MLflowClusterRoleName      = "mlflow-integration"
 	MLflowTrackingURIEnvVar    = "MLFLOW_TRACKING_URI"
 	MLflowK8sIntegrationEnvVar = "MLFLOW_K8S_INTEGRATION"
 	MLflowInstanceAnnotation   = "opendatahub.io/mlflow-instance"
@@ -49,18 +49,8 @@ func mlflowRoleBindingName(notebook *nbv1.Notebook) string {
 // getMLflowInstanceAnnotation returns the trimmed instance name from the notebook annotation
 // and a boolean indicating whether a non-empty value was present.
 func getMLflowInstanceAnnotation(notebook *nbv1.Notebook) (string, bool) {
-	if notebook.Annotations == nil {
-		return "", false
-	}
-	val, exists := notebook.Annotations[MLflowInstanceAnnotation]
-	if !exists {
-		return "", false
-	}
-	trimmed := strings.TrimSpace(val)
-	if trimmed == "" {
-		return "", false
-	}
-	return trimmed, true
+	val := strings.TrimSpace(notebook.Annotations[MLflowInstanceAnnotation])
+	return val, val != ""
 }
 
 // setNotebookContainerEnvVar sets or updates an environment variable in the notebook container.
