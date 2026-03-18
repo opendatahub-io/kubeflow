@@ -3,6 +3,7 @@ package culler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -191,7 +192,7 @@ func getNotebookApiKernels(nm, ns string) []KernelStatus {
 			log.Error(err, "Error closing response body.")
 		}
 	}()
-	err := json.NewDecoder(resp.Body).Decode(&kernels)
+	err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&kernels)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API Kernels.")
 		return nil
@@ -215,7 +216,7 @@ func getNotebookApiTerminals(nm, ns string) []TerminalStatus {
 			log.Error(err, "Error closing response body.")
 		}
 	}()
-	err := json.NewDecoder(resp.Body).Decode(&terminals)
+	err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&terminals)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API terminals.")
 		return nil
