@@ -96,8 +96,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// TODO(yanniszark): Can we avoid reconciling Events and Notebook in the same queue?
 	event := &corev1.Event{}
-	var getEventErr error
-	getEventErr = r.Get(ctx, req.NamespacedName, event)
+	getEventErr := r.Get(ctx, req.NamespacedName, event)
 	if getEventErr == nil {
 		log.Info("Found event for Notebook. Re-emitting...")
 
@@ -188,8 +187,8 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Copy the pod template labels, but reconcilation is not required
 	// exclusively based on ths pod template labels
 	if ss.Spec.Replicas != nil && foundStateful.Spec.Replicas != nil && *ss.Spec.Replicas != *foundStateful.Spec.Replicas {
-		if !reflect.DeepEqual(foundStateful.Spec.Template.ObjectMeta.Labels, ss.Spec.Template.ObjectMeta.Labels) {
-			foundStateful.Spec.Template.ObjectMeta.Labels = ss.Spec.Template.ObjectMeta.Labels
+		if !reflect.DeepEqual(foundStateful.Spec.Template.Labels, ss.Spec.Template.Labels) {
+			foundStateful.Spec.Template.Labels = ss.Spec.Template.Labels
 		}
 	}
 
@@ -477,14 +476,14 @@ func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv
 	}
 
 	// copy all of the Notebook labels to the pod including poddefault related labels
-	l := &ss.Spec.Template.ObjectMeta.Labels
-	for k, v := range instance.ObjectMeta.Labels {
+	l := &ss.Spec.Template.Labels
+	for k, v := range instance.Labels {
 		(*l)[k] = v
 	}
 
 	// copy all of the Notebook annotations to the pod.
-	a := &ss.Spec.Template.ObjectMeta.Annotations
-	for k, v := range instance.ObjectMeta.Annotations {
+	a := &ss.Spec.Template.Annotations
+	for k, v := range instance.Annotations {
 		if !strings.Contains(k, "kubectl") && !strings.Contains(k, "notebook") {
 			(*a)[k] = v
 		}
@@ -563,7 +562,7 @@ func generateVirtualService(instance *v1beta1.Notebook) (*unstructured.Unstructu
 
 	// unpack annotations from Notebook resource
 	annotations := make(map[string]string)
-	for k, v := range instance.ObjectMeta.Annotations {
+	for k, v := range instance.Annotations {
 		annotations[k] = v
 	}
 
@@ -589,7 +588,7 @@ func generateVirtualService(instance *v1beta1.Notebook) (*unstructured.Unstructu
 		istioHost = "*"
 	}
 	if err := unstructured.SetNestedStringSlice(vsvc.Object, []string{istioHost}, "spec", "hosts"); err != nil {
-		return nil, fmt.Errorf("Set .spec.hosts error: %v", err)
+		return nil, fmt.Errorf("set .spec.hosts error: %v", err)
 
 	}
 

@@ -133,11 +133,7 @@ func SetStopAnnotation(meta *metav1.ObjectMeta, m *metrics.Metrics) {
 		m.NotebookCullingTimestamp.WithLabelValues(meta.Namespace, meta.Name).Set(float64(t.Unix()))
 	}
 
-	if meta.GetAnnotations() != nil {
-		if _, ok := meta.GetAnnotations()["notebooks.kubeflow.org/last_activity"]; ok {
-			delete(meta.GetAnnotations(), "notebooks.kubeflow.org/last_activity")
-		}
-	}
+	delete(meta.GetAnnotations(), "notebooks.kubeflow.org/last_activity")
 }
 
 func StopAnnotationIsSet(meta metav1.ObjectMeta) bool {
@@ -190,7 +186,11 @@ func getNotebookApiKernels(nm, ns string) []KernelStatus {
 
 	var kernels []KernelStatus
 
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error(err, "Error closing response body.")
+		}
+	}()
 	err := json.NewDecoder(resp.Body).Decode(&kernels)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API Kernels.")
@@ -210,7 +210,11 @@ func getNotebookApiTerminals(nm, ns string) []TerminalStatus {
 
 	var terminals []TerminalStatus
 
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error(err, "Error closing response body.")
+		}
+	}()
 	err := json.NewDecoder(resp.Body).Decode(&terminals)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API terminals.")
@@ -263,11 +267,11 @@ func getNotebookRecentTime(t []string, api string) string {
 
 // Update LAST_ACTIVITY_ANNOTATION
 func UpdateNotebookLastActivityAnnotation(meta *metav1.ObjectMeta) bool {
-	log := log.WithValues("notebook", getNamespacedNameFromMeta(*meta))
 	if meta == nil {
 		log.Info("Metadata is Nil. Can't update Last Activity Annotation.")
 		return false
 	}
+	log := log.WithValues("notebook", getNamespacedNameFromMeta(*meta))
 
 	log.Info("Updating the last-activity annotation.")
 	nm, ns := meta.GetName(), meta.GetNamespace()
@@ -322,7 +326,7 @@ func compareAnnotationTimeToResource(meta *metav1.ObjectMeta, resourceTime strin
 func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []KernelStatus) bool {
 	log := log.WithValues("notebook", getNamespacedNameFromMeta(*meta))
 
-	if kernels == nil || len(kernels) == 0 {
+	if len(kernels) == 0 {
 		log.Info("Notebook has no kernels. Will not update last-activity")
 		return false
 	}
@@ -359,7 +363,7 @@ func updateTimestampFromTerminalsActivity(meta *metav1.ObjectMeta, terminals []T
 	// going backwards in time.
 	log := log.WithValues("notebook", getNamespacedNameFromMeta(*meta))
 
-	if terminals == nil || len(terminals) == 0 {
+	if len(terminals) == 0 {
 		log.Info("Notebook has no terminals. Will not update last-activity")
 		return false
 	}
