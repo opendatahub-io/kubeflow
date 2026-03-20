@@ -13,6 +13,26 @@ permissions:
   pull-requests: read
 
 jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/notebook-controller/go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Skip hooks that already have dedicated jobs with richer PR integration (e.g. only-new-issues, inline annotations)
+      - uses: pre-commit/action@v3.0.1
+        env:
+          SKIP: golangci-lint-notebook-controller,golangci-lint-odh-notebook-controller
+
   golangci:
     name: golangci-lint
     runs-on: ubuntu-latest
@@ -47,22 +67,6 @@ jobs:
       - name: go mod verify
         if: "${{ !cancelled() }}"
         run: go mod verify
-        working-directory: ${{ matrix.component }}
-
-      # https://github.com/golang/go/issues/27005
-      - name: go mod tidy -diff
-        if: "${{ !cancelled() }}"
-        run: |
-          set -x
-
-          go mod tidy
-
-          # if the above changed any files, report the differences and fail the step
-          if [[ $(git ls-files . -d -m -o --exclude-standard --full-name -v | wc -l) -gt 0 ]]; then
-            echo "There are changes:"
-            git diff
-            exit 1
-          fi
         working-directory: ${{ matrix.component }}
 
   govulncheck:

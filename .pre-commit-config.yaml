@@ -1,0 +1,62 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: golangci-lint-notebook-controller
+        name: golangci-lint (notebook-controller)
+        entry: bash -c 'cd components/notebook-controller && golangci-lint run --timeout=5m ./...'
+        language: golang
+        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0']
+        files: ^components/notebook-controller/.*\.go$
+        pass_filenames: false
+        types: [go]
+
+      - id: golangci-lint-odh-notebook-controller
+        name: golangci-lint (odh-notebook-controller)
+        entry: bash -c 'cd components/odh-notebook-controller && golangci-lint run --timeout=5m ./...'
+        language: golang
+        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0']
+        files: ^components/odh-notebook-controller/.*\.go$
+        pass_filenames: false
+        types: [go]
+
+      - id: go-mod-tidy-notebook-controller
+        name: go mod tidy (notebook-controller)
+        entry: bash -c 'cd components/notebook-controller && go mod tidy -diff'
+        language: system
+        files: ^components/notebook-controller/go\.(mod|sum)$
+        pass_filenames: false
+        types: [file]
+
+      - id: go-mod-tidy-odh-notebook-controller
+        name: go mod tidy (odh-notebook-controller)
+        entry: bash -c 'cd components/odh-notebook-controller && go mod tidy -diff'
+        language: system
+        files: ^components/odh-notebook-controller/go\.(mod|sum)$
+        pass_filenames: false
+        types: [file]
+
+      - id: go-vet-notebook-controller
+        name: go vet (notebook-controller)
+        entry: bash -c 'cd components/notebook-controller && go vet ./...'
+        language: system
+        files: ^components/notebook-controller/.*\.go$
+        pass_filenames: false
+        types: [go]
+
+      - id: go-vet-odh-notebook-controller
+        name: go vet (odh-notebook-controller)
+        entry: bash -c 'cd components/odh-notebook-controller && go vet ./...'
+        language: system
+        files: ^components/odh-notebook-controller/.*\.go$
+        pass_filenames: false
+        types: [go]
