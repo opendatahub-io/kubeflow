@@ -37,6 +37,8 @@ const (
 	MLflowClusterRoleName      = "mlflow-operator-mlflow-integration"
 	MLflowTrackingURIEnvVar    = "MLFLOW_TRACKING_URI"
 	MLflowK8sIntegrationEnvVar = "MLFLOW_K8S_INTEGRATION"
+	MLflowTrackingAuthEnvVar   = "MLFLOW_TRACKING_AUTH"
+	MLflowTrackingAuthValue    = "kubernetes-namespaced"
 	MLflowInstanceAnnotation   = "opendatahub.io/mlflow-instance"
 )
 
@@ -104,11 +106,12 @@ func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr
 	if err != nil {
 		return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
 	}
-
 	hostname := getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
 	if hostname == "" {
 		return "", fmt.Errorf("unable to determine hostname for MLflow tracking URI")
 	}
+
+	// Construct the path segment for the tracking URI
 	pathSegment := MLflowIdentifier
 	if instanceName != "" && instanceName != MLflowIdentifier {
 		pathSegment = fmt.Sprintf("%s-%s", MLflowIdentifier, instanceName)
@@ -247,28 +250,31 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 //   - MLFLOW_K8S_INTEGRATION: set to 'true' when the 'opendatahub.io/mlflow-instance'
 //     annotation is present and non-empty. If the annotation is absent or empty, this
 //     variable will not be injected.
+//   - MLFLOW_TRACKING_AUTH: set to 'kubernetes-namespaced' when the 'opendatahub.io/mlflow-instance'
+//     annotation is present and non-empty. This tells the MLflow client to use Kubernetes
+//     namespace-scoped authentication.
 //   - MLFLOW_TRACKING_URI: set when the 'opendatahub.io/mlflow-instance' annotation
 //     contains a non-empty instance name and a tracking URI can be determined.
 func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) {
 	// Determine mlflow instance annotation (if present)
 	instanceName, instanceEnabled := getMLflowInstanceAnnotation(notebook)
 
-	// Only inject MLFLOW_K8S_INTEGRATION when the mlflow-instance annotation is present (non-empty).
-	if instanceEnabled {
-		if err := setNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar, "true"); err != nil {
-			log.Error(err, "Notebook image container not found, skipping MLflow K8s integration env var injection")
-			// Don't fail webhook - MLflow integration is optional
-			return
-		}
-	} else {
-		// Ensure the var is removed when not enabled (do not inject "false")
+	// Only inject MLflow env vars when the mlflow-instance annotation is present (non-empty).
+	if !instanceEnabled {
+		// Ensure all MLflow vars are removed when not enabled
 		removeNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar)
+		removeNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar)
+		removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
+		return
 	}
 
-	// Handle MLFLOW_TRACKING_URI based on integration status
-	if !instanceEnabled {
-		// Annotation is not present/empty - remove MLFLOW_TRACKING_URI if it exists
-		removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
+	if err := setNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar, "true"); err != nil {
+		log.Error(err, "Notebook image container not found, skipping MLflow K8s integration env var injection")
+		// Don't fail webhook - MLflow integration is optional
+		return
+	}
+	if err := setNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar, MLflowTrackingAuthValue); err != nil {
+		log.Error(err, "Notebook image container not found, skipping MLflow tracking auth env var injection")
 		return
 	}
 

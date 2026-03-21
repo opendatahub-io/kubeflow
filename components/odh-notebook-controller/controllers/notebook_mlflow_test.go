@@ -239,19 +239,21 @@ var _ = Describe("MLflow Integration", func() {
 
 	Describe("HandleMLflowEnvVars", func() {
 		Context("when mlflow-instance annotation is not set", func() {
-			It("should NOT inject MLFLOW_K8S_INTEGRATION and not inject MLFLOW_TRACKING_URI", func() {
+			It("should NOT inject any MLflow environment variables", func() {
 				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 				_, hasK8s := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
 				Expect(hasK8s).To(BeFalse())
+				_, hasAuth := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(hasAuth).To(BeFalse())
 				_, hasURI := getEnvVarValue(container, MLflowTrackingURIEnvVar)
 				Expect(hasURI).To(BeFalse())
 			})
 		})
 
 		Context("when mlflow-instance annotation is present", func() {
-			It("should inject MLFLOW_K8S_INTEGRATION as 'true'", func() {
+			It("should inject MLFLOW_K8S_INTEGRATION as 'true' and MLFLOW_TRACKING_AUTH as 'kubernetes-namespaced'", func() {
 				// Set the mlflow instance annotation to enable integration (use default 'mlflow')
 				notebook.Annotations = map[string]string{
 					MLflowInstanceAnnotation: MLflowIdentifier,
@@ -260,14 +262,18 @@ var _ = Describe("MLflow Integration", func() {
 				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
-				val, found := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
-				Expect(found).To(BeTrue())
-				Expect(val).To(Equal("true"))
+				k8sVal, k8sFound := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
+				Expect(k8sFound).To(BeTrue())
+				Expect(k8sVal).To(Equal("true"))
+
+				authVal, authFound := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(authFound).To(BeTrue())
+				Expect(authVal).To(Equal(MLflowTrackingAuthValue))
 			})
 		})
 
 		Context("when mlflow-instance annotation is set to an empty value", func() {
-			It("should NOT inject MLFLOW_K8S_INTEGRATION", func() {
+			It("should NOT inject MLFLOW_K8S_INTEGRATION or MLFLOW_TRACKING_AUTH", func() {
 				// Set the annotation to an empty/whitespace value (treated as disabled)
 				notebook.Annotations = map[string]string{
 					MLflowInstanceAnnotation: " ",
@@ -276,8 +282,10 @@ var _ = Describe("MLflow Integration", func() {
 				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
-				_, found := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
-				Expect(found).To(BeFalse())
+				_, hasK8s := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
+				Expect(hasK8s).To(BeFalse())
+				_, hasAuth := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(hasAuth).To(BeFalse())
 			})
 		})
 
@@ -307,7 +315,7 @@ var _ = Describe("MLflow Integration", func() {
 				}
 			})
 
-			It("should inject both MLFLOW_K8S_INTEGRATION and MLFLOW_TRACKING_URI environment variables", func() {
+			It("should inject all MLflow environment variables", func() {
 				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
@@ -315,6 +323,10 @@ var _ = Describe("MLflow Integration", func() {
 				k8sVal, k8sFound := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
 				Expect(k8sFound).To(BeTrue())
 				Expect(k8sVal).To(Equal("true"))
+
+				authVal, authFound := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(authFound).To(BeTrue())
+				Expect(authVal).To(Equal(MLflowTrackingAuthValue))
 
 				uriVal, uriFound := getEnvVarValue(container, MLflowTrackingURIEnvVar)
 				Expect(uriFound).To(BeTrue())
