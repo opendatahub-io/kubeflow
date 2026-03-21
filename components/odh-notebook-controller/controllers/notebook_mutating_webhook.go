@@ -567,6 +567,71 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 	return mutatedNotebook, &UpdatesPending{Reason: diff}, nil
 }
 
+// =============================================================================
+// Pending Updates Detection
+// =============================================================================
+//
+// The following types and functions support maybeRestartRunningNotebook() above.
+// They detect when webhook mutations would cause a notebook pod restart and
+// generate human-readable diff messages explaining what changed.
+// =============================================================================
+
+// UpdatesPending is either NoPendingUpdates, or a new value providing a Reason for the update.
+type UpdatesPending struct {
+	Reason string
+}
+
+var (
+	NoPendingUpdates = &UpdatesPending{}
+)
+
+// FirstDifferenceReporter is a custom go-cmp reporter that only records the first difference.
+type FirstDifferenceReporter struct {
+	path cmp.Path
+	diff string
+}
+
+func (r *FirstDifferenceReporter) PushStep(ps cmp.PathStep) {
+	r.path = append(r.path, ps)
+}
+
+func (r *FirstDifferenceReporter) Report(rs cmp.Result) {
+	if r.diff == "" && !rs.Equal() {
+		vx, vy := r.path.Last().Values()
+		r.diff = fmt.Sprintf("%#v: %+v != %+v", r.path, vx, vy)
+	}
+}
+
+func (r *FirstDifferenceReporter) PopStep() {
+	r.path = r.path[:len(r.path)-1]
+}
+
+func (r *FirstDifferenceReporter) String() string {
+	return r.diff
+}
+
+// getStructDiff compares a and b, reporting the first difference it found in a human-readable single-line string.
+func getStructDiff(ctx context.Context, a any, b any) (result string) {
+	log := logr.FromContextOrDiscard(ctx)
+
+	// calling cmp.Equal may panic, get ready for it
+	result = "failed to compute the reason for why there is a pending restart"
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error(fmt.Errorf("failed to compute struct difference: %+v", r), "Cannot determine reason for restart")
+		}
+	}()
+
+	var comparator FirstDifferenceReporter
+	eq := cmp.Equal(a, b, cmp.Reporter(&comparator))
+	if eq {
+		log.Error(nil, "Unexpectedly attempted to diff structs that are actually equal")
+	}
+	result = comparator.String()
+
+	return
+}
+
 func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	var imgContainer corev1.Container
@@ -668,8 +733,6 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 }
 
 func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
-
-	// ConfigMap details
 	configVolumeName := "trusted-ca"
 	configMapMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
 	configMapMountKey := "ca-bundle.crt"
@@ -782,62 +845,6 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 		}
 	}
 	return nil
-}
-
-// UpdatesPending is either NoPendingUpdates, or a new value providing a Reason for the update.
-type UpdatesPending struct {
-	Reason string
-}
-
-var (
-	NoPendingUpdates = &UpdatesPending{}
-)
-
-// FirstDifferenceReporter is a custom go-cmp reporter that only records the first difference.
-type FirstDifferenceReporter struct {
-	path cmp.Path
-	diff string
-}
-
-func (r *FirstDifferenceReporter) PushStep(ps cmp.PathStep) {
-	r.path = append(r.path, ps)
-}
-
-func (r *FirstDifferenceReporter) Report(rs cmp.Result) {
-	if r.diff == "" && !rs.Equal() {
-		vx, vy := r.path.Last().Values()
-		r.diff = fmt.Sprintf("%#v: %+v != %+v", r.path, vx, vy)
-	}
-}
-
-func (r *FirstDifferenceReporter) PopStep() {
-	r.path = r.path[:len(r.path)-1]
-}
-
-func (r *FirstDifferenceReporter) String() string {
-	return r.diff
-}
-
-// getStructDiff compares a and b, reporting the first difference it found in a human-readable single-line string.
-func getStructDiff(ctx context.Context, a any, b any) (result string) {
-	log := logr.FromContextOrDiscard(ctx)
-
-	// calling cmp.Equal may panic, get ready for it
-	result = "failed to compute the reason for why there is a pending restart"
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error(fmt.Errorf("failed to compute struct difference: %+v", r), "Cannot determine reason for restart")
-		}
-	}()
-
-	var comparator FirstDifferenceReporter
-	eq := cmp.Equal(a, b, cmp.Reporter(&comparator))
-	if eq {
-		log.Error(nil, "Unexpectedly attempted to diff structs that are actually equal")
-	}
-	result = comparator.String()
-
-	return
 }
 
 // SetContainerImageFromRegistry checks if there is an internal registry and takes the corresponding actions to set the container.image value.
