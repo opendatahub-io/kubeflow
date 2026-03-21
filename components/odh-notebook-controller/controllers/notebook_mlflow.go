@@ -28,7 +28,6 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -100,8 +99,8 @@ func removeNotebookContainerEnvVar(notebook *nbv1.Notebook, envVarName string) {
 // The path component is derived from the mlflow instance name:
 //   - if instanceName == "mlflow" -> "/mlflow"
 //   - otherwise -> "/mlflow-<instanceName>"
-func getMLflowTrackingURI(ctx context.Context, dynamicClient dynamic.Interface, k8sClient client.Client, log logr.Logger, instanceName string) (string, error) {
-	gatewayInstance, err := getGatewayInstance(ctx, dynamicClient, log)
+func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName string) (string, error) {
+	gatewayInstance, err := getGatewayInstance(ctx, k8sClient, log)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
 	}
@@ -250,7 +249,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 //     variable will not be injected.
 //   - MLFLOW_TRACKING_URI: set when the 'opendatahub.io/mlflow-instance' annotation
 //     contains a non-empty instance name and a tracking URI can be determined.
-func HandleMLflowEnvVars(ctx context.Context, cli client.Client, dynamicClient dynamic.Interface, notebook *nbv1.Notebook, log logr.Logger) {
+func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) {
 	// Determine mlflow instance annotation (if present)
 	instanceName, instanceEnabled := getMLflowInstanceAnnotation(notebook)
 
@@ -274,7 +273,7 @@ func HandleMLflowEnvVars(ctx context.Context, cli client.Client, dynamicClient d
 	}
 
 	// Integration is enabled - try to get and set the tracking URI
-	trackingURI, err := getMLflowTrackingURI(ctx, dynamicClient, cli, log, instanceName)
+	trackingURI, err := getMLflowTrackingURI(ctx, cli, log, instanceName)
 	if err != nil {
 		log.Error(err, "Unable to determine MLflow tracking URI, skipping injection")
 		// Don't fail webhook - just skip MLflow integration

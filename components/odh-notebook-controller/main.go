@@ -41,7 +41,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -213,19 +212,13 @@ func main() {
 	}
 
 	// Setup notebook mutating webhook
-	dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
-	if err != nil {
-		setupLog.Error(err, "unable to create dynamic client")
-		os.Exit(1)
-	}
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &controllers.NotebookWebhook{
-			Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
-			Client:        mgr.GetClient(),
-			Config:        mgr.GetConfig(),
-			DynamicClient: dynamicClient,
-			Namespace:     namespace,
+			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
+			Client:    mgr.GetClient(),
+			Config:    mgr.GetConfig(),
+			Namespace: namespace,
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},

@@ -45,7 +45,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,7 +58,6 @@ type NotebookWebhook struct {
 	Log                 logr.Logger
 	Client              client.Client
 	Config              *rest.Config
-	DynamicClient       dynamic.Interface
 	Decoder             admission.Decoder
 	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
@@ -447,7 +445,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		HandleMLflowEnvVars(ctx, w.Client, w.DynamicClient, notebook, log)
+		HandleMLflowEnvVars(ctx, w.Client, notebook, log)
 	}
 
 	// Inject the kube-rbac-proxy if the annotation is present

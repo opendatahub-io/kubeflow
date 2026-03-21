@@ -45,7 +45,6 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
-	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -64,10 +63,9 @@ import (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var (
-	cfg               *rest.Config
-	cli               client.Client
-	testDynamicClient dynamic.Interface
-	envTest           *envtest.Environment
+	cfg     *rest.Config
+	cli     client.Client
+	envTest *envtest.Environment
 
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -142,9 +140,6 @@ var _ = BeforeSuite(func() {
 	cfg, err = envTest.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
-
-	testDynamicClient, err = dynamic.NewForConfig(cfg)
-	Expect(err).NotTo(HaveOccurred())
 
 	if kubeconfigPath, found := os.LookupEnv("DEBUG_WRITE_KUBECONFIG"); found {
 		// https://github.com/rancher/fleet/blob/main/integrationtests/utils/kubeconfig.go
@@ -228,16 +223,13 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	// Setup notebook mutating webhook
-	dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
-	Expect(err).NotTo(HaveOccurred())
 	hookServer := mgr.GetWebhookServer()
 	notebookWebhook := &webhook.Admission{
 		Handler: &NotebookWebhook{
-			Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
-			Client:        mgr.GetClient(),
-			Config:        mgr.GetConfig(),
-			DynamicClient: dynamicClient,
-			Namespace:     odhNotebookControllerTestNamespace,
+			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
+			Client:    mgr.GetClient(),
+			Config:    mgr.GetConfig(),
+			Namespace: odhNotebookControllerTestNamespace,
 			KubeRbacProxyConfig: KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},

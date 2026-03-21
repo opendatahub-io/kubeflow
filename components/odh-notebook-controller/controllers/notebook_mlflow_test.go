@@ -240,7 +240,7 @@ var _ = Describe("MLflow Integration", func() {
 	Describe("HandleMLflowEnvVars", func() {
 		Context("when mlflow-instance annotation is not set", func() {
 			It("should NOT inject MLFLOW_K8S_INTEGRATION and not inject MLFLOW_TRACKING_URI", func() {
-				HandleMLflowEnvVars(ctx, cli, testDynamicClient, notebook, log)
+				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 				_, hasK8s := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
@@ -257,7 +257,7 @@ var _ = Describe("MLflow Integration", func() {
 					MLflowInstanceAnnotation: MLflowIdentifier,
 				}
 
-				HandleMLflowEnvVars(ctx, cli, testDynamicClient, notebook, log)
+				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 				val, found := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
@@ -273,7 +273,7 @@ var _ = Describe("MLflow Integration", func() {
 					MLflowInstanceAnnotation: " ",
 				}
 
-				HandleMLflowEnvVars(ctx, cli, testDynamicClient, notebook, log)
+				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 				_, found := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
@@ -308,7 +308,7 @@ var _ = Describe("MLflow Integration", func() {
 			})
 
 			It("should inject both MLFLOW_K8S_INTEGRATION and MLFLOW_TRACKING_URI environment variables", func() {
-				HandleMLflowEnvVars(ctx, cli, testDynamicClient, notebook, log)
+				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 
@@ -329,7 +329,7 @@ var _ = Describe("MLflow Integration", func() {
 				expectedPathSegment := fmt.Sprintf("%s-%s", MLflowIdentifier, customInstanceName)
 				expectedURI := fmt.Sprintf("https://%s/%s", testGatewayHostname, expectedPathSegment)
 
-				HandleMLflowEnvVars(ctx, cli, testDynamicClient, notebook, log)
+				HandleMLflowEnvVars(ctx, cli, notebook, log)
 
 				container := findNotebookContainer(notebook)
 				uriVal, uriFound := getEnvVarValue(container, MLflowTrackingURIEnvVar)
