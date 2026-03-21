@@ -25,4 +25,3 @@ spec:
             name: test-vol
           - mountPath: /dev/shm
             name: dshm
-      

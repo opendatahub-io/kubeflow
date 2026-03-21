@@ -67,4 +67,3 @@ spec:
                   name: notebook-controller-setting-config
                   key: INJECT_CLUSTER_PROXY_ENV
                   optional: true
-

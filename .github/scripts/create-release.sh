@@ -1,35 +1,35 @@
 #! /usr/bin/env bash
 
 ## Description:
-## 
+##
 ## This script automates the process involved in creating a new release for the opendatahub-io/kubeflow repository as
 ## documented in https://issues.redhat.com/browse/RHOAIENG-15391.
 ##
-## Usage: 
-##      
+## Usage:
+##
 ##      create-release.sh
 ##          - Intended to be invoked as part of a GitHub Action workflow.
 ##          - Accepts no arguments.  Information is passed to the script in the form of environment variables (see below)
-##  
+##
 ##
 ## Required Environment Variables:
 ##
-##      TARGET_BRANCH           [Optional] Existing branch on the repository used to construct the release.  If unset, the branch with most recent commit will be used.                                
+##      TARGET_BRANCH           [Optional] Existing branch on the repository used to construct the release.  If unset, the branch with most recent commit will be used.
 ##      RELEASE_TAG             [Optional] Tag to create that identifies the release.  If unset, latest existing tag will be incremented.
 ##      GITHUB_REPOSITORY       [Required] Repository to target for the release.  Set automatically as part of GitHub Actions execution.
 ##
 
 set -euo pipefail
 
-# Description: 
+# Description:
 #   Computes the branch to use when creating the release.  If no argument provided for $1, the remote branch matching the naming convention of */v* that has the most
 #   recent commit will be used.
 #       git branch -r returns branches in the form of <remote>/<branch>
-#            examples: 
+#            examples:
 #               origin/v1.10-branch  : match
-#               origin/main          : no match    
-#     
-# Arguments: 
+#               origin/main          : no match
+#
+# Arguments:
 #   $1 : Release branch to use if provided.
 #
 # Returns:
@@ -47,7 +47,7 @@ _get_release_branch()
     printf "%s" "${release_branch}"
 }
 
-# Description: 
+# Description:
 #   Retrieves the tag used for the most recent published release.  Draft and Pre-Release releases are excluded.
 #
 #   gh release list, by default, sorts releases based on the date of the most recent commit.  To ensure the most recent published release is returned, a jq filter
@@ -65,13 +65,13 @@ _get_latest_release_tag()
         --jq 'sort_by(.publishedAt) | reverse | .[0].tagName'
 }
 
-# Description: 
-#   Determines if the most recent release tag is related to the given release branch.  A release branch is "related" to the most recent release tag if the tag name starts 
+# Description:
+#   Determines if the most recent release tag is related to the given release branch.  A release branch is "related" to the most recent release tag if the tag name starts
 #   with the branch prefix.
 #
 #   This determination is critical in being able to properly auto-increment the release name. See comments on _get_target_release_json() for further details.
 #
-# Arguments: 
+# Arguments:
 #   $1 : Branch prefix that is being used to create the new release.  kubeflow names branches like 'v1.10-branch'.  The branch prefix would then be expected to be 'v1.10'
 #   $2 : Tag name corresponding to the most recent published release
 #
@@ -83,17 +83,17 @@ _same_branch_as_prior_release()
     local release_branch_prefix="${1:-}"
     local latest_release_tag="${2:-}"
 
-    case "${latest_release_tag}" in 
-        "${release_branch_prefix}"*) 
+    case "${latest_release_tag}" in
+        "${release_branch_prefix}"*)
             true
-            ;; 
-        *) 
+            ;;
+        *)
             false
-            ;; 
+            ;;
     esac
 }
 
-# Description: 
+# Description:
 #   Determines the name of the release (which is also the tag name) to identify the to-be-created release.  Additionally returns the tag name of the most recent
 #   published release to use in automated notes generation.
 #       As both these data points can be interdependent and require querying for the latest published release, the computation is combined in this single function
@@ -101,7 +101,7 @@ _same_branch_as_prior_release()
 #   Release names are expected to be in the form: v{major}.{minor}.{patch}-{release}
 #
 #   If a release name is provided in the arguments, it is used as-is without any further computation.  However, if a release name is not provided, this function will
-#   analyze the state of the release branch as well as the most recent published release tag, to determine the appropriate auto-incrementing strategy. Consider the 
+#   analyze the state of the release branch as well as the most recent published release tag, to determine the appropriate auto-incrementing strategy. Consider the
 #   following scenarios:
 #       _get_target_release_json "v1.10-branch" ""
 #           In this case, the most recent published release is retrieved, and, based on _same_branch_as_prior_release():
@@ -113,7 +113,7 @@ _same_branch_as_prior_release()
 #
 #   Generally speaking, it should not be necessary to provide the $2 argument unless under extraordinary circumstances.
 #
-# Arguments: 
+# Arguments:
 #   $1 : Name of the branch being used to create the new release.
 #   $2 : Name of the release (and related tag)
 #
@@ -124,7 +124,7 @@ _get_target_release_json()
     local release_branch="${1:-}"
     local release_name="${2:-}"
 
-    local latest_release_tag=$(_get_latest_release_tag) 
+    local latest_release_tag=$(_get_latest_release_tag)
     local notes_start_tag="${latest_release_tag}"
     if [ -z "${release_name}" ]; then
         local release_base="${release_branch%-branch}"
@@ -145,13 +145,13 @@ _get_target_release_json()
     jq -n --arg notes_start_tag "${notes_start_tag}" --arg release_name "${release_name}" '{notes_start_tag: $notes_start_tag, release_name: $release_name}'
 }
 
-# Description: 
+# Description:
 #   Invokes the GH CLI to create a release.  Release notes are automatically generated.  If the $3 argument is not provided, the --notes-start-tag option is not
 #   provided to the GH CLI invocation.
 #
 #   Expects GITHUB_REPOSITORY to be defined as an environment variable in the shell session.
 #
-# Arguments: 
+# Arguments:
 #   $1 : Name of the branch being used to create the new release.
 #   $2 : Name of the release (and related tag)
 #   $3 : Name of the tag to use, if provided, for the --notes-start-tag parameter of the 'gh release create' command
@@ -169,7 +169,7 @@ _create_release()
         ${notes_start_tag:+ --notes-start-tag ${notes_start_tag}}
 }
 
-# Description: 
+# Description:
 #   Orchestration logic that accomplishes the intent of the script. Diagnostic messages are also output to aid in understanding the outcome.
 #
 #   Will honor TARGET_BRANCH and RELEASE_TAG environment variables if defined in the shell session.
@@ -190,5 +190,3 @@ main()
 
 
 main
-
-

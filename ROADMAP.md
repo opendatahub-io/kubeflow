@@ -61,14 +61,14 @@ The Kubeflow Community plans to deliver its v1.8 release in Oct 2023 per this [t
 * [Manifests](https://github.com/kubeflow/manifests/issues/2456)
 * [Security](https://github.com/kubeflow/kubeflow/blob/master/security/roadmap.md)
 
-## Kubeflow 1.7 Release, Delivered: March 2023 
+## Kubeflow 1.7 Release, Delivered: March 2023
 The Kubeflow Community plans to deliver its v1.7 release in March 2023, per this [timeline](https://github.com/kubeflow/community/pull/573).   The high level deliveries are being tracked in this [Project Board](https://github.com/orgs/kubeflow/projects/50/views/1).   The v1.7 release process will be managed by the v1.7 [Release Team](https://github.com/kubeflow/internal-acls/pull/576) using the best practices in the [Release Handbook](https://github.com/kubeflow/community/blob/master/releases/handbook.md)
 
 Notable feature candidates in the [Project Board](https://github.com/orgs/kubeflow/projects/50/views/1) are:
 * Support for Kubernetes 1.25
 * Improved user isolation especially for the Kubeflow pipelines user interface, database, and artifacts
 * Update Kubeflow Notebooks naming from Notebooks to Workbenches
-* Delivery of KFP V2 beta with its new front-end, backend and SDK 
+* Delivery of KFP V2 beta with its new front-end, backend and SDK
 * Simplified creation of Katib and Training Operator experiments using SDKs
 * Simplified hyperparameter trial and log access from the Katib user interface.  Katib plans to add filtering and sorting of hyperparameter trial lists, and to speed user debugging by exposing logs from previous and running trials
 * Distributed Training Operator support for PaddlePaddle
@@ -81,7 +81,7 @@ Notable feature candidates in the [Project Board](https://github.com/orgs/kubefl
 * [Kubeflow Pipelines](https://github.com/kubeflow/pipelines/blob/master/ROADMAP.md)
 * [Notebooks](https://github.com/kubeflow/kubeflow/issues/5978)
 
-Please join the Kubeflow Community Meetings on Tuesdays for updates and for opportunities to contribute.  
+Please join the Kubeflow Community Meetings on Tuesdays for updates and for opportunities to contribute.
 
 ## Kubeflow 1.6 Release, Delivered: September 2022
 * Kubeflow 1.6 [milestones and timelines](https://github.com/kubeflow/community/tree/master/releases/release-1.6)
@@ -133,7 +133,7 @@ Please join the Kubeflow Community Meetings on Tuesdays for updates and for oppo
 ### Themes
 * Switching to [Emissary executor](https://www.kubeflow.org/docs/components/pipelines/installation/choose-executor/#emissary-executor) enables Kubeflow Pipelines deployment on Kubernetes >= v1.20, which runs on containerd runtime instead of Docker runtime
 * Improve model accuracy and reduce overfitting, especially with hyper parameter tuning
-* Simplify operations and optimize utilization (including spot instance use cases for distributed training) 
+* Simplify operations and optimize utilization (including spot instance use cases for distributed training)
 * More consistent user experience - UI appearance, features and naming
 * Improved documentation, tutorials and examples
 * Stretch - Support for K8s 1.22 and associated dependencies (cert mgr, istio)
@@ -143,18 +143,18 @@ Please join the Kubeflow Community Meetings on Tuesdays for updates and for oppo
 #### Kubeflow Pipelines, v1.8
 * Switching to [Emissary executor](https://www.kubeflow.org/docs/components/pipelines/installation/choose-executor/#emissary-executor) enables Kubeflow Pipelines deployment on Kubernetes >= v1.20, which runs on containerd runtime instead of Docker runtime.
 
-#### Katib, v0.13 
+#### Katib, v0.13
 * Katib controller leader election for HA operations and faster recovery
 * Validation for Early Stopping algorithm settings helps users to reduce model overfitting
-* Improve SDK, AWS CI, parameter settings across frameworks (goptuna, optuna, hyperopt) 
+* Improve SDK, AWS CI, parameter settings across frameworks (goptuna, optuna, hyperopt)
 * Update namespace label for Metrics Collector injection (note - breaking change)
 
 #### Training Operator, v1.3
 * Elastic Training for PyTorch, restarts pod rather than whole job, supports spot instances
-* MPI addition to Unified training operator 
-* Python SDK supported on PyPI 
+* MPI addition to Unified training operator
+* Python SDK supported on PyPI
 
-#### Notebooks, Central Dashboard, Web Apps, Manifest, v1.5 
+#### Notebooks, Central Dashboard, Web Apps, Manifest, v1.5
 * Exposing notebook idleness parameters, reduces infra used on idle notebooks
 * UI consistency between web apps along with frontend pagination, and remove cards and user responsive tables
 * Support for dark mode
@@ -162,7 +162,7 @@ Please join the Kubeflow Community Meetings on Tuesdays for updates and for oppo
 
 #### KServe, v0.7
 * KFServing is rebranded to [KServe](https://github.com/kserve)
-* [ModelMesh](https://github.com/kserve/modelmesh-serving) joins KServe 
+* [ModelMesh](https://github.com/kserve/modelmesh-serving) joins KServe
 * Triton model serving runtime defaults to v21.09
 * (Alpha feature) Raw kubernetes deployment support, Istio/Knative dependency is now optional
 
@@ -189,7 +189,7 @@ Please join the Kubeflow Community Meetings on Tuesdays for updates and for oppo
 * KFServing User Interface with model details, logs, yaml
 * Reduce redundant code in training operators and Kubeflow’s web apps
 * Faster, better builds with more CI/CD - Katib, Training Operators, Notebooks
-* Audit relevant docs pages and update for 1.4 features 
+* Audit relevant docs pages and update for 1.4 features
 * Ongoing improvement to user documentation on [Kubeflow.org](https://www.kubeflow.org/)
 
 ### Detailed features, bug fixes and enhancements are identified in the Working Group Roadmaps
@@ -241,7 +241,7 @@ Core improvements to Kubeflow Installation, Management, Authentication, and Isti
     * Easy installation of Kubeflow applications and common services
     * Easy creation of Kubeflow distributions
     * Moving manifest development to upstream application repositories
-      - This allows separation of responsibilities between Application Owners and Distribution Owners. 
+      - This allows separation of responsibilities between Application Owners and Distribution Owners.
       - These will be sync'ed on a regular basis.
       - This will result in a reduction of tech debt from old or duplicate manifests.
 
@@ -253,17 +253,17 @@ Kubeflow 1.2 provides valuable enhancements to HyperParameter Tuning, Pipelines,
 
 1.2 includes the following features:
 
-* Katib 0.10 with the new v1beta1 API 
+* Katib 0.10 with the new v1beta1 API
 * Katib support for early stopping
 * Katib support for custom CRD in the new Trial template
 * Katib support to resume experiments
 * Katib support for multiple ways to extract metrics
-* KFServing support to add batcher module as sidecar 
-* KFServing for the Alibi explainer upgrade to 0.4.0 
-* KFServing for Triton inference server rename and integrations  
+* KFServing support to add batcher module as sidecar
+* KFServing for the Alibi explainer upgrade to 0.4.0
+* KFServing for Triton inference server rename and integrations
 * Pipelines support for a Tekton backend option.
 * Kubeflow Pipelines 1.0.4, Changelog includes ~20 fixes and ~5 minor features.
-* Notebooks support for Affinity/Toleration configs 
+* Notebooks support for Affinity/Toleration configs
 * Update mxnet-operator manifest to v1
 * Correct XGBoostJob CRD group name and add singular name
 * Fix XGBoost Operator manifest issue
@@ -292,7 +292,7 @@ The following features were delivered in Kubeflow 1.1:
 * Ability to turn off the self-serve mode, as in many environments there are mechanisms other than the Kubeflow Dashboard that provision/share an environment for/with the user. (#4942)
 * Multi-User Authorization: Add support for K8s RBAC via SubjectAccessReview [#3513](https://github.com/kubeflow/pipelines/issues/3513)
 
-The 1.1 features are tracked in this [Kanban board](https://github.com/orgs/kubeflow/projects/36) 
+The 1.1 features are tracked in this [Kanban board](https://github.com/orgs/kubeflow/projects/36)
 
 ## Kubeflow 1.0
 Kubeflow 1.0 was released on March 2, 2020. The 1.0 release consists of the following key pieces
@@ -326,7 +326,7 @@ Following Kubeflow's quarterly relese schedule Kubeflow 0.7 will be released in 
 
 Notebooks
 
-  * Notebook infrastructure to beta quality in 0.7 
+  * Notebook infrastructure to beta quality in 0.7
     * 1.0 in the following release
   * The notebook infrastructure has 2 primary pieces; the jupyter notebook controller
     and web application for managing notebooks
@@ -365,7 +365,7 @@ Enterprise support
 
 Onpremise support
 
-   * E2E CI for setup and multi-user support in on premise environments   
+   * E2E CI for setup and multi-user support in on premise environments
    * [Kanban board](https://github.com/orgs/kubeflow/projects/18)
 
 Data management
@@ -404,15 +404,15 @@ Multi-user support
    * Dex provides a reference implementation for AuthN
    * Integration with GCP and AWS AuthN services
    * Profile resource to manage per-team namespaces
-   * Kubeflow identity management API to manage multiple users/teams     
+   * Kubeflow identity management API to manage multiple users/teams
 
 Training Operators
 
    * TFJob and PyTorch to 1.0
 
 Pipelines
-   * UI improvements: 
-     * 10x Perf improvement (e.g. load list of runs) 
+   * UI improvements:
+     * 10x Perf improvement (e.g. load list of runs)
    * API performance optimization
    * streamlined run creation
    * stackdriver integration for logs (better debugging)
@@ -437,6 +437,3 @@ for the issues tagged "area/X.Y.Z".
 
 If you are a member of the Kubeflow org you can use these search queries
   * Issues for [0.4.0](https://github.com/issues?utf8=%E2%9C%93&q=org%3Akubeflow+label%3Aarea%2F0.4.0)
-
-
-  

@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 
 ## Description:
-## 
+##
 ## This script will ensure a components/notebook-controller/config/component_metadata.yaml file exists and is compliant with
 ## https://issues.redhat.com/browse/RHOAISTRAT-327.
 ##    - Lots of discussion around the acceptance criteria from this work was also captured in Slack
@@ -11,8 +11,8 @@
 ##    - ./components/notebook-controller/PROJECT
 ##    - ./releasing/version/VERSION
 ##
-## If component_metadata.yaml file exists, and attempting to generate any of the required attributes results in an empty string, 
-## then the existing value is preserved.  
+## If component_metadata.yaml file exists, and attempting to generate any of the required attributes results in an empty string,
+## then the existing value is preserved.
 ##
 ## The script is designed to generate appropriate attribute values implicitly.  It should be able to be executed without providing
 ## any of the optional arguments.  In the event an optional argument is provided on the command line, that value is used as-is.
@@ -20,11 +20,11 @@
 ## It should be noted that while the component_metadata.yaml specification has a root level attribute of 'releases' that is a list,
 ## this script only interacts with index 0.
 ##
-## Dependencies: 
-##     
+## Dependencies:
+##
 ##    - yq:   https://mikefarah.gitbook.io/yq
 ##
-## Usage: 
+## Usage:
 ##
 ##      generate-metadata-yaml.sh [-o <output file>] [-n <name>] [-v <version>] [-r <repoUrl>] [-p] [-x] [-h]"
 ##          - Intended (eventually) to be invoked as part of a GitHub Action workflow.
@@ -37,7 +37,7 @@
 ##                  - defaults to a value derived from the 'domain' and 'projectName' attribute of ./components/notebook-controller/PROJECT
 ##                      - value of 'domain' is split on the '.' character, and only first word is uppercased, discarding all other words
 ##                        - ex: kubeflow.org -> Kubeflow
-##                      - value of 'projectName' is split on the '-' character, each word has the 1st letter uppercased, and then 
+##                      - value of 'projectName' is split on the '-' character, each word has the 1st letter uppercased, and then
 ##                      results are joined back together delimited by whitespace
 ##                        - ex: notebook-controller -> Notebook Controller
 ##              - [optional] -v <version>
@@ -48,20 +48,20 @@
 ##              - [optional] -r <repoUrl>
 ##                  - repoUrl attribute of 'releases' element at index 0
 ##                  - defaults to a value derived from the 'repo' attribute of ./components/notebook-controller/PROJECT
-##                      - value of 'repo' is split on the '/' character, 1st 3 elements are joined together by the '/' character, 
+##                      - value of 'repo' is split on the '/' character, 1st 3 elements are joined together by the '/' character,
 ##                      and then 'https://' prefix is added
 ##                        - ex: github.com/kubeflow/kubeflow/components/notebook-controller -> https://github.com/kubeflow/kubeflow
-##              - [optional] -x 
+##              - [optional] -x
 ##                  - enables tracing on the shell script
 ##              - [optional] -h
 ##                  - prints a simple usage message
-##  
+##
 ##
 
 
 set -uo pipefail
 
-# Description: 
+# Description:
 #   Simple trap function that ensures shell tracing is disabled upon script exit.
 function trap_exit() {
 	rc=$?
@@ -73,7 +73,7 @@ function trap_exit() {
 
 trap "trap_exit" EXIT
 
-# Description: 
+# Description:
 #   Helper function that gets invoked when '-h' passed as a command line argument.
 #
 # Returns:
@@ -83,7 +83,7 @@ _usage()
 	printf "%s\n" "Usage: $(basename "${0}") -o <output file> [-n <name>] [-v <version>] [-r <repoUrl>] [-p] [-x] [-h]"
 }
 
-# Description: 
+# Description:
 #   Computes the default component_metadata.yaml 'name', 'version', and 'repoUrl' attributes for the 0th element of 'releases'.  If the
 #   value of any attribute was provided on the command line, that value is used as-is and subsequent processing is skipped.
 #
@@ -135,7 +135,7 @@ _derive_metadata()
   fi
 }
 
-# Description: 
+# Description:
 #   Computes the component_metadata.yaml 'name', 'version', and 'repoUrl' attributes for the 0th element of 'releases'
 #   based on an existing component_metadata.yaml file.  Processing is skipped for any output variable that already has
 #   a non-zero length string value.
@@ -161,7 +161,7 @@ _fallback_to_existing_values()
   fi
 }
 
-# Description: 
+# Description:
 #   Validation function that ensures all required attributes have non-zero length.  Any attributes in violation of
 #   this check will log an error message and cause script to exit with a 1 status code.
 #
@@ -189,7 +189,7 @@ _check_for_missing_data()
   fi
 }
 
-# Description: 
+# Description:
 #   Orchestration logic that generates the component_metadata.yaml file.
 #
 #   NOTE: Multiple entries for the 'releases' attribute is not supported. Only the 0th index is operated against.
@@ -208,7 +208,7 @@ _handle_metadata_file()
   yq_env_arg="${metadata_repo_url}" yq -i '.releases[0].repoUrl = strenv(yq_env_arg)' "${output_file}"
 }
 
-# Description: 
+# Description:
 #   Helper function that processes command line arguments provided to the script.
 #       - '-h' will cause script to exit with 0 (successful) status code
 #       - any unsupported options will cause script to exit with 1 (failure) status code

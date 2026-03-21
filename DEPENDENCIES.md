@@ -6,7 +6,7 @@ This guide outlines the steps to upgrade the Go version and dependencies in the 
 
 Upgrading the Go version should be done in a separate PR to isolate the changes and make review easier.
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > Images are to be built in the [ubi9/go-toolset](https://catalog.redhat.com/software/containers/ubi9/go-toolset/61e5c00b4ec9945c18787690) container.
 > It contains a customized FIPS-compatible version of Go, that however lags behind the latest upstream Go version.
 > Always use a Go version that has a supporting go-toolset image available.
@@ -26,7 +26,7 @@ Upgrading the Go version should be done in a separate PR to isolate the changes 
 
 4. Commit these changes and create a pull request for the Go version upgrade.
 
-   > [!WARNING]  
+   > [!WARNING]
    > Use the `Manifest List Digest` and not the `Image Digest` when locating sha256 in the Red Hat Image Catalog entry.
 
 5. After merging the Go upgrade PR, update the fork at https://github.com/red-hat-data-services/kubeflow:

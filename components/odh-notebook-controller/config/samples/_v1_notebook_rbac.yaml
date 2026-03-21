@@ -18,4 +18,3 @@ spec:
               value: "8888"
             - name: NOTEBOOK_ARGS
               value: "--NotebookApp.token='' --NotebookApp.password=''"
-

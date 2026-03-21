@@ -9,7 +9,7 @@ on:
         type: string
       target_branch:
         description: "Target Branch:"
-        type: string        
+        type: string
   workflow_call:
     inputs:
       release_tag:
@@ -17,7 +17,7 @@ on:
         type: string
       target_branch:
         description: "Target Branch:"
-        type: string  
+        type: string
 
 env:
   RELEASE_TAG: ${{ inputs.release_tag }}
@@ -40,5 +40,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: ${{env.GITHUB_WORKSPACE}}
         run: |
-          ./.github/scripts/create-release.sh    
-
+          ./.github/scripts/create-release.sh

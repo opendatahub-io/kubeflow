@@ -1,6 +1,6 @@
 # Introduce a PVCViewer Controller in Kubeflow
 
-**Authors**: Apostolos Gerakaris apoger@arrikto.com, Tobias Goerke tobias.goerke@gmail.com, Kimonas Sotirchos kimwnasptd@arrikto.com 
+**Authors**: Apostolos Gerakaris apoger@arrikto.com, Tobias Goerke tobias.goerke@gmail.com, Kimonas Sotirchos kimwnasptd@arrikto.com
 
 ## Motivation
 
@@ -27,7 +27,7 @@ The main features of this component are:
 
 Under the hood for each PVCViewer CR the PVCViewer Controller will create:
 1. A **Deployment** that will manage the lifecycle of the PVCViewer Pod that will mount the requested PVC.
-2. A **ClusterIP Service** for sending the traffic to that Pod. 
+2. A **ClusterIP Service** for sending the traffic to that Pod.
 3. A **VirtualService** to expose the Pod outside the cluster.
 
 ### Spec
@@ -36,20 +36,20 @@ The Spec of the CR will consist of 4 fields:
 ```go
 // PVCViewerSpec defines the desired state of PVCViewer
 type PVCViewerSpec struct {
-   // Defines the PVC we want to edit 
+   // Defines the PVC we want to edit
    // +required
    PVC string `json:"pvc"`
-   // Specifies the deployment's pod spec that will be created	by the operator. 
-   // You must not provide PodSpec.Volumes in this case  
-   // +optional 
+   // Specifies the deployment's pod spec that will be created	by the operator.
+   // You must not provide PodSpec.Volumes in this case
+   // +optional
    PodSpec corev1.PodSpec `json:"podSpec, omitempty"`
-   // Specifies custom networking specification for the underlying 
+   // Specifies custom networking specification for the underlying
    // Service and VirtualService resources
    // +optional
    Networking Networking `json:"networking, omitempty"`
-   // If set to true, the controller detects RWO-Volumes referred to by 
-   // the Pod and uses affinities to schedule the PVCViewer to nodes 
-   // where the volume is currently mounted. This enables the PVCViewer 
+   // If set to true, the controller detects RWO-Volumes referred to by
+   // the Pod and uses affinities to schedule the PVCViewer to nodes
+   // where the volume is currently mounted. This enables the PVCViewer
    // to access RWO-Volumes, even though they might already be mounted.
    // +kubebuilder:default:=false
    RWOScheduling bool `json:"rwoScheduling"`
@@ -64,7 +64,7 @@ type Networking struct {
    // +optional
    BasePrefix string `json:"basePrefix"`
    // Specifies the virtual service's 'rewrite' field.
-   // If omitted, the controller will set the 'rewrite' field to the same 
+   // If omitted, the controller will set the 'rewrite' field to the same
    // value as the 'prefix' field.
    // +optional
    Rewrite string `json:"rewrite,omitempty"`
@@ -82,7 +82,7 @@ Users will be able to override the default Pod specifications by providing a cus
 
 Furthermore, the controller will utilize an admission webhook to infer default values for the PodSpec, since the simplest form of an applied PVCViewer CR may only define the `Spec.PVC` field.
 
-Example use-cases for providing a custom PodSpec: 
+Example use-cases for providing a custom PodSpec:
 1. Users can control which web app shall be used for showing the filesystem of a PVC by overriding the image. Options:
    - Cloudcmd: https://github.com/coderaiser/cloudcmd.
    - Filebrowser: https://github.com/filebrowser/filebrowser (preffered used by KF).

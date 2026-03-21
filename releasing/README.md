@@ -5,7 +5,7 @@ for the components of this repository.
 
 ## Release Process
 
-The Notebooks Working Group release process follows the Kubeflow [release timeline](https://github.com/kubeflow/community/blob/master/releases/handbook.md#timeline) 
+The Notebooks Working Group release process follows the Kubeflow [release timeline](https://github.com/kubeflow/community/blob/master/releases/handbook.md#timeline)
  and the [release versioning policy](https://github.com/kubeflow/community/blob/master/releases/handbook.md#versioning-policy),
  as defined in the [Kubeflow release handbook](https://github.com/kubeflow/community/blob/master/releases/handbook.md).
 
