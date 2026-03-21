@@ -91,8 +91,18 @@ func (r *OpenshiftNotebookReconciler) ReconcileNotebookServiceAccount(notebook *
 	return nil
 }
 
-// NewNotebookKubeRbacProxyService defines the desired service object for kube-rbac-proxy
+// NewNotebookKubeRbacProxyService defines the desired service object for kube-rbac-proxy.
+// It reads the port name from the notebook annotation to support legacy oauth-proxy port names
+// in kueue-managed namespaces where port names are immutable.
 func NewNotebookKubeRbacProxyService(notebook *nbv1.Notebook) *corev1.Service {
+	// Get the port name from the annotation, defaulting to the standard name
+	portName := KubeRbacProxyServicePortName
+	if notebook.Annotations != nil {
+		if annotatedPortName, ok := notebook.Annotations[AnnotationProxyPortName]; ok && annotatedPortName != "" {
+			portName = annotatedPortName
+		}
+	}
+
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      notebook.Name + KubeRbacProxyServiceSuffix,
@@ -106,9 +116,9 @@ func NewNotebookKubeRbacProxyService(notebook *nbv1.Notebook) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{{
-				Name:       KubeRbacProxyServicePortName,
+				Name:       portName,
 				Port:       KubeRbacProxyServicePort,
-				TargetPort: intstr.FromString(KubeRbacProxyServicePortName),
+				TargetPort: intstr.FromString(portName),
 				Protocol:   corev1.ProtocolTCP,
 			}},
 			Selector: map[string]string{
