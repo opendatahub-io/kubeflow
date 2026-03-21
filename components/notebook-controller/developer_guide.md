@@ -1,4 +1,4 @@
-# Developer Guide 
+# Developer Guide
 
 ## Building and deploying with skaffold
 

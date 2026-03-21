@@ -138,7 +138,7 @@ make deploy -e K8S_NAMESPACE=<YOUR_NAMESPACE> -e IMG=<YOUR_IMAGE>
 
 ### Run e2e Tests
 
-A user can run the e2e tests in the same namespace as the controllers. To deploy 
+A user can run the e2e tests in the same namespace as the controllers. To deploy
 kubeflow notebook controller and ODH Notebook controller refer to [this](#run-locally) section. The
 following environment variables must be set when running locally:
 

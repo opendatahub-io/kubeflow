@@ -4,9 +4,9 @@
 
 ## Motivation
 
-The motivation behind this iteration is to expose information about the idleness for Jupyter Notebooks. More precisely, we want to extend the notebook controller so that it exposes the last time that a Jupyter Notebook Server performed any computations. 
+The motivation behind this iteration is to expose information about the idleness for Jupyter Notebooks. More precisely, we want to extend the notebook controller so that it exposes the last time that a Jupyter Notebook Server performed any computations.
 
-This information will be exposed in the `notebooks.kubeflow.org/last_activity: <timestamp>` annotation on each Jupyter Notebook. Throughout the doc we will call this `LAST_ACTIVITY_ANNOTATION`. 
+This information will be exposed in the `notebooks.kubeflow.org/last_activity: <timestamp>` annotation on each Jupyter Notebook. Throughout the doc we will call this `LAST_ACTIVITY_ANNOTATION`.
 
 ## Goals
 
@@ -35,14 +35,14 @@ We can deduce the last time that a Jupyter Notebook performed any computations f
 ```
 [{"id": "470d0112-6dcd-4df3-9016-8a40fc8864ca", "name": "python3", "last_activity": "2021-08-30T14:02:56.821755Z", "execution_state": "idle", "connections": 1}, ...]
 ```
-For more information about the `/api/kernels` endpoint you can check [Jupyter's docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jupyter/notebook/master/notebook/services/api/api.yaml#/kernels). 
+For more information about the `/api/kernels` endpoint you can check [Jupyter's docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jupyter/notebook/master/notebook/services/api/api.yaml#/kernels).
 
 ### Implementation Details
 
 The notebook controller will be periodically checking each Notebook Server. The notebook controller will be both setting and utilizing a special annotation that we will introduce. This annotation (`LAST_ACTIVITY_ANNOTATION`) will be the **cornerstone** of this implementation. Here's how this annotation will be used:
 1. **Set** the `LAST_ACTIVITY_ANNOTATION`: When the user creates a Notebook CR, then a respective pod is initialized. The CR object for this Notebook Server does not contain (yet) the `LAST_ACTIVITY_ANNOTATION`. In this case, the controller sets the `LAST_ACTIVITY_ANNOTATION` with the **current time**.
 2. **Update** the `LAST_ACTIVITY_ANNOTATION`: If a Notebook Server has already a `Running` pod, then this Notebook Server will already have this annotation set, from step 1. The controller must update properly this annotation. To do so, the notebook controller must examine whether or not all the notebook's kernels are `idle`:
-   - If the Notebook Server has at least one `busy` kernel then we must consider the server as `busy`. The Controller will update the `LAST_ACTIVITY_ANNOTATION` with the **current time**. 
+   - If the Notebook Server has at least one `busy` kernel then we must consider the server as `busy`. The Controller will update the `LAST_ACTIVITY_ANNOTATION` with the **current time**.
    - If the Notebook Server has only `idle` kernels then the notebook controller will update this annotation based on the most recent `last-activity` of the kernels (as exposed by the `/api/kernels` endpoint).
 3. **Delete** the `LAST_ACTIVITY_ANNOTATION`: The notebook controller will examine CR objects. If a CR object does not have a pod running then the notebook controller will delete the `LAST_ACTIVITY_ANNOTATION` of this CR object. Notebooks with no pods should not have the `LAST_ACTIVITY_ANNOTATION` annotation.
 
@@ -57,13 +57,13 @@ else
       if (AllKernelsIdle != true) then
           update(CR, LAST_ACTIVITY_ANNOTATION, time.Now())
       else
-          kernels_la = get_latest_last_activity(/api/kernels) 
-          update(CR, LAST_ACTIVITY_ANNOTATION, kernels_la)          
+          kernels_la = get_latest_last_activity(/api/kernels)
+          update(CR, LAST_ACTIVITY_ANNOTATION, kernels_la)
       endif
    endif
 endif
 ```
-Both `last-activity` and `execution-state`, that the `/api/kernels` endpoint exposes, are necessary for our new approach. Therefore, we do not make any requests on the `/api/status` endpoint. 
+Both `last-activity` and `execution-state`, that the `/api/kernels` endpoint exposes, are necessary for our new approach. Therefore, we do not make any requests on the `/api/status` endpoint.
 
 ### API changes
 
@@ -87,7 +87,7 @@ A summary for the endpoints, the ENV Vars, and the annotations that we use is th
 
 ### Culling Modifications
 
-Instead of making a GET request to a Notebook's `/api/status` endpoint, the notebook controller will now use the `LAST_ACTIVITY_ANNOTATION` of the respective CR. 
+Instead of making a GET request to a Notebook's `/api/status` endpoint, the notebook controller will now use the `LAST_ACTIVITY_ANNOTATION` of the respective CR.
 
 ### Local Development and Testing
 
@@ -95,7 +95,7 @@ We introduce a new ENV Var named `DEV`. If we set its value to "true" then our c
 ```
 http://localhost:8001/api/v1/namespaces/{ns}/services/{name}:{port-name}/proxy/{path}
 ```
- 
+
 
 To enable this functionality the developers must have first set properly their `kubectl proxy`-ing with:
 
@@ -133,7 +133,7 @@ The `CULLING_CHECK_PERIOD` has been **renamed** to `IDLENESS_CHECK_PERIOD`. This
 
    **Old approach**
    ```
-   $ export CULLING_CHECK_PERIOD=3 
+   $ export CULLING_CHECK_PERIOD=3
    ```
    **New approach**
    ```

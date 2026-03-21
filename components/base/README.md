@@ -205,4 +205,3 @@ following:
 
 - [yq](https://github.com/mikefarah/yq#install) version 4.21.1+.
 - [kustomize](https://sigs.k8s.io/kustomize/docs/INSTALL.md) version 3.2.0+
-

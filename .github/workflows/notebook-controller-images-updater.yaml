@@ -41,7 +41,7 @@ env:
   BRANCH_NAME: ${{ inputs.branch-name }}
   GENERATE_PR: ${{ inputs.generate-pr }}
   REPO_NAME: kubeflow
-  GH_TOKEN: ${{ secrets.GH_TOKEN }} 
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
 jobs:
   update-notebook-controller-images:

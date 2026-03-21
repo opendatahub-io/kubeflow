@@ -16,7 +16,7 @@ build:
       dockerfile: notebook-controller/Dockerfile
       buildContext:
         gcsBucket: kubeflow-ci_skaffold
-      env: 
+      env:
         # TODO(GoogleContainerTools/skaffold#3468) skaffold doesn't
         # appear to work with workload identity and the kubeflow-testing
         # cluster isn't using it yet.

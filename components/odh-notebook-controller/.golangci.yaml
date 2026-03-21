@@ -1,0 +1,42 @@
+# https://github.com/golangci/golangci-lint
+
+# Newer Kubebuilder adds this as a default
+# https://github.com/kubernetes-sigs/kubebuilder/issues/1887
+
+version: "2"
+
+run:
+  timeout: 5m
+  allow-parallel-runners: true
+
+linters:
+  default: none
+  enable:
+    - dupl
+    - errcheck
+    - goconst
+    - gocyclo
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - prealloc
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+  exclusions:
+    rules:
+      - path: "api/.*"
+        linters:
+          - lll
+      - path: "internal/.*"
+        linters:
+          - dupl
+          - lll
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
