@@ -107,13 +107,16 @@ var _ = Describe("MLflow Integration", func() {
 			})
 
 			AfterEach(func() {
-				Eventually(func() error {
-					nb := &nbv1.Notebook{}
-					if err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nb); err != nil {
-						return nil
-					}
-					return cli.Delete(ctx, nb)
-				}, duration, interval).Should(Succeed())
+				// Delete the notebook
+				nb := &nbv1.Notebook{}
+				if err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nb); err == nil {
+					_ = cli.Delete(ctx, nb)
+				}
+				// Wait for the notebook to be fully deleted (handles finalizers)
+				Eventually(func() bool {
+					err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, &nbv1.Notebook{})
+					return apierrors.IsNotFound(err)
+				}, duration, interval).Should(BeTrue())
 			})
 
 			It("should clean up existing RoleBinding when annotation is absent", func() {
@@ -148,13 +151,16 @@ var _ = Describe("MLflow Integration", func() {
 			})
 
 			AfterEach(func() {
-				Eventually(func() error {
-					nb := &nbv1.Notebook{}
-					if err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nb); err != nil {
-						return nil
-					}
-					return cli.Delete(ctx, nb)
-				}, duration, interval).Should(Succeed())
+				// Delete the notebook
+				nb := &nbv1.Notebook{}
+				if err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, nb); err == nil {
+					_ = cli.Delete(ctx, nb)
+				}
+				// Wait for the notebook to be fully deleted (handles finalizers)
+				Eventually(func() bool {
+					err := cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, &nbv1.Notebook{})
+					return apierrors.IsNotFound(err)
+				}, duration, interval).Should(BeTrue())
 			})
 
 			It("should requeue without creating a RoleBinding", func() {
