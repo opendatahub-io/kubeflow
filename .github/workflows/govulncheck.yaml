@@ -7,13 +7,12 @@ name: Go Vulnerability Check
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -35,14 +34,17 @@ jobs:
 
       - name: Run govulncheck
         id: vulncheck
-        continue-on-error: true
         run: |
+          set -o pipefail
           go mod tidy
-          govulncheck -json ./... > govulncheck-report.json 2>&1 || true
-          govulncheck ./... > govulncheck-report.txt 2>&1 || true
+          # Generate JSON report (ignore exit code)
+          govulncheck -json ./... > govulncheck-report.json || true
+          # Generate text report - exit code propagates via pipefail
+          govulncheck ./... | tee govulncheck-report.txt
         working-directory: ${{ matrix.component }}
 
       - name: Generate report summary
+        if: always()
         run: |
           echo "## Vulnerability Report for ${{ matrix.component }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -55,6 +57,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload vulnerability report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: govulncheck-report-${{ matrix.component == 'components/notebook-controller' && 'notebook-controller' || 'odh-notebook-controller' }}
