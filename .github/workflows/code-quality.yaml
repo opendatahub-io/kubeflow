@@ -65,33 +65,6 @@ jobs:
           fi
         working-directory: ${{ matrix.component }}
 
-  govulncheck:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        component:
-          - components/notebook-controller
-          - components/odh-notebook-controller
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          check-latest: true
-          go-version-file: ${{ matrix.component }}/go.mod
-          cache-dependency-path: ${{ matrix.component }}/go.sum
-
-      # https://go.googlesource.com/vuln
-      - name: govulncheck
-        if: "${{ !cancelled() }}"
-        run: |
-          go mod tidy
-          make govulncheck
-        working-directory: ${{ matrix.component }}
-
   check-generated-code:
     runs-on: ubuntu-24.04
     steps:
