@@ -445,7 +445,10 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		HandleMLflowEnvVars(ctx, w.Client, notebook, log)
+		// Only process if MLflow integration is enabled via MLFLOW_ENABLED env var
+		if IsMLflowEnabled() {
+			HandleMLflowEnvVars(ctx, w.Client, notebook, log)
+		}
 	}
 
 	// Inject the kube-rbac-proxy if the annotation is present

@@ -16,6 +16,7 @@ package controllers
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -353,6 +354,197 @@ var _ = Describe("MLflow Integration", func() {
 				uriVal, uriFound := getEnvVarValue(container, MLflowTrackingURIEnvVar)
 				Expect(uriFound).To(BeTrue())
 				Expect(uriVal).To(Equal(expectedURI))
+			})
+		})
+	})
+
+	Describe("IsMLflowEnabled", func() {
+		AfterEach(func() {
+			Expect(os.Unsetenv("MLFLOW_ENABLED")).To(Succeed())
+		})
+
+		It("should return true when MLFLOW_ENABLED is 'true'", func() {
+			Expect(os.Setenv("MLFLOW_ENABLED", "true")).To(Succeed())
+			Expect(IsMLflowEnabled()).To(BeTrue())
+		})
+
+		It("should return false when MLFLOW_ENABLED is not 'true'", func() {
+			Expect(os.Setenv("MLFLOW_ENABLED", "false")).To(Succeed())
+			Expect(IsMLflowEnabled()).To(BeFalse())
+
+			Expect(os.Unsetenv("MLFLOW_ENABLED")).To(Succeed())
+			Expect(IsMLflowEnabled()).To(BeFalse())
+		})
+	})
+
+	Describe("getGatewayURL", func() {
+		AfterEach(func() {
+			Expect(os.Unsetenv("GATEWAY_URL")).To(Succeed())
+		})
+
+		It("should return the GATEWAY_URL value when set", func() {
+			Expect(os.Setenv("GATEWAY_URL", "apps.example.com")).To(Succeed())
+			Expect(getGatewayURL()).To(Equal("apps.example.com"))
+		})
+
+		It("should return empty string when GATEWAY_URL is not set", func() {
+			Expect(os.Unsetenv("GATEWAY_URL")).To(Succeed())
+			Expect(getGatewayURL()).To(Equal(""))
+		})
+	})
+
+	Describe("getMLflowTrackingURI with GATEWAY_URL", func() {
+		AfterEach(func() {
+			Expect(os.Unsetenv("GATEWAY_URL")).To(Succeed())
+		})
+
+		It("should use GATEWAY_URL when set instead of Gateway lookup", func() {
+			Expect(os.Setenv("GATEWAY_URL", "custom-gateway.example.com")).To(Succeed())
+
+			uri, err := getMLflowTrackingURI(ctx, cli, ctrl.Log.WithName("test"), MLflowIdentifier)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(uri).To(Equal("https://custom-gateway.example.com/mlflow"))
+		})
+	})
+
+	Describe("Webhook MLflow Integration", func() {
+		const (
+			WebhookTestName      = "test-notebook-webhook-mlflow"
+			WebhookTestNamespace = "default"
+			testGatewayHostname  = "gateway.example.com"
+		)
+
+		Context("when MLFLOW_ENABLED=true and notebook has mlflow-instance annotation", func() {
+			var webhookNotebook *nbv1.Notebook
+
+			BeforeEach(func() {
+				Expect(os.Setenv("MLFLOW_ENABLED", "true")).To(Succeed())
+				Expect(os.Setenv("GATEWAY_URL", testGatewayHostname)).To(Succeed())
+
+				webhookNotebook = &nbv1.Notebook{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      WebhookTestName,
+						Namespace: WebhookTestNamespace,
+						Annotations: map[string]string{
+							MLflowInstanceAnnotation: MLflowIdentifier,
+						},
+					},
+					Spec: nbv1.NotebookSpec{
+						Template: nbv1.NotebookTemplateSpec{
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Name:  WebhookTestName,
+										Image: "registry.redhat.io/ubi9/ubi:latest",
+									},
+								},
+							},
+						},
+					},
+				}
+			})
+
+			AfterEach(func() {
+				Expect(os.Unsetenv("MLFLOW_ENABLED")).To(Succeed())
+				Expect(os.Unsetenv("GATEWAY_URL")).To(Succeed())
+
+				// Clean up the notebook if it exists
+				nb := &nbv1.Notebook{}
+				if err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, nb); err == nil {
+					_ = cli.Delete(ctx, nb)
+				}
+				Eventually(func() bool {
+					err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &nbv1.Notebook{})
+					return apierrors.IsNotFound(err)
+				}, duration, interval).Should(BeTrue())
+			})
+
+			It("should inject MLflow environment variables through the webhook", func() {
+				// Create the notebook - this triggers the mutating webhook
+				Expect(cli.Create(ctx, webhookNotebook)).To(Succeed())
+
+				// Fetch the notebook to see the webhook mutations
+				var createdNotebook nbv1.Notebook
+				Expect(cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &createdNotebook)).To(Succeed())
+
+				// Verify MLflow env vars were injected by the webhook
+				container := findNotebookContainer(&createdNotebook)
+
+				k8sVal, k8sFound := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
+				Expect(k8sFound).To(BeTrue(), "MLFLOW_K8S_INTEGRATION should be injected by webhook")
+				Expect(k8sVal).To(Equal("true"))
+
+				authVal, authFound := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(authFound).To(BeTrue(), "MLFLOW_TRACKING_AUTH should be injected by webhook")
+				Expect(authVal).To(Equal(MLflowTrackingAuthValue))
+
+				uriVal, uriFound := getEnvVarValue(container, MLflowTrackingURIEnvVar)
+				Expect(uriFound).To(BeTrue(), "MLFLOW_TRACKING_URI should be injected by webhook")
+				Expect(uriVal).To(Equal("https://" + testGatewayHostname + "/mlflow"))
+			})
+		})
+
+		Context("when MLFLOW_ENABLED=false (default) and notebook has mlflow-instance annotation", func() {
+			var webhookNotebook *nbv1.Notebook
+
+			BeforeEach(func() {
+				// Ensure MLFLOW_ENABLED is not set (default behavior)
+				Expect(os.Unsetenv("MLFLOW_ENABLED")).To(Succeed())
+
+				webhookNotebook = &nbv1.Notebook{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      WebhookTestName,
+						Namespace: WebhookTestNamespace,
+						Annotations: map[string]string{
+							MLflowInstanceAnnotation: MLflowIdentifier,
+						},
+					},
+					Spec: nbv1.NotebookSpec{
+						Template: nbv1.NotebookTemplateSpec{
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Name:  WebhookTestName,
+										Image: "registry.redhat.io/ubi9/ubi:latest",
+									},
+								},
+							},
+						},
+					},
+				}
+			})
+
+			AfterEach(func() {
+				// Clean up the notebook if it exists
+				nb := &nbv1.Notebook{}
+				if err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, nb); err == nil {
+					_ = cli.Delete(ctx, nb)
+				}
+				Eventually(func() bool {
+					err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &nbv1.Notebook{})
+					return apierrors.IsNotFound(err)
+				}, duration, interval).Should(BeTrue())
+			})
+
+			It("should NOT inject MLflow environment variables when feature is disabled", func() {
+				// Create the notebook - this triggers the mutating webhook
+				Expect(cli.Create(ctx, webhookNotebook)).To(Succeed())
+
+				// Fetch the notebook to see the webhook mutations
+				var createdNotebook nbv1.Notebook
+				Expect(cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &createdNotebook)).To(Succeed())
+
+				// Verify MLflow env vars were NOT injected (feature disabled)
+				container := findNotebookContainer(&createdNotebook)
+
+				_, k8sFound := getEnvVarValue(container, MLflowK8sIntegrationEnvVar)
+				Expect(k8sFound).To(BeFalse(), "MLFLOW_K8S_INTEGRATION should NOT be injected when MLFLOW_ENABLED=false")
+
+				_, authFound := getEnvVarValue(container, MLflowTrackingAuthEnvVar)
+				Expect(authFound).To(BeFalse(), "MLFLOW_TRACKING_AUTH should NOT be injected when MLFLOW_ENABLED=false")
+
+				_, uriFound := getEnvVarValue(container, MLflowTrackingURIEnvVar)
+				Expect(uriFound).To(BeFalse(), "MLFLOW_TRACKING_URI should NOT be injected when MLFLOW_ENABLED=false")
 			})
 		})
 	})

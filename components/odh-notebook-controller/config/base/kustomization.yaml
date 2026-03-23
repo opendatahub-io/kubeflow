@@ -11,6 +11,7 @@ generatorOptions:
   disableNameSuffixHash: true
 
 replacements:
+# Image replacements
 - source:
     fieldPath: data.odh-notebook-controller-image
     kind: ConfigMap
@@ -33,6 +34,36 @@ replacements:
   targets:
   - fieldPaths:
     - spec.template.spec.containers.0.args.1
+    select:
+      group: apps
+      kind: Deployment
+      name: manager
+      namespace: system
+      version: v1
+# Option 2: Inject config values as pod annotations to trigger rolling updates
+# when gateway-url or mlflow-enabled changes. ConfigMap name stays stable.
+- source:
+    fieldPath: data.gateway-url
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.metadata.annotations.[configHash.gateway-url]
+    select:
+      group: apps
+      kind: Deployment
+      name: manager
+      namespace: system
+      version: v1
+- source:
+    fieldPath: data.mlflow-enabled
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.metadata.annotations.[configHash.mlflow-enabled]
     select:
       group: apps
       kind: Deployment

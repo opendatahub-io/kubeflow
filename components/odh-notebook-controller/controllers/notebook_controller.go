@@ -491,13 +491,16 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Call the MLflow integration reconciler
 	// This will reconcile RoleBinding based on the MLflow integration annotation
 	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
-	mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
-	if err != nil {
-		log.Error(err, "Unable to reconcile MLflow integration")
-		return ctrl.Result{}, err
-	}
-	if mlflowResult.RequeueAfter > 0 {
-		return mlflowResult, nil
+	// Only process if MLflow integration is enabled via MLFLOW_ENABLED env var
+	if IsMLflowEnabled() {
+		mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Unable to reconcile MLflow integration")
+			return ctrl.Result{}, err
+		}
+		if mlflowResult.RequeueAfter > 0 {
+			return mlflowResult, nil
+		}
 	}
 
 	// Remove the reconciliation lock annotation

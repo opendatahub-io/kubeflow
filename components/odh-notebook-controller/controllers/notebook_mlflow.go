@@ -17,6 +17,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -41,6 +42,18 @@ const (
 	MLflowTrackingAuthValue    = "kubernetes-namespaced"
 	MLflowInstanceAnnotation   = "opendatahub.io/mlflow-instance"
 )
+
+// IsMLflowEnabled checks if MLflow integration is enabled via the MLFLOW_ENABLED environment variable.
+// Returns true if the value is "true" (case-insensitive), false otherwise.
+func IsMLflowEnabled() bool {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("MLFLOW_ENABLED"))) == "true"
+}
+
+// getGatewayURL reads the gateway URL from the GATEWAY_URL environment variable.
+// Returns the URL or empty string if not configured.
+func getGatewayURL() string {
+	return strings.TrimSpace(os.Getenv("GATEWAY_URL"))
+}
 
 // mlflowRoleBindingName returns the canonical RoleBinding name for a notebook's MLflow integration.
 func mlflowRoleBindingName(notebook *nbv1.Notebook) string {
@@ -101,14 +114,26 @@ func removeNotebookContainerEnvVar(notebook *nbv1.Notebook, envVarName string) {
 // The path component is derived from the mlflow instance name:
 //   - if instanceName == "mlflow" -> "/mlflow"
 //   - otherwise -> "/mlflow-<instanceName>"
+//
+// If gateway-url is configured (via mounted ConfigMap or GATEWAY_URL env var),
+// it will be used as the hostname directly, bypassing the Gateway instance lookup.
 func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName string) (string, error) {
-	gatewayInstance, err := getGatewayInstance(ctx, k8sClient, log)
-	if err != nil {
-		return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
-	}
-	hostname := getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
-	if hostname == "" {
-		return "", fmt.Errorf("unable to determine hostname for MLflow tracking URI")
+	var hostname string
+
+	// Check if gateway-url is configured
+	if gatewayURL := getGatewayURL(); gatewayURL != "" {
+		log.Info("Using configured gateway-url for MLflow tracking URI", "gatewayURL", gatewayURL)
+		hostname = gatewayURL
+	} else {
+		// Fall back to fetching hostname from Gateway instance
+		gatewayInstance, err := getGatewayInstance(ctx, k8sClient, log)
+		if err != nil {
+			return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
+		}
+		hostname = getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
+		if hostname == "" {
+			return "", fmt.Errorf("unable to determine hostname for MLflow tracking URI")
+		}
 	}
 
 	// Construct the path segment for the tracking URI
