@@ -361,7 +361,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 				ProxyImage: kubeRbacProxyImage,
 			}
 
-			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig)
+			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig, "")
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify kube-rbac-proxy container injection
@@ -459,7 +459,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 				ProxyImage: "test-kube-rbac-proxy-image",
 			}
 
-			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig)
+			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig, "")
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify total container count (2 original + 1 kube-rbac-proxy)
@@ -533,7 +533,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 				ProxyImage: "test-kube-rbac-proxy-image",
 			}
 
-			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig)
+			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid kube-rbac-proxy resource configuration"))
 
@@ -618,7 +618,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 				ProxyImage: "new-rbac-image",
 			}
 
-			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig)
+			err := InjectKubeRbacProxy(notebook, kubeRbacProxyConfig, "")
 			Expect(err).ToNot(HaveOccurred())
 
 			// Verify container count remains the same (update, not add)
