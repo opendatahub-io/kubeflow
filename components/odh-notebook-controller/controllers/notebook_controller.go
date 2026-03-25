@@ -116,8 +116,10 @@ type OpenshiftNotebookReconciler struct {
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
-	return reflect.DeepEqual(nb1.Labels, nb2.Labels) &&
-		reflect.DeepEqual(nb1.Annotations, nb2.Annotations) &&
+	// Do not treat all labels as controller-managed. Labels on Notebooks are often
+	// used by external automation (e.g., sharding / policy / ops tooling) and
+	// should not cause perpetual reconciliation.
+	return reflect.DeepEqual(nb1.Annotations, nb2.Annotations) &&
 		reflect.DeepEqual(nb1.Spec, nb2.Spec)
 }
 
