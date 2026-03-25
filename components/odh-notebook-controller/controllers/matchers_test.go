@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
 	"reflect"
 	"regexp"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/onsi/gomega/types"
-	"github.com/stretchr/testify/assert"
-
 	routev1 "github.com/openshift/api/route/v1"
+	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
