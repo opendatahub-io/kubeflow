@@ -415,7 +415,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Sync and mount Secret ds-pipeline-config for Elyra pipelines support
-		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == trueString {
 			// Ensure the ds-pipeline-config Secret exists before trying to mount it.
 			// This fixes the race condition (RHOAIENG-24545) where the first notebook in a
 			// namespace would not have the secret mounted because it didn't exist yet.
@@ -690,13 +690,12 @@ func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 // CheckAndMountCACertBundle checks if the odh-trusted-ca-bundle ConfigMap is present
 func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
-	workbenchConfigMapName := "workbench-trusted-ca-bundle"
-	odhConfigMapName := "odh-trusted-ca-bundle"
+	workbenchConfigMapName := WorkbenchTrustedCABundleName
 
 	// if the odh-trusted-ca-bundle ConfigMap is not present, skip the process
 	// as operator might have disabled the feature.
 	odhConfigMap := &corev1.ConfigMap{}
-	odhErr := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: odhConfigMapName}, odhConfigMap)
+	odhErr := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: OdhConfigMapName}, odhConfigMap)
 	if odhErr != nil {
 		log.Info("odh-trusted-ca-bundle ConfigMap is not present, not starting mounting process.")
 		return nil
@@ -716,7 +715,7 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
 			},
 			Data: map[string]string{
-				"ca-bundle.crt": odhConfigMap.Data["ca-bundle.crt"],
+				CaBundleCertKey: odhConfigMap.Data[CaBundleCertKey],
 			},
 		}
 		err = cli.Create(ctx, workbenchConfigMap)
