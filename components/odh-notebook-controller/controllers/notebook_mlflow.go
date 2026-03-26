@@ -292,10 +292,7 @@ func HandleMLflowEnvVars(
 
 	// Only inject MLflow env vars when the mlflow-instance annotation is present (non-empty).
 	if !instanceEnabled {
-		// Ensure all MLflow vars are removed when not enabled
-		removeNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar)
-		removeNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar)
-		removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
+		CleanupMLflowEnvVars(notebook)
 		return
 	}
 
@@ -319,7 +316,15 @@ func HandleMLflowEnvVars(
 	}
 
 	// Set the tracking URI
-	if err = setNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar, trackingURI); err != nil {
-		log.Error(err, "Notebook image container not found, skipping MLflow tracking URI injection")
+	if err := setNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar, trackingURI); err != nil {
+		log.Error(err, "Notebook image container not found, skipping MLflow tracking URI env var injection")
 	}
+}
+
+// CleanupMLflowEnvVars removes all MLflow-related environment variables from the notebook.
+// Called when the mlflow-instance annotation is removed from a notebook.
+func CleanupMLflowEnvVars(notebook *nbv1.Notebook) {
+	removeNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar)
+	removeNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar)
+	removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
 }

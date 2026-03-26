@@ -448,7 +448,8 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		// Only process if MLflow integration is enabled (configured at startup)
+		// When MLflow is disabled, we skip processing - existing notebooks keep their env vars
+		// until they are recreated (graceful degradation, no forced restarts)
 		if w.MLflowEnabled {
 			HandleMLflowEnvVars(ctx, w.Client, notebook, log, w.GatewayURL)
 		}

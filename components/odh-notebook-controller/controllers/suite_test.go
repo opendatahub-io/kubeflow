@@ -219,6 +219,8 @@ var _ = BeforeSuite(func() {
 		Namespace:     odhNotebookControllerTestNamespace,
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		MLflowEnabled: true,
+		GatewayURL:    "gateway.example.com",
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 

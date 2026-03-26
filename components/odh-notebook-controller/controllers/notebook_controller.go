@@ -493,8 +493,9 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Call the MLflow integration reconciler
 	// This will reconcile RoleBinding based on the MLflow integration annotation
-	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
-	// Only process if MLflow integration is enabled (configured at startup)
+	// Note: RoleBinding cleanup is handled automatically via ownerReference when notebook is deleted
+	// When MLflow is disabled, we skip processing - existing notebooks keep their access until
+	// they are deleted or the annotation is removed (graceful degradation)
 	if r.MLflowEnabled {
 		mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
 		if err != nil {
