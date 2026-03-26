@@ -27,7 +27,7 @@ func (src *Notebook) ConvertTo(dstRaw conversion.Hub) error {
 	dst.Spec.Template.Spec = src.Spec.Template.Spec
 	dst.Status.ReadyReplicas = src.Status.ReadyReplicas
 	dst.Status.ContainerState = src.Status.ContainerState
-	conditions := []nbv1beta1.NotebookCondition{}
+	conditions := make([]nbv1beta1.NotebookCondition, 0, len(src.Status.Conditions))
 	for _, c := range src.Status.Conditions {
 		newc := nbv1beta1.NotebookCondition{
 			Type:          c.Type,
@@ -53,7 +53,7 @@ func (dst *Notebook) ConvertFrom(srcRaw conversion.Hub) error {
 	dst.Spec.Template.Spec = src.Spec.Template.Spec
 	dst.Status.ReadyReplicas = src.Status.ReadyReplicas
 	dst.Status.ContainerState = src.Status.ContainerState
-	conditions := []NotebookCondition{}
+	conditions := make([]NotebookCondition, 0, len(src.Status.Conditions))
 	for _, c := range src.Status.Conditions {
 		newc := NotebookCondition{
 			Type:          c.Type,

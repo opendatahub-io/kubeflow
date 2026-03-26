@@ -60,7 +60,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gatewayv1.HTTPRoute, error) {
 	nbHTTPRouteList := gatewayv1.HTTPRouteList{}
 
-	var opts []client.ListOption
+	opts := make([]client.ListOption, 0, 2)
 	opts = append(opts, client.InNamespace(nbMeta.Namespace))
 	opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
@@ -460,7 +460,7 @@ func (tc *testContext) dumpControllerLogs(t *testing.T) {
 		}
 
 		// Build label selector from the deployment's spec.selector.matchLabels
-		var selectorParts []string
+		selectorParts := make([]string, 0, len(dep.Spec.Selector.MatchLabels))
 		for k, v := range dep.Spec.Selector.MatchLabels {
 			selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", k, v))
 		}
@@ -476,7 +476,7 @@ func (tc *testContext) dumpControllerLogs(t *testing.T) {
 
 		for _, pod := range pods.Items {
 			// Collect all container names (init + regular)
-			var containerNames []string
+			containerNames := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
 			for _, c := range pod.Spec.InitContainers {
 				containerNames = append(containerNames, c.Name)
 			}
