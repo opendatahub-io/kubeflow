@@ -53,7 +53,7 @@ func SyncRuntimeImagesConfigMap(ctx context.Context, cli client.Client, log logr
 	// Prepare data for ConfigMap
 	data := make(map[string]string)
 	for _, imageStream := range imageStreamList.Items {
-		if imageStream.Labels["opendatahub.io/runtime-image"] != "true" {
+		if imageStream.Labels["opendatahub.io/runtime-image"] != trueString {
 			continue
 		}
 

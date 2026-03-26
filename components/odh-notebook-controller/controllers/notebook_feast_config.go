@@ -36,7 +36,7 @@ func isFeastEnabled(notebook *nbv1.Notebook) bool {
 		return false
 	}
 	labelValue := notebook.Labels[feastLabelKey]
-	return labelValue == "true"
+	return labelValue == trueString
 }
 
 // isFeastMounted checks if the Feast config volume is currently mounted.

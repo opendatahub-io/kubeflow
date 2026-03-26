@@ -376,7 +376,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		BeforeEach(func() {
 			// Skip the tests if SET_PIPELINE_RBAC is not set to "true"
 			fmt.Printf("SET_PIPELINE_RBAC is: %s\n", os.Getenv("SET_PIPELINE_RBAC"))
-			if os.Getenv("SET_PIPELINE_RBAC") != "true" {
+			if os.Getenv("SET_PIPELINE_RBAC") != trueString {
 				Skip("Skipping RoleBinding reconciliation tests as SET_PIPELINE_RBAC is not set to 'true'")
 			}
 		})
@@ -441,20 +441,20 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
 			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
-			workbenchTrustedCACertBundle := "workbench-trusted-ca-bundle"
+			workbenchTrustedCACertBundle := WorkbenchTrustedCABundleName
 			trustedCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "odh-trusted-ca-bundle",
+					Name:      OdhConfigMapName,
 					Namespace: "default",
 					Labels: map[string]string{
-						"config.openshift.io/inject-trusted-cabundle": "true",
+						"config.openshift.io/inject-trusted-cabundle": trueString,
 					},
 				},
 				// NOTE: use valid short CA certs and make them each be different
 				// $ openssl req -nodes -x509 -newkey ed25519 -days 365 -set_serial 1 -out /dev/stdout -subj "/"
 				Data: map[string]string{
-					"ca-bundle.crt":     "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\nMzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\ndNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n-----END CERTIFICATE-----",
-					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\nMzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\nAxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n-----END CERTIFICATE-----",
+					CaBundleCertKey:    "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\nMzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\ndNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n-----END CERTIFICATE-----",
+					OdhCABundleCertKey: "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\nMzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\nAxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n-----END CERTIFICATE-----",
 				},
 			}
 
@@ -492,11 +492,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
-			volumeMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
+			volumeMountPath := CaBundleCertMountPath
 			expectedVolumeMount := corev1.VolumeMount{
 				Name:      "trusted-ca",
 				MountPath: volumeMountPath,
-				SubPath:   "ca-bundle.crt",
+				SubPath:   CaBundleCertKey,
 				ReadOnly:  true,
 			}
 			// Check if the volume mount is present and matches the expected one
@@ -510,8 +510,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Optional:             ptr.To(true),
 						Items: []corev1.KeyToPath{
 							{
-								Key:  "ca-bundle.crt",
-								Path: "ca-bundle.crt",
+								Key:  CaBundleCertKey,
+								Path: CaBundleCertKey,
 							},
 						},
 					},
@@ -524,10 +524,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			//   - have 3 certificates there in ca-bundle.crt
 			//   - all certificates are valid
 			// Wait for the controller to create/update the workbench-trusted-ca-bundle
-			configMapName := "workbench-trusted-ca-bundle"
+			configMapName := WorkbenchTrustedCABundleName
 			// TODO(RHOAIENG-15907): use eventually to mask product flakiness
 			Eventually(func() error {
-				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, CaBundleCertKey, 3)
 			}, duration, interval).Should(Succeed())
 		})
 
@@ -714,18 +714,18 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
 			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
-			workbenchTrustedCACertBundle := "workbench-trusted-ca-bundle"
+			workbenchTrustedCACertBundle := WorkbenchTrustedCABundleName
 			trustedCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "odh-trusted-ca-bundle",
+					Name:      OdhConfigMapName,
 					Namespace: "default",
 					Labels: map[string]string{
-						"config.openshift.io/inject-trusted-cabundle": "true",
+						"config.openshift.io/inject-trusted-cabundle": trueString,
 					},
 				},
 				Data: map[string]string{
-					"ca-bundle.crt":     "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4MjZaFw0yNTExMTMy\nMzI4MjZaMAAwKjAFBgMrZXADIQD77pLvWIX0WmlkYthRZ79oIf7qrGO7yECf668T\nSB42vTAFBgMrZXADQQDs76j81LPh+lgnnf4L0ROUqB66YiBx9SyDTjm83Ya4KC+2\nLEP6Mw1//X2DX89f1chy7RxCpFS3eXb7U/p+GPwA\n-----END CERTIFICATE-----",
-					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
+					CaBundleCertKey:    "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4MjZaFw0yNTExMTMy\nMzI4MjZaMAAwKjAFBgMrZXADIQD77pLvWIX0WmlkYthRZ79oIf7qrGO7yECf668T\nSB42vTAFBgMrZXADQQDs76j81LPh+lgnnf4L0ROUqB66YiBx9SyDTjm83Ya4KC+2\nLEP6Mw1//X2DX89f1chy7RxCpFS3eXb7U/p+GPwA\n-----END CERTIFICATE-----",
+					OdhCABundleCertKey: "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
 				},
 			}
 			// Create the ConfigMap
@@ -748,11 +748,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
-			volumeMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
+			volumeMountPath := CaBundleCertMountPath
 			expectedVolumeMount := corev1.VolumeMount{
 				Name:      "trusted-ca",
 				MountPath: volumeMountPath,
-				SubPath:   "ca-bundle.crt",
+				SubPath:   CaBundleCertKey,
 				ReadOnly:  true,
 			}
 			Expect(notebook.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(expectedVolumeMount))
@@ -765,8 +765,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Optional:             ptr.To(true),
 						Items: []corev1.KeyToPath{
 							{
-								Key:  "ca-bundle.crt",
-								Path: "ca-bundle.crt",
+								Key:  CaBundleCertKey,
+								Path: CaBundleCertKey,
 							},
 						},
 					},
@@ -778,10 +778,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			//   - have 3 certificates there in ca-bundle.crt
 			//   - all certificates are valid
 			// Wait for the controller to create/update the workbench-trusted-ca-bundle
-			configMapName := "workbench-trusted-ca-bundle"
+			configMapName := WorkbenchTrustedCABundleName
 			// TODO(RHOAIENG-15907): use eventually to mask product flakiness
 			Eventually(func() error {
-				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, CaBundleCertKey, 3)
 			}, duration, interval).Should(Succeed())
 		})
 	})
@@ -985,9 +985,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 			Spec: corev1.ServiceSpec{
 				Ports: []corev1.ServicePort{{
-					Name:       "kube-rbac-proxy",
+					Name:       KubeRbacProxyServicePortName,
 					Port:       8443,
-					TargetPort: intstr.FromString("kube-rbac-proxy"),
+					TargetPort: intstr.FromString(KubeRbacProxyServicePortName),
 					Protocol:   corev1.ProtocolTCP,
 				}},
 				Selector: map[string]string{
@@ -1087,7 +1087,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(Succeed())
 
 			// Verify the notebook has the inject-auth annotation
-			Expect(notebook.Annotations[AnnotationInjectAuth]).To(Equal("true"))
+			Expect(notebook.Annotations[AnnotationInjectAuth]).To(Equal(trueString))
 		})
 
 		It("Should inject the kube-rbac-proxy as a sidecar container", func() {
@@ -1106,7 +1106,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 				// Verify the second container is the kube-rbac-proxy
 				kubeRbacProxyContainer := notebook.Spec.Template.Spec.Containers[1]
-				if kubeRbacProxyContainer.Name != "kube-rbac-proxy" {
+				if kubeRbacProxyContainer.Name != ContainerNameKubeRbacProxy {
 					return fmt.Errorf("expected kube-rbac-proxy container name 'kube-rbac-proxy', got '%s'", kubeRbacProxyContainer.Name)
 				}
 
@@ -1119,7 +1119,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				// Verify kube-rbac-proxy container has the correct port
 				foundPort := false
 				for _, port := range kubeRbacProxyContainer.Ports {
-					if port.Name == "kube-rbac-proxy" && port.ContainerPort == 8443 {
+					if port.Name == KubeRbacProxyServicePortName && port.ContainerPort == 8443 {
 						foundPort = true
 						break
 					}
@@ -1387,7 +1387,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			if notebook.Annotations == nil {
 				notebook.Annotations = make(map[string]string)
 			}
-			notebook.Annotations[AnnotationInjectAuth] = "true"
+			notebook.Annotations[AnnotationInjectAuth] = trueString
 			Expect(cli.Update(ctx, notebook)).Should(Succeed())
 
 			By("Verifying the unauthenticated HTTPRoute is cleaned up")
@@ -1549,9 +1549,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		)
 		BeforeEach(func() {
 			//Pass env to be visible within test suite
-			_ = os.Setenv("SET_PIPELINE_SECRET", "true")
+			_ = os.Setenv("SET_PIPELINE_SECRET", trueString)
 			fmt.Printf("SET_PIPELINE_SECRET is: %s\n", os.Getenv("SET_PIPELINE_SECRET"))
-			if os.Getenv("SET_PIPELINE_SECRET") != "true" {
+			if os.Getenv("SET_PIPELINE_SECRET") != trueString {
 				Skip("Skipping elyra secret creation reconciliation tests as SET_PIPELINE_SECRET is not set to 'true'")
 			}
 
@@ -1797,7 +1797,7 @@ func createNotebookWithKubeRbacProxy(name, namespace string) *nbv1.Notebook {
 			Name:      name,
 			Namespace: namespace,
 			Annotations: map[string]string{
-				AnnotationInjectAuth: "true",
+				AnnotationInjectAuth: trueString,
 			},
 		},
 		Spec: nbv1.NotebookSpec{
