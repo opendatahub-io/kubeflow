@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	testNotebookName      = "test-notebook"
+	testNotebookName       = "test-notebook"
 	testFeastConfigMapName = "test-notebook-feast-config"
 )
 
