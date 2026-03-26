@@ -71,4 +71,3 @@ spec:
               value: GATEWAY_URL_PLACEHOLDER
             - name: MLFLOW_ENABLED
               value: MLFLOW_ENABLED_PLACEHOLDER
-
