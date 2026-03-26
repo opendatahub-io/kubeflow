@@ -35,4 +35,4 @@ Key differences from the stable branch push pipelines:
 - Added pipeline timeouts (2h pipeline / 1h per task).
 - `pipeline-type` is set to `"kubeflow-main-build"` instead of the default `"push"`. This deliberately prevents the `trigger-operator-build` task from running, which would otherwise kick off downstream operator, operator-bundle, and FBC fragment CI builds. Those downstream triggers are not needed on the `main` branch.
 - `enable-group-testing` is set to `"true"` to run e2e tests after a successful build.
-- Push-built images use the `:odh-main` tag and do not expire.
+- Push-built images use the `:main` tag and do not expire.
