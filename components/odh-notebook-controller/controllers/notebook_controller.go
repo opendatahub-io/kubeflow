@@ -74,14 +74,14 @@ const (
 )
 
 const (
-	OdhConfigMapName               = "odh-trusted-ca-bundle"    // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
-	SelfSignedConfigMapName        = "kube-root-ca.crt"         // Self-Signed Certs Contains ca.crt
-	ServiceCAConfigMapName         = "openshift-service-ca.crt" // Service CA Bundle Contains service-ca.crt
-	CaBundleCertKey                = "ca-bundle.crt"
-	OdhCABundleCertKey             = "odh-ca-bundle.crt"
-	WorkbenchTrustedCABundleName   = "workbench-trusted-ca-bundle"
-	CaBundleCertMountPath          = "/etc/pki/tls/custom-certs/ca-bundle.crt"
-	trueString                     = "true"
+	OdhConfigMapName             = "odh-trusted-ca-bundle"    // ODH Trusted CA Bundle: ca-bundle.crt, odh-ca-bundle.crt
+	SelfSignedConfigMapName      = "kube-root-ca.crt"         // Self-Signed Certs Contains ca.crt
+	ServiceCAConfigMapName       = "openshift-service-ca.crt" // Service CA Bundle Contains service-ca.crt
+	CaBundleCertKey              = "ca-bundle.crt"
+	OdhCABundleCertKey           = "odh-ca-bundle.crt"
+	WorkbenchTrustedCABundleName = "workbench-trusted-ca-bundle"
+	CaBundleCertMountPath        = "/etc/pki/tls/custom-certs/ca-bundle.crt"
+	trueString                   = "true"
 )
 
 // OpenshiftNotebookReconciler holds the controller configuration.
