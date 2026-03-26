@@ -315,7 +315,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 					By("Checking telemetry events")
 					Expect(tracings.TraceProvider.ForceFlush(ctx)).To(Succeed())
 					spans := tracings.SpanExporter.GetSpans()
-					events := make([]string, 0)
+					events := make([]string, 0, len(spans))
 					for _, span := range spans {
 						for _, event := range span.Events {
 							events = append(events, event.Name)

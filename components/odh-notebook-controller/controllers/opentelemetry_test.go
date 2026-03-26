@@ -24,7 +24,7 @@ var tracings struct {
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
 func setupOTelSDK(ctx context.Context) (shutdown func(context.Context) error, err error) {
-	var shutdownFuncs []func(context.Context) error
+	shutdownFuncs := make([]func(context.Context) error, 0, 1)
 
 	// shutdown() calls cleanup functions registered via shutdownFuncs.
 	// The errors from the calls are joined.
