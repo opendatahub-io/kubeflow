@@ -123,8 +123,10 @@ var _ = Describe("MLflow Integration", func() {
 				var currentNotebook nbv1.Notebook
 				Expect(cli.Get(ctx, types.NamespacedName{Name: Name, Namespace: Namespace}, &currentNotebook)).To(Succeed())
 
-				// Create RoleBinding with controller reference, as ReconcileMLflowRoleBinding does when label is enabled
-				roleBinding := NewRoleBinding(&currentNotebook, mlflowRoleBindingName(&currentNotebook), "ClusterRole", MLflowClusterRoleName)
+				// Create RoleBinding with controller reference, as ReconcileMLflowRoleBinding does
+				roleBinding := NewRoleBinding(
+					&currentNotebook, mlflowRoleBindingName(&currentNotebook),
+					"ClusterRole", MLflowClusterRoleName)
 				Expect(ctrl.SetControllerReference(&currentNotebook, roleBinding, testScheme)).To(Succeed())
 				Expect(cli.Create(ctx, roleBinding)).To(Succeed())
 
@@ -295,7 +297,7 @@ var _ = Describe("MLflow Integration", func() {
 			})
 		})
 
-		Context("when opendatahub.io/mlflow-instance annotation is set to MLflowIdentifier and Gateway is configured", func() {
+		Context("when mlflow-instance annotation is set and Gateway is configured", func() {
 			var (
 				gateway *unstructured.Unstructured
 			)
@@ -378,13 +380,17 @@ var _ = Describe("MLflow Integration", func() {
 		})
 
 		It("should preserve existing https:// scheme in gatewayURL", func() {
-			uri, err := getMLflowTrackingURI(ctx, cli, ctrl.Log.WithName("test"), MLflowIdentifier, "https://custom-gateway.example.com")
+			uri, err := getMLflowTrackingURI(
+				ctx, cli, ctrl.Log.WithName("test"),
+				MLflowIdentifier, "https://custom-gateway.example.com")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(uri).To(Equal("https://custom-gateway.example.com/mlflow"))
 		})
 
 		It("should preserve existing http:// scheme in gatewayURL", func() {
-			uri, err := getMLflowTrackingURI(ctx, cli, ctrl.Log.WithName("test"), MLflowIdentifier, "http://custom-gateway.example.com")
+			uri, err := getMLflowTrackingURI(
+				ctx, cli, ctrl.Log.WithName("test"),
+				MLflowIdentifier, "http://custom-gateway.example.com")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(uri).To(Equal("http://custom-gateway.example.com/mlflow"))
 		})
@@ -437,11 +443,14 @@ var _ = Describe("MLflow Integration", func() {
 			AfterEach(func() {
 				// Clean up the notebook if it exists
 				nb := &nbv1.Notebook{}
-				if err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, nb); err == nil {
+				nsName := types.NamespacedName{
+					Name: WebhookTestName, Namespace: WebhookTestNamespace,
+				}
+				if err := cli.Get(ctx, nsName, nb); err == nil {
 					_ = cli.Delete(ctx, nb)
 				}
 				Eventually(func() bool {
-					err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &nbv1.Notebook{})
+					err := cli.Get(ctx, nsName, &nbv1.Notebook{})
 					return apierrors.IsNotFound(err)
 				}, duration, interval).Should(BeTrue())
 			})
@@ -452,7 +461,10 @@ var _ = Describe("MLflow Integration", func() {
 
 				// Fetch the notebook to see the webhook mutations
 				var createdNotebook nbv1.Notebook
-				Expect(cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &createdNotebook)).To(Succeed())
+				nsName := types.NamespacedName{
+					Name: WebhookTestName, Namespace: WebhookTestNamespace,
+				}
+				Expect(cli.Get(ctx, nsName, &createdNotebook)).To(Succeed())
 
 				// Verify MLflow env vars were injected by the webhook
 				container := findNotebookContainer(&createdNotebook)
@@ -499,11 +511,14 @@ var _ = Describe("MLflow Integration", func() {
 			AfterEach(func() {
 				// Clean up the notebook if it exists
 				nb := &nbv1.Notebook{}
-				if err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, nb); err == nil {
+				nsName := types.NamespacedName{
+					Name: WebhookTestName, Namespace: WebhookTestNamespace,
+				}
+				if err := cli.Get(ctx, nsName, nb); err == nil {
 					_ = cli.Delete(ctx, nb)
 				}
 				Eventually(func() bool {
-					err := cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &nbv1.Notebook{})
+					err := cli.Get(ctx, nsName, &nbv1.Notebook{})
 					return apierrors.IsNotFound(err)
 				}, duration, interval).Should(BeTrue())
 			})
@@ -514,7 +529,10 @@ var _ = Describe("MLflow Integration", func() {
 
 				// Fetch the notebook to see the webhook mutations
 				var createdNotebook nbv1.Notebook
-				Expect(cli.Get(ctx, types.NamespacedName{Name: WebhookTestName, Namespace: WebhookTestNamespace}, &createdNotebook)).To(Succeed())
+				nsName := types.NamespacedName{
+					Name: WebhookTestName, Namespace: WebhookTestNamespace,
+				}
+				Expect(cli.Get(ctx, nsName, &createdNotebook)).To(Succeed())
 
 				// Verify MLflow env vars were NOT injected (no annotation)
 				container := findNotebookContainer(&createdNotebook)

@@ -104,7 +104,9 @@ func removeNotebookContainerEnvVar(notebook *nbv1.Notebook, envVarName string) {
 //
 // If gatewayURL is provided (configured at startup via GATEWAY_URL env var),
 // it will be used as the hostname directly, bypassing the Gateway instance lookup.
-func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName, gatewayURL string) (string, error) {
+func getMLflowTrackingURI(
+	ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName, gatewayURL string,
+) (string, error) {
 	var hostname string
 
 	// Check if gateway-url is configured
@@ -177,13 +179,17 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowRoleBinding(notebook *nbv1.
 	ownerRefsDiffer := !equality.Semantic.DeepEqual(desiredRoleBinding.OwnerReferences, foundRoleBinding.OwnerReferences)
 	needsUpdate := subjectsDiffer || labelsDiffer || ownerRefsDiffer
 	if needsUpdate {
-		log.Info("Updating MLflow RoleBinding", "RoleBinding.Namespace", foundRoleBinding.Namespace, "RoleBinding.Name", foundRoleBinding.Name)
+		log.Info("Updating MLflow RoleBinding",
+			"RoleBinding.Namespace", foundRoleBinding.Namespace,
+			"RoleBinding.Name", foundRoleBinding.Name)
 		foundRoleBinding.Subjects = desiredRoleBinding.Subjects
 		foundRoleBinding.Labels = desiredRoleBinding.Labels
 		foundRoleBinding.OwnerReferences = desiredRoleBinding.OwnerReferences
 		err = r.Update(ctx, foundRoleBinding)
 		if err != nil {
-			log.Error(err, "Failed to update MLflow RoleBinding", "RoleBinding.Namespace", foundRoleBinding.Namespace, "RoleBinding.Name", foundRoleBinding.Name)
+			log.Error(err, "Failed to update MLflow RoleBinding",
+				"RoleBinding.Namespace", foundRoleBinding.Namespace,
+				"RoleBinding.Name", foundRoleBinding.Name)
 			return err
 		}
 	}
@@ -227,7 +233,9 @@ func (r *OpenshiftNotebookReconciler) CleanupMLflowRoleBinding(notebook *nbv1.No
 // Unlike other sub-reconcilers that return only error, this returns (ctrl.Result, error) because
 // it needs to express "retry later" when the MLflow ClusterRole doesn't exist yet — OpenShift
 // rejects RoleBindings that reference a non-existent ClusterRole.
-func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.Notebook, ctx context.Context) (ctrl.Result, error) {
+func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(
+	notebook *nbv1.Notebook, ctx context.Context,
+) (ctrl.Result, error) {
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 	// Only reconcile RoleBinding when the notebook has the mlflow instance annotation defined (non-empty)
 	if _, ok := getMLflowInstanceAnnotation(notebook); !ok {
@@ -276,7 +284,9 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 //     namespace-scoped authentication.
 //   - MLFLOW_TRACKING_URI: set when the 'opendatahub.io/mlflow-instance' annotation
 //     contains a non-empty instance name and a tracking URI can be determined.
-func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger, gatewayURL string) {
+func HandleMLflowEnvVars(
+	ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger, gatewayURL string,
+) {
 	// Determine mlflow instance annotation (if present)
 	instanceName, instanceEnabled := getMLflowInstanceAnnotation(notebook)
 
