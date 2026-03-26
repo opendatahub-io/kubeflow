@@ -233,7 +233,9 @@ var _ = BeforeSuite(func() {
 			KubeRbacProxyConfig: KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},
-			Decoder: admission.NewDecoder(mgr.GetScheme()),
+			Decoder:       admission.NewDecoder(mgr.GetScheme()),
+			MLflowEnabled: true,
+			GatewayURL:    "gateway.example.com",
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)

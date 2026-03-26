@@ -17,7 +17,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -42,18 +41,6 @@ const (
 	MLflowTrackingAuthValue    = "kubernetes-namespaced"
 	MLflowInstanceAnnotation   = "opendatahub.io/mlflow-instance"
 )
-
-// IsMLflowEnabled checks if MLflow integration is enabled via the MLFLOW_ENABLED environment variable.
-// Returns true if the value is "true" (case-insensitive), false otherwise.
-func IsMLflowEnabled() bool {
-	return strings.ToLower(strings.TrimSpace(os.Getenv("MLFLOW_ENABLED"))) == "true"
-}
-
-// getGatewayURL reads the gateway URL from the GATEWAY_URL environment variable.
-// Returns the URL or empty string if not configured.
-func getGatewayURL() string {
-	return strings.TrimSpace(os.Getenv("GATEWAY_URL"))
-}
 
 // mlflowRoleBindingName returns the canonical RoleBinding name for a notebook's MLflow integration.
 func mlflowRoleBindingName(notebook *nbv1.Notebook) string {
@@ -115,13 +102,13 @@ func removeNotebookContainerEnvVar(notebook *nbv1.Notebook, envVarName string) {
 //   - if instanceName == "mlflow" -> "/mlflow"
 //   - otherwise -> "/mlflow-<instanceName>"
 //
-// If gateway-url is configured (via mounted ConfigMap or GATEWAY_URL env var),
+// If gatewayURL is provided (configured at startup via GATEWAY_URL env var),
 // it will be used as the hostname directly, bypassing the Gateway instance lookup.
-func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName string) (string, error) {
+func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName, gatewayURL string) (string, error) {
 	var hostname string
 
 	// Check if gateway-url is configured
-	if gatewayURL := getGatewayURL(); gatewayURL != "" {
+	if gatewayURL != "" {
 		log.Info("Using configured gateway-url for MLflow tracking URI", "gatewayURL", gatewayURL)
 		hostname = gatewayURL
 	} else {
@@ -142,7 +129,13 @@ func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr
 		pathSegment = fmt.Sprintf("%s-%s", MLflowIdentifier, instanceName)
 	}
 
-	trackingURI := fmt.Sprintf("https://%s/%s", hostname, pathSegment)
+	// Check if hostname already has a scheme, if not prepend https://
+	var trackingURI string
+	if strings.HasPrefix(hostname, "https://") || strings.HasPrefix(hostname, "http://") {
+		trackingURI = fmt.Sprintf("%s/%s", hostname, pathSegment)
+	} else {
+		trackingURI = fmt.Sprintf("https://%s/%s", hostname, pathSegment)
+	}
 	return trackingURI, nil
 }
 
@@ -271,6 +264,9 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 // HandleMLflowEnvVars handles MLflow-related environment variables in the notebook container.
 // This function should be called from the webhook to ensure the env vars are available immediately.
 //
+// The gatewayURL parameter is the pre-configured gateway URL (from startup env var).
+// If empty, the function will fall back to looking up the Gateway instance.
+//
 // It may set the following environment variables:
 //   - MLFLOW_K8S_INTEGRATION: set to 'true' when the 'opendatahub.io/mlflow-instance'
 //     annotation is present and non-empty. If the annotation is absent or empty, this
@@ -280,7 +276,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 //     namespace-scoped authentication.
 //   - MLFLOW_TRACKING_URI: set when the 'opendatahub.io/mlflow-instance' annotation
 //     contains a non-empty instance name and a tracking URI can be determined.
-func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) {
+func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger, gatewayURL string) {
 	// Determine mlflow instance annotation (if present)
 	instanceName, instanceEnabled := getMLflowInstanceAnnotation(notebook)
 
@@ -304,7 +300,7 @@ func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.
 	}
 
 	// Integration is enabled - try to get and set the tracking URI
-	trackingURI, err := getMLflowTrackingURI(ctx, cli, log, instanceName)
+	trackingURI, err := getMLflowTrackingURI(ctx, cli, log, instanceName, gatewayURL)
 	if err != nil {
 		log.Error(err, "Unable to determine MLflow tracking URI, skipping injection")
 		// Don't fail webhook - just skip MLflow integration

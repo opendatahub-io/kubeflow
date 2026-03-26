@@ -62,6 +62,9 @@ type NotebookWebhook struct {
 	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
 	Namespace string
+	// MLflow configuration (read once at startup from env vars)
+	MLflowEnabled bool
+	GatewayURL    string
 }
 
 var proxyEnvVars = make(map[string]string, 3)
@@ -445,9 +448,9 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 
 		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		// Only process if MLflow integration is enabled via MLFLOW_ENABLED env var
-		if IsMLflowEnabled() {
-			HandleMLflowEnvVars(ctx, w.Client, notebook, log)
+		// Only process if MLflow integration is enabled (configured at startup)
+		if w.MLflowEnabled {
+			HandleMLflowEnvVars(ctx, w.Client, notebook, log, w.GatewayURL)
 		}
 	}
 

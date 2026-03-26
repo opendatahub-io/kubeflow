@@ -14,9 +14,6 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
-        # These annotations trigger rolling updates when config values change
-        configHash.gateway-url: GATEWAY_URL_HASH_PLACEHOLDER
-        configHash.mlflow-enabled: MLFLOW_ENABLED_HASH_PLACEHOLDER
     spec:
       serviceAccountName: manager
       terminationGracePeriodSeconds: 10
@@ -71,15 +68,7 @@ spec:
                   key: INJECT_CLUSTER_PROXY_ENV
                   optional: true
             - name: GATEWAY_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: odh-notebook-controller-image-parameters
-                  key: gateway-url
-                  optional: true
+              value: GATEWAY_URL_PLACEHOLDER
             - name: MLFLOW_ENABLED
-              valueFrom:
-                configMapKeyRef:
-                  name: odh-notebook-controller-image-parameters
-                  key: mlflow-enabled
-                  optional: true
+              value: MLFLOW_ENABLED_PLACEHOLDER
 

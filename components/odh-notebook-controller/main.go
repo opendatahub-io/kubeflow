@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -199,6 +200,12 @@ func main() {
 		os.Exit(1)
 	}
 	setupLog.Info("Controller is running in namespace", "namespace", namespace)
+
+	// Read MLflow configuration from environment variables (set once at startup)
+	mlflowEnabled := strings.ToLower(strings.TrimSpace(os.Getenv("MLFLOW_ENABLED"))) == "true"
+	gatewayURL := strings.TrimSpace(os.Getenv("GATEWAY_URL"))
+	setupLog.Info("MLflow configuration", "mlflowEnabled", mlflowEnabled)
+
 	if err = (&controllers.OpenshiftNotebookReconciler{
 		Client:        mgr.GetClient(),
 		Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
@@ -206,6 +213,8 @@ func main() {
 		Scheme:        mgr.GetScheme(),
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		MLflowEnabled: mlflowEnabled,
+		GatewayURL:    gatewayURL,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "odh-notebook-controller")
 		os.Exit(1)
@@ -222,7 +231,9 @@ func main() {
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},
-			Decoder: admission.NewDecoder(mgr.GetScheme()),
+			Decoder:       admission.NewDecoder(mgr.GetScheme()),
+			MLflowEnabled: mlflowEnabled,
+			GatewayURL:    gatewayURL,
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)

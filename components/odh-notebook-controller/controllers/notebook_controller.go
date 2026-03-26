@@ -87,6 +87,9 @@ type OpenshiftNotebookReconciler struct {
 	Log           logr.Logger
 	Config        *rest.Config
 	EventRecorder record.EventRecorder
+	// MLflow configuration (read once at startup from env vars)
+	MLflowEnabled bool
+	GatewayURL    string
 }
 
 // ClusterRole permissions
@@ -491,8 +494,8 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Call the MLflow integration reconciler
 	// This will reconcile RoleBinding based on the MLflow integration annotation
 	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
-	// Only process if MLflow integration is enabled via MLFLOW_ENABLED env var
-	if IsMLflowEnabled() {
+	// Only process if MLflow integration is enabled (configured at startup)
+	if r.MLflowEnabled {
 		mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
 		if err != nil {
 			log.Error(err, "Unable to reconcile MLflow integration")

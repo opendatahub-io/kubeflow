@@ -7,11 +7,10 @@ configMapGenerator:
 - envs:
   - params.env
   name: odh-notebook-controller-image-parameters
-generatorOptions:
-  disableNameSuffixHash: true
+# Note: Hash suffix is enabled (default) to trigger automatic rollouts
+# when params.env values change (gateway-url, mlflow-enabled).
 
 replacements:
-# Image replacements
 - source:
     fieldPath: data.odh-notebook-controller-image
     kind: ConfigMap
@@ -40,8 +39,6 @@ replacements:
       name: manager
       namespace: system
       version: v1
-# Option 2: Inject config values as pod annotations to trigger rolling updates
-# when gateway-url or mlflow-enabled changes. ConfigMap name stays stable.
 - source:
     fieldPath: data.gateway-url
     kind: ConfigMap
@@ -49,7 +46,7 @@ replacements:
     version: v1
   targets:
   - fieldPaths:
-    - spec.template.metadata.annotations.[configHash.gateway-url]
+    - spec.template.spec.containers.[name=manager].env.[name=GATEWAY_URL].value
     select:
       group: apps
       kind: Deployment
@@ -63,7 +60,7 @@ replacements:
     version: v1
   targets:
   - fieldPaths:
-    - spec.template.metadata.annotations.[configHash.mlflow-enabled]
+    - spec.template.spec.containers.[name=manager].env.[name=MLFLOW_ENABLED].value
     select:
       group: apps
       kind: Deployment
