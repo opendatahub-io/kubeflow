@@ -447,9 +447,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			unmountFeastConfig(notebook)
 		}
 
-		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		// When MLflow is disabled, we skip processing - existing notebooks keep their env vars
-		// until they are recreated (graceful degradation, no forced restarts)
+		// Handle MLflow environment variables (ODH integration flag and tracking URI).
+		//
+		// MLflowEnabled=false intentionally skips cleanup of existing notebooks.
+		// Env vars are already baked into running pods; to revoke access immediately,
+		// remove the opendatahub.io/mlflow-instance annotation from the notebook.
 		if w.MLflowEnabled {
 			HandleMLflowEnvVars(ctx, w.Client, notebook, log, w.GatewayURL)
 		}
