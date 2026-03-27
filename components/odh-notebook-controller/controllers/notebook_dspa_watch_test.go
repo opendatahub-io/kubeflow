@@ -17,7 +17,6 @@ package controllers
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -88,6 +87,17 @@ func TestNotebooksForDSPA_RHOAIENG4531(t *testing.T) {
 			wantCount:         0,
 		},
 		{
+			name:              "handles SET_PIPELINE_SECRET with whitespace and mixed case",
+			setPipelineSecret: "  True  ",
+			dspaNamespace:     "test-ns",
+			notebooks: []nbv1.Notebook{
+				newTestNotebook("nb1", "test-ns"),
+			},
+			wantCount:      1,
+			wantNamespaces: []string{"test-ns"},
+			wantNames:      []string{"nb1"},
+		},
+		{
 			name:              "only returns notebooks from DSPA namespace, not other namespaces",
 			setPipelineSecret: "true",
 			dspaNamespace:     "target-ns",
@@ -103,13 +113,10 @@ func TestNotebooksForDSPA_RHOAIENG4531(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set env var
-			if tt.setPipelineSecret == "" {
-				os.Unsetenv("SET_PIPELINE_SECRET")
-			} else {
-				os.Setenv("SET_PIPELINE_SECRET", tt.setPipelineSecret)
+			// Set env var — t.Setenv automatically restores on subtest cleanup
+			if tt.setPipelineSecret != "" {
+				t.Setenv("SET_PIPELINE_SECRET", tt.setPipelineSecret)
 			}
-			defer os.Unsetenv("SET_PIPELINE_SECRET")
 
 			// Build fake client with notebooks
 			objs := make([]runtime.Object, len(tt.notebooks))
@@ -142,13 +149,13 @@ func TestNotebooksForDSPA_RHOAIENG4531(t *testing.T) {
 
 			for i, req := range requests {
 				if i < len(tt.wantNames) {
-					if req.NamespacedName.Name != tt.wantNames[i] {
-						t.Errorf("request[%d].Name = %q, want %q", i, req.NamespacedName.Name, tt.wantNames[i])
+					if req.Name != tt.wantNames[i] {
+						t.Errorf("request[%d].Name = %q, want %q", i, req.Name, tt.wantNames[i])
 					}
 				}
 				if i < len(tt.wantNamespaces) {
-					if req.NamespacedName.Namespace != tt.wantNamespaces[i] {
-						t.Errorf("request[%d].Namespace = %q, want %q", i, req.NamespacedName.Namespace, tt.wantNamespaces[i])
+					if req.Namespace != tt.wantNamespaces[i] {
+						t.Errorf("request[%d].Namespace = %q, want %q", i, req.Namespace, tt.wantNamespaces[i])
 					}
 				}
 			}
