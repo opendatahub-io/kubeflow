@@ -926,7 +926,7 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 									sort.Slice(tag.Items, func(i, j int) bool {
 										iTime := tag.Items[i].Created
 										jTime := tag.Items[j].Created
-										return iTime.Time.After(jTime.Time) //nolint:QF1008 // Reason: We are comparing metav1.Time // Lexicographical comparison of RFC3339 timestamps
+										return iTime.Time.After(jTime.Time) //nolint:staticcheck // QF1008: explicit .Time access for clarity when comparing metav1.Time
 									})
 									// Get the most recent item
 									imageHash := tag.Items[0].DockerImageReference
