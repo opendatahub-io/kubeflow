@@ -79,10 +79,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				CommonRouteSpec: gatewayv1.CommonRouteSpec{
 					ParentRefs: []gatewayv1.ParentReference{
 						{
-							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
-							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Group:     ptr.To(gatewayv1.Group("gateway.networking.k8s.io")),
+							Kind:      ptr.To(gatewayv1.Kind("Gateway")),
 							Name:      gatewayv1.ObjectName("data-science-gateway"),
-							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+							Namespace: ptr.To(gatewayv1.Namespace("openshift-ingress")),
 						},
 					},
 				},
@@ -92,7 +92,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
+									Value: ptr.To("/notebook/" + Namespace + "/" + Name),
 								},
 							},
 						},
@@ -100,13 +100,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Group:     ptr.To(gatewayv1.Group("")),
+										Kind:      ptr.To(gatewayv1.Kind("Service")),
 										Name:      gatewayv1.ObjectName(Name),
-										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
-										Port:      &[]gatewayv1.PortNumber{8888}[0],
+										Namespace: ptr.To(gatewayv1.Namespace(Namespace)), // Cross-namespace reference
+										Port:      ptr.To(gatewayv1.PortNumber(8888)),
 									},
-									Weight: func() *int32 { w := int32(1); return &w }(),
+									Weight: ptr.To(int32(1)),
 								},
 							},
 						},
@@ -562,10 +562,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				CommonRouteSpec: gatewayv1.CommonRouteSpec{
 					ParentRefs: []gatewayv1.ParentReference{
 						{
-							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
-							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Group:     ptr.To(gatewayv1.Group("gateway.networking.k8s.io")),
+							Kind:      ptr.To(gatewayv1.Kind("Gateway")),
 							Name:      gatewayv1.ObjectName("data-science-gateway"),
-							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+							Namespace: ptr.To(gatewayv1.Namespace("openshift-ingress")),
 						},
 					},
 				},
@@ -575,7 +575,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
+									Value: ptr.To("/notebook/" + Namespace + "/" + Name),
 								},
 							},
 						},
@@ -583,13 +583,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Group:     ptr.To(gatewayv1.Group("")),
+										Kind:      ptr.To(gatewayv1.Kind("Service")),
 										Name:      gatewayv1.ObjectName(Name),
-										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
-										Port:      &[]gatewayv1.PortNumber{8888}[0],
+										Namespace: ptr.To(gatewayv1.Namespace(Namespace)),
+										Port:      ptr.To(gatewayv1.PortNumber(8888)),
 									},
-									Weight: func() *int32 { w := int32(1); return &w }(),
+									Weight: ptr.To(int32(1)),
 								},
 							},
 						},
@@ -848,8 +848,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Kind:               "Notebook",
 						Name:               notebook.Name,
 						UID:                notebook.UID,
-						Controller:         &[]bool{true}[0],
-						BlockOwnerDeletion: &[]bool{true}[0],
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
 					},
 				},
 			},
@@ -867,7 +867,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Ports: []netv1.NetworkPolicyPort{
 							{
 								Protocol: &npProtocol,
-								Port:     &[]intstr.IntOrString{intstr.FromInt(int(NotebookKubeRbacProxyPort))}[0],
+								Port:     ptr.To(intstr.FromInt(int(NotebookKubeRbacProxyPort))),
 							},
 						},
 					},
@@ -978,8 +978,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Kind:               "Notebook",
 						Name:               Name,
 						UID:                notebook.UID,
-						Controller:         &[]bool{true}[0],
-						BlockOwnerDeletion: &[]bool{true}[0],
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
 					},
 				},
 			},
@@ -1011,10 +1011,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				CommonRouteSpec: gatewayv1.CommonRouteSpec{
 					ParentRefs: []gatewayv1.ParentReference{
 						{
-							Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
-							Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+							Group:     ptr.To(gatewayv1.Group("gateway.networking.k8s.io")),
+							Kind:      ptr.To(gatewayv1.Kind("Gateway")),
 							Name:      gatewayv1.ObjectName("data-science-gateway"),
-							Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+							Namespace: ptr.To(gatewayv1.Namespace("openshift-ingress")),
 						},
 					},
 				},
@@ -1024,7 +1024,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
+									Value: ptr.To("/notebook/" + Namespace + "/" + Name),
 								},
 							},
 						},
@@ -1032,13 +1032,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								BackendRef: gatewayv1.BackendRef{
 									BackendObjectReference: gatewayv1.BackendObjectReference{
-										Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+										Group:     ptr.To(gatewayv1.Group("")),
+										Kind:      ptr.To(gatewayv1.Kind("Service")),
 										Name:      gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
-										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
-										Port:      &[]gatewayv1.PortNumber{8443}[0],
+										Namespace: ptr.To(gatewayv1.Namespace(Namespace)), // Cross-namespace reference
+										Port:      ptr.To(gatewayv1.PortNumber(8443)),
 									},
-									Weight: func() *int32 { w := int32(1); return &w }(),
+									Weight: ptr.To(int32(1)),
 								},
 							},
 						},
@@ -1060,8 +1060,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Kind:               "Notebook",
 						Name:               Name,
 						UID:                notebook.UID,
-						Controller:         &[]bool{true}[0],
-						BlockOwnerDeletion: &[]bool{true}[0],
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
 					},
 				},
 			},
