@@ -1480,6 +1480,93 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("Cleaning up the test notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
 		})
+
+		It("Should clean up all kube-rbac-proxy resources when annotation is removed", func() {
+			By("Creating a notebook with kube-rbac-proxy initially")
+			notebookName := Name + "-cleanup-all"
+			notebook := createNotebookWithKubeRbacProxy(notebookName, Namespace)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("Verifying kube-rbac-proxy Service is created")
+			service := &corev1.Service{}
+			serviceKey := types.NamespacedName{Name: notebookName + KubeRbacProxyServiceSuffix, Namespace: Namespace}
+			Eventually(func() error {
+				return cli.Get(ctx, serviceKey, service)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying kube-rbac-proxy ConfigMap is created")
+			configMap := &corev1.ConfigMap{}
+			configMapKey := types.NamespacedName{Name: notebookName + KubeRbacProxyConfigSuffix, Namespace: Namespace}
+			Eventually(func() error {
+				return cli.Get(ctx, configMapKey, configMap)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying kube-rbac-proxy ClusterRoleBinding is created")
+			clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
+			clusterRoleBindingName := fmt.Sprintf("%s-rbac-%s-auth-delegator", notebookName, Namespace)
+			clusterRoleBindingKey := types.NamespacedName{Name: clusterRoleBindingName}
+			Eventually(func() error {
+				return cli.Get(ctx, clusterRoleBindingKey, clusterRoleBinding)
+			}, duration, interval).Should(Succeed())
+
+			By("Verifying the notebook has kube-rbac-proxy sidecar container")
+			notebookKey := types.NamespacedName{Name: notebookName, Namespace: Namespace}
+			Eventually(func() (int, error) {
+				err := cli.Get(ctx, notebookKey, notebook)
+				if err != nil {
+					return 0, err
+				}
+				return len(notebook.Spec.Template.Spec.Containers), nil
+			}, duration, interval).Should(Equal(2))
+
+			By("Updating the notebook to remove the inject-auth annotation")
+			Expect(cli.Get(ctx, notebookKey, notebook)).Should(Succeed())
+			delete(notebook.Annotations, AnnotationInjectAuth)
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+
+			By("Verifying the kube-rbac-proxy Service is deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, serviceKey, service)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue())
+
+			By("Verifying the kube-rbac-proxy ConfigMap is deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, configMapKey, configMap)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue())
+
+			By("Verifying the kube-rbac-proxy ClusterRoleBinding is deleted")
+			Eventually(func() bool {
+				err := cli.Get(ctx, clusterRoleBindingKey, clusterRoleBinding)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue())
+
+			By("Verifying the kube-rbac-proxy sidecar container is removed")
+			Eventually(func() (int, error) {
+				err := cli.Get(ctx, notebookKey, notebook)
+				if err != nil {
+					return 0, err
+				}
+				return len(notebook.Spec.Template.Spec.Containers), nil
+			}, duration, interval).Should(Equal(1))
+
+			By("Verifying the kube-rbac-proxy volumes are removed")
+			Eventually(func() bool {
+				err := cli.Get(ctx, notebookKey, notebook)
+				if err != nil {
+					return false
+				}
+				volumeNames := make(map[string]bool)
+				for _, volume := range notebook.Spec.Template.Spec.Volumes {
+					volumeNames[volume.Name] = true
+				}
+				return !volumeNames[KubeRbacProxyConfigVolumeName] && !volumeNames[KubeRbacProxyTLSCertsVolumeName]
+			}, duration, interval).Should(BeTrue())
+
+			By("Cleaning up the test notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+		})
 	})
 
 	When("Creating a Notebook without kube-rbac-proxy proxy injection", func() {

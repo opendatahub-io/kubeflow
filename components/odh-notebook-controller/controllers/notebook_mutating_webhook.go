@@ -173,6 +173,42 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 	return config, nil
 }
 
+// RemoveKubeRbacProxy removes the kube-rbac-proxy sidecar container and associated volumes
+// from the Notebook spec when auth is disabled
+func RemoveKubeRbacProxy(notebook *nbv1.Notebook) {
+	// Remove the kube-rbac-proxy container
+	notebookContainers := &notebook.Spec.Template.Spec.Containers
+	for index, container := range *notebookContainers {
+		if container.Name == ContainerNameKubeRbacProxy {
+			*notebookContainers = append((*notebookContainers)[:index], (*notebookContainers)[index+1:]...)
+			break
+		}
+	}
+
+	// Remove the kube-rbac-proxy config volume
+	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
+	for index, volume := range *notebookVolumes {
+		if volume.Name == KubeRbacProxyConfigVolumeName {
+			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
+			break
+		}
+	}
+
+	// Remove the TLS certificates volume
+	for index, volume := range *notebookVolumes {
+		if volume.Name == KubeRbacProxyTLSCertsVolumeName {
+			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
+			break
+		}
+	}
+
+	// Reset service account name to default if it was set to notebook name for kube-rbac-proxy
+	// Only reset if it matches the notebook name (which indicates it was set by kube-rbac-proxy)
+	if notebook.Spec.Template.Spec.ServiceAccountName == notebook.Name {
+		notebook.Spec.Template.Spec.ServiceAccountName = ""
+	}
+}
+
 // InjectKubeRbacProxy injects the kube-rbac-proxy proxy sidecar container in the Notebook
 // spec
 func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacProxyConfig) error {
@@ -455,6 +491,9 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
+	} else {
+		// Remove kube-rbac-proxy sidecar and volumes if annotation is not present
+		RemoveKubeRbacProxy(notebook)
 	}
 
 	// If cluster-wide-proxy is enabled, and INJECT_CLUSTER_PROXY_ENV is set to true,

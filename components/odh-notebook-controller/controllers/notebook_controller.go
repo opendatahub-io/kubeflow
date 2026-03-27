@@ -475,8 +475,18 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 
-		// Clean up any existing kube-rbac-proxy ClusterRoleBinding when switching away from auth mode
+		// Clean up any existing kube-rbac-proxy resources when switching away from auth mode
 		err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		err = r.CleanupKubeRbacProxyService(notebook, ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		err = r.CleanupKubeRbacProxyConfigMap(notebook, ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
