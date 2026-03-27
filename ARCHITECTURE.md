@@ -258,3 +258,10 @@ This fork tracks `kubeflow/kubeflow` and periodically rebases (see
 [REBASE.md](./REBASE.md)). The upstream `notebook-controller` is kept as close
 to upstream as possible, while `odh-notebook-controller` contains all
 ODH/RHOAI-specific extensions.
+
+## Related Documentation
+
+- [Workbenches Architecture (ADR repo)](https://github.com/opendatahub-io/architecture-decision-records/tree/main/documentation/components/workbenches) —
+  product-level overview of the full Workbenches component, including notebook
+  image flavors (CPU/CUDA/ROCm variants), the image build chain hierarchy,
+  RStudio support, Elyra, and Pipeline runtimes.
