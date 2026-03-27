@@ -2,11 +2,9 @@ package e2e
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -98,57 +96,6 @@ func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name 
 	})
 
 	return nbNetworkPolicy, err
-}
-
-func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Response, error) {
-	nbHTTPRoute, err := tc.getNotebookHTTPRoute(&nbMeta)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the Gateway hostname from the Gateway resource
-	// since HTTPRoute doesn't have hostnames set by our controller
-	var hostname string
-	if len(nbHTTPRoute.Spec.Hostnames) > 0 {
-		// Use hostname from HTTPRoute if available
-		hostname = string(nbHTTPRoute.Spec.Hostnames[0])
-	} else {
-		// Try to get hostname from the Gateway resource
-		gatewayName := string(nbHTTPRoute.Spec.ParentRefs[0].Name)
-		gatewayNamespace := string(*nbHTTPRoute.Spec.ParentRefs[0].Namespace)
-
-		gateway := &gatewayv1.Gateway{}
-		err := tc.customClient.Get(tc.ctx, client.ObjectKey{
-			Name:      gatewayName,
-			Namespace: gatewayNamespace,
-		}, gateway)
-		if err != nil {
-			return nil, fmt.Errorf("unable to get Gateway %s/%s: %v", gatewayNamespace, gatewayName, err)
-		}
-
-		// Extract hostname from Gateway status or use a default
-		if len(gateway.Status.Addresses) > 0 {
-			hostname = gateway.Status.Addresses[0].Value
-		} else {
-			// If no hostname is available, skip the traffic test
-			return nil, fmt.Errorf("no hostname available in Gateway %s/%s status", gatewayNamespace, gatewayName)
-		}
-	}
-
-	notebookEndpoint := "https://" + hostname + "/notebook/" +
-		nbMeta.Namespace + "/" + nbMeta.Name + "/api"
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	httpClient := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest("GET", notebookEndpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return httpClient.Do(req)
 }
 
 func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
