@@ -537,8 +537,24 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 		configMap := &corev1.ConfigMap{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
 			// if configmap odh-trusted-ca-bundle is not found,
-			// no need to create the workbench-trusted-ca-bundle
+			// clean up the workbench-trusted-ca-bundle ConfigMap if it exists
 			if apierrs.IsNotFound(err) && configMapName == OdhConfigMapName {
+				workbenchConfigMap := &corev1.ConfigMap{}
+				err := r.Get(ctx, client.ObjectKey{
+					Namespace: notebook.Namespace,
+					Name:      "workbench-trusted-ca-bundle",
+				}, workbenchConfigMap)
+				if err == nil {
+					// ConfigMap exists, delete it
+					log.Info("Deleting workbench-trusted-ca-bundle ConfigMap as source CA bundle is not found")
+					if err := r.Delete(ctx, workbenchConfigMap); err != nil {
+						log.Error(err, "Unable to delete workbench-trusted-ca-bundle ConfigMap")
+						return err
+					}
+					log.Info("Deleted workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace)
+				} else if !apierrs.IsNotFound(err) {
+					log.Info("Unable to check workbench-trusted-ca-bundle ConfigMap existence, skipping cleanup", "error", err)
+				}
 				return nil
 			}
 			log.Info("Unable to fetch ConfigMap", "configMap", configMapName)

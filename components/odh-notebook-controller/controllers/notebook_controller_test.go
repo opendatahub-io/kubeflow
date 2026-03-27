@@ -784,6 +784,129 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
 			}, duration, interval).Should(Succeed())
 		})
+
+		It("Should cleanup workbench-trusted-ca-bundle when odh-trusted-ca-bundle is removed", func() {
+			logger := logr.Discard()
+
+			By("By creating odh-trusted-ca-bundle ConfigMap")
+			trustedCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "odh-trusted-ca-bundle",
+					Namespace: "default",
+					Labels: map[string]string{
+						"config.openshift.io/inject-trusted-cabundle": "true",
+					},
+				},
+				Data: map[string]string{
+					"ca-bundle.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\n" +
+						"MzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n" +
+						"35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\n" +
+						"dNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n" +
+						"-----END CERTIFICATE-----",
+					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\n" +
+						"MzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n" +
+						"0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\n" +
+						"AxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n" +
+						"-----END CERTIFICATE-----",
+				},
+			}
+
+			serviceCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openshift-service-ca.crt",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"service-ca.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\n" +
+						"NjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\n" +
+						"j8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\n" +
+						"BBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\n" +
+						"ZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\n" +
+						"B8i0efvecoLP/mqmXNyl7KgTnC4D\n" +
+						"-----END CERTIFICATE-----",
+				},
+			}
+
+			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
+			Expect(cli.Create(ctx, serviceCACertBundle)).Should(Succeed())
+
+			By("By creating a new Notebook")
+			cleanupTestName := "test-notebook-cleanup-cert"
+			notebook := createNotebook(cleanupTestName, Namespace)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("By verifying workbench-trusted-ca-bundle is created")
+			configMapName := "workbench-trusted-ca-bundle"
+			Eventually(func() error {
+				return checkCertConfigMapWithError(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
+			}, duration, interval).Should(Succeed())
+
+			By("By deleting odh-trusted-ca-bundle ConfigMap")
+			Expect(cli.Delete(ctx, trustedCACertBundle)).Should(Succeed())
+
+			By("By verifying workbench-trusted-ca-bundle is deleted")
+			Eventually(func() bool {
+				workbenchConfigMap := &corev1.ConfigMap{}
+				err := cli.Get(ctx, types.NamespacedName{
+					Name:      configMapName,
+					Namespace: notebook.Namespace,
+				}, workbenchConfigMap)
+				return apierrors.IsNotFound(err)
+			}, duration, interval).Should(BeTrue())
+
+			By("By verifying notebook has cert env variables and volumes removed")
+			Eventually(func() bool {
+				updatedNotebook := &nbv1.Notebook{}
+				err := cli.Get(ctx, types.NamespacedName{
+					Name:      notebook.Name,
+					Namespace: notebook.Namespace,
+				}, updatedNotebook)
+				if err != nil {
+					return false
+				}
+
+				// Check that cert-related env variables are removed
+				certEnvVars := []string{
+					"PIP_CERT",
+					"REQUESTS_CA_BUNDLE",
+					"SSL_CERT_FILE",
+					"PIPELINES_SSL_SA_CERTS",
+					"GIT_SSL_CAINFO",
+					"KF_PIPELINES_SSL_SA_CERTS",
+				}
+				for _, container := range updatedNotebook.Spec.Template.Spec.Containers {
+					if container.Name == notebook.Name {
+						for _, env := range container.Env {
+							for _, certEnvVar := range certEnvVars {
+								if env.Name == certEnvVar {
+									return false
+								}
+							}
+						}
+					}
+				}
+
+				// Check that trusted-ca volume is removed
+				for _, volume := range updatedNotebook.Spec.Template.Spec.Volumes {
+					if volume.Name == "trusted-ca" {
+						return false
+					}
+				}
+
+				return true
+			}, duration, interval).Should(BeTrue())
+
+			// Clean up
+			if err := cli.Delete(ctx, notebook); err != nil {
+				logger.Info("Error occurred during deletion of Notebook", "error", err)
+			}
+			if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
+				logger.Info("Error occurred during deletion of ConfigMap", "error", err)
+			}
+		})
 	})
 
 	When("Creating a Notebook, test Networkpolicies", func() {
