@@ -315,7 +315,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 					By("Checking telemetry events")
 					Expect(tracings.TraceProvider.ForceFlush(ctx)).To(Succeed())
 					spans := tracings.SpanExporter.GetSpans()
-					events := make([]string, 0)
+					events := make([]string, 0, len(spans))
 					for _, span := range spans {
 						for _, event := range span.Events {
 							events = append(events, event.Name)
@@ -372,7 +372,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 			var kubeRbacProxyContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "kube-rbac-proxy" {
+				if container.Name == ContainerNameKubeRbacProxy {
 					kubeRbacProxyContainer = container
 					found = true
 					break
@@ -392,7 +392,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 
 			// Verify ports configuration
 			Expect(kubeRbacProxyContainer.Ports).To(HaveLen(1))
-			Expect(kubeRbacProxyContainer.Ports[0].Name).To(Equal("kube-rbac-proxy"))
+			Expect(kubeRbacProxyContainer.Ports[0].Name).To(Equal(KubeRbacProxyServicePortName))
 			Expect(kubeRbacProxyContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
 
 			// Verify volume mounts
@@ -473,7 +473,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 			var kubeRbacProxyContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "kube-rbac-proxy" {
+				if container.Name == ContainerNameKubeRbacProxy {
 					kubeRbacProxyContainer = container
 					found = true
 					break
@@ -544,7 +544,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 			// Verify no kube-rbac-proxy container was added on failure
 			kubeRbacProxyContainerFound := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "kube-rbac-proxy" {
+				if container.Name == ContainerNameKubeRbacProxy {
 					kubeRbacProxyContainerFound = true
 					break
 				}
@@ -584,7 +584,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 									Image: "test-image",
 								},
 								{
-									Name:  "kube-rbac-proxy",
+									Name:  ContainerNameKubeRbacProxy,
 									Image: "old-rbac-image",
 									Args:  []string{"--old-arg=value"},
 									Resources: corev1.ResourceRequirements{
@@ -632,7 +632,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 			var kubeRbacProxyContainer corev1.Container
 			found := false
 			for _, container := range notebook.Spec.Template.Spec.Containers {
-				if container.Name == "kube-rbac-proxy" {
+				if container.Name == ContainerNameKubeRbacProxy {
 					kubeRbacProxyContainer = container
 					found = true
 					break
@@ -656,7 +656,7 @@ var _ = Describe("kube-rbac-proxy Resource Configuration Integration", func() {
 
 			// Verify ports were replaced with kube-rbac-proxy port
 			Expect(kubeRbacProxyContainer.Ports).To(HaveLen(1))
-			Expect(kubeRbacProxyContainer.Ports[0].Name).To(Equal("kube-rbac-proxy"))
+			Expect(kubeRbacProxyContainer.Ports[0].Name).To(Equal(KubeRbacProxyServicePortName))
 			Expect(kubeRbacProxyContainer.Ports[0].ContainerPort).To(Equal(int32(8443)))
 
 			// Verify volumes were properly managed (existing volumes updated/replaced as needed)

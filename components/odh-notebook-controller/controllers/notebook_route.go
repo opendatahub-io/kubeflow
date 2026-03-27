@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
@@ -117,7 +118,7 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 								BackendObjectReference: gatewayv1.BackendObjectReference{
 									Name:      gatewayv1.ObjectName(notebook.Name),
 									Namespace: (*gatewayv1.Namespace)(&notebook.Namespace), // Cross-namespace reference
-									Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									Port:      ptr.To(gatewayv1.PortNumber(8888)),
 								},
 							},
 						},
