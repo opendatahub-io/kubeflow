@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -251,9 +250,7 @@ func TestNotebookIsIdle(t *testing.T) {
 	for _, c := range testCases {
 		t.Run(c.testName, func(t *testing.T) {
 			for envVar, val := range c.env {
-				if err := os.Setenv(envVar, val); err != nil {
-					t.Fatalf("Failed to set env var %s: %v", envVar, err)
-				}
+				t.Setenv(envVar, val)
 			}
 			if err := initGlobalVars(); err != nil {
 				t.Fatalf("Failed to initialize global vars: %v", err)
