@@ -94,6 +94,10 @@ const (
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 
 	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
+
+	// RHOAIENG-12325: Certificate mount path constants
+	TrustedCACertsMountPath = "/etc/pki/tls/custom-certs"
+	TrustedCACertFileName   = "ca-bundle.crt"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -645,12 +649,12 @@ func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 
 			for key, val := range proxyEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if Proxy spec is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -734,22 +738,24 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 
 func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	configVolumeName := "trusted-ca"
-	configMapMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
-	configMapMountKey := "ca-bundle.crt"
-	configMapMountValue := "ca-bundle.crt"
+	// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates.
+	// Kubernetes does not propagate ConfigMap updates when using subPath mounts.
+	// Environment variables point to the certificate file inside the mounted directory
+	certFilePath := TrustedCACertsMountPath + "/" + TrustedCACertFileName
 	configEnvVars := map[string]string{
-		"PIP_CERT":                  configMapMountPath,
-		"REQUESTS_CA_BUNDLE":        configMapMountPath,
-		"SSL_CERT_FILE":             configMapMountPath,
-		"PIPELINES_SSL_SA_CERTS":    configMapMountPath,
-		"KF_PIPELINES_SSL_SA_CERTS": configMapMountPath,
-		"GIT_SSL_CAINFO":            configMapMountPath,
+		"PIP_CERT":                  certFilePath,
+		"REQUESTS_CA_BUNDLE":        certFilePath,
+		"SSL_CERT_FILE":             certFilePath,
+		"PIPELINES_SSL_SA_CERTS":    certFilePath,
+		"KF_PIPELINES_SSL_SA_CERTS": certFilePath,
+		"GIT_SSL_CAINFO":            certFilePath,
 	}
 
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	var imgContainer corev1.Container
 
 	// Add trusted-ca volume
+	// RHOAIENG-12325: Mount entire ConfigMap without Items to enable auto-updates
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
 	certVolumeExists := false
 	certVolume := corev1.Volume{
@@ -760,11 +766,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 					Name: configMapName,
 				},
 				Optional: ptr.To(true),
-				Items: []corev1.KeyToPath{{
-					Key:  configMapMountKey,
-					Path: configMapMountValue,
-				},
-				},
+				// Items removed - mount all keys to enable automatic updates
 			},
 		},
 	}
@@ -788,12 +790,12 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 
 			for key, val := range configEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if env value is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -809,13 +811,14 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 			}
 
 			// Create Volume mount
+			// RHOAIENG-12325: Remove SubPath to enable ConfigMap auto-updates
 			volumeMountExists := false
 			containerVolMounts := &imgContainer.VolumeMounts
 			trustedCAVolMount := corev1.VolumeMount{
 				Name:      configVolumeName,
 				ReadOnly:  true,
-				MountPath: configMapMountPath,
-				SubPath:   configMapMountValue,
+				MountPath: TrustedCACertsMountPath,
+				// SubPath removed - mount directory instead of file to enable auto-updates
 			}
 
 			for index, volumeMount := range *containerVolMounts {
