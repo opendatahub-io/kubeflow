@@ -366,3 +366,56 @@ func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyClusterRoleBinding(not
 	log.Info("Successfully deleted kube-rbac-proxy ClusterRoleBinding", "clusterRoleBinding", clusterRoleBindingName)
 	return nil
 }
+
+// CleanupKubeRbacProxyService removes the kube-rbac-proxy Service when auth is disabled
+func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyService(notebook *nbv1.Notebook, ctx context.Context) error {
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	serviceName := notebook.Name + KubeRbacProxyServiceSuffix
+	err := r.Delete(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: notebook.Namespace,
+		},
+	})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("kube-rbac-proxy Service already deleted", "service", serviceName)
+			return nil
+		}
+		log.Error(err, "Unable to delete kube-rbac-proxy Service", "service", serviceName)
+		return err
+	}
+
+	log.Info("Successfully deleted kube-rbac-proxy Service", "service", serviceName)
+	return nil
+}
+
+// CleanupKubeRbacProxyConfigMap removes the kube-rbac-proxy ConfigMap when auth is disabled
+func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyConfigMap(
+	notebook *nbv1.Notebook,
+	ctx context.Context,
+) error {
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	configMapName := notebook.Name + KubeRbacProxyConfigSuffix
+	err := r.Delete(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName,
+			Namespace: notebook.Namespace,
+		},
+	})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			log.Info("kube-rbac-proxy ConfigMap already deleted", "configMap", configMapName)
+			return nil
+		}
+		log.Error(err, "Unable to delete kube-rbac-proxy ConfigMap", "configMap", configMapName)
+		return err
+	}
+
+	log.Info("Successfully deleted kube-rbac-proxy ConfigMap", "configMap", configMapName)
+	return nil
+}
