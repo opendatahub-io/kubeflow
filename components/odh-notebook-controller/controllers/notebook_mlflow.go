@@ -101,14 +101,28 @@ func removeNotebookContainerEnvVar(notebook *nbv1.Notebook, envVarName string) {
 // The path component is derived from the mlflow instance name:
 //   - if instanceName == "mlflow" -> "/mlflow"
 //   - otherwise -> "/mlflow-<instanceName>"
-func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName string) (string, error) {
-	gatewayInstance, err := getGatewayInstance(ctx, k8sClient, log)
-	if err != nil {
-		return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
-	}
-	hostname := getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
-	if hostname == "" {
-		return "", fmt.Errorf("unable to determine hostname for MLflow tracking URI")
+//
+// If gatewayURL is provided (configured at startup via GATEWAY_URL env var),
+// it will be used as the hostname directly, bypassing the Gateway instance lookup.
+func getMLflowTrackingURI(
+	ctx context.Context, k8sClient client.Client, log logr.Logger, instanceName, gatewayURL string,
+) (string, error) {
+	var hostname string
+
+	// Check if gateway-url is configured
+	if gatewayURL != "" {
+		log.Info("Using configured gateway-url for MLflow tracking URI", "gatewayURL", gatewayURL)
+		hostname = gatewayURL
+	} else {
+		// Fall back to fetching hostname from Gateway instance
+		gatewayInstance, err := getGatewayInstance(ctx, k8sClient, log)
+		if err != nil {
+			return "", fmt.Errorf("failed to get Gateway instance for MLflow tracking URI: %w", err)
+		}
+		hostname = getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
+		if hostname == "" {
+			return "", fmt.Errorf("unable to determine hostname for MLflow tracking URI")
+		}
 	}
 
 	// Construct the path segment for the tracking URI
@@ -117,7 +131,13 @@ func getMLflowTrackingURI(ctx context.Context, k8sClient client.Client, log logr
 		pathSegment = fmt.Sprintf("%s-%s", MLflowIdentifier, instanceName)
 	}
 
-	trackingURI := fmt.Sprintf("https://%s/%s", hostname, pathSegment)
+	// Check if hostname already has a scheme, if not prepend https://
+	var trackingURI string
+	if strings.HasPrefix(hostname, "https://") || strings.HasPrefix(hostname, "http://") {
+		trackingURI = fmt.Sprintf("%s/%s", hostname, pathSegment)
+	} else {
+		trackingURI = fmt.Sprintf("https://%s/%s", hostname, pathSegment)
+	}
 	return trackingURI, nil
 }
 
@@ -159,13 +179,17 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowRoleBinding(notebook *nbv1.
 	ownerRefsDiffer := !equality.Semantic.DeepEqual(desiredRoleBinding.OwnerReferences, foundRoleBinding.OwnerReferences)
 	needsUpdate := subjectsDiffer || labelsDiffer || ownerRefsDiffer
 	if needsUpdate {
-		log.Info("Updating MLflow RoleBinding", "RoleBinding.Namespace", foundRoleBinding.Namespace, "RoleBinding.Name", foundRoleBinding.Name)
+		log.Info("Updating MLflow RoleBinding",
+			"RoleBinding.Namespace", foundRoleBinding.Namespace,
+			"RoleBinding.Name", foundRoleBinding.Name)
 		foundRoleBinding.Subjects = desiredRoleBinding.Subjects
 		foundRoleBinding.Labels = desiredRoleBinding.Labels
 		foundRoleBinding.OwnerReferences = desiredRoleBinding.OwnerReferences
 		err = r.Update(ctx, foundRoleBinding)
 		if err != nil {
-			log.Error(err, "Failed to update MLflow RoleBinding", "RoleBinding.Namespace", foundRoleBinding.Namespace, "RoleBinding.Name", foundRoleBinding.Name)
+			log.Error(err, "Failed to update MLflow RoleBinding",
+				"RoleBinding.Namespace", foundRoleBinding.Namespace,
+				"RoleBinding.Name", foundRoleBinding.Name)
 			return err
 		}
 	}
@@ -209,7 +233,9 @@ func (r *OpenshiftNotebookReconciler) CleanupMLflowRoleBinding(notebook *nbv1.No
 // Unlike other sub-reconcilers that return only error, this returns (ctrl.Result, error) because
 // it needs to express "retry later" when the MLflow ClusterRole doesn't exist yet — OpenShift
 // rejects RoleBindings that reference a non-existent ClusterRole.
-func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.Notebook, ctx context.Context) (ctrl.Result, error) {
+func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(
+	notebook *nbv1.Notebook, ctx context.Context,
+) (ctrl.Result, error) {
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 	// Only reconcile RoleBinding when the notebook has the mlflow instance annotation defined (non-empty)
 	if _, ok := getMLflowInstanceAnnotation(notebook); !ok {
@@ -246,6 +272,9 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 // HandleMLflowEnvVars handles MLflow-related environment variables in the notebook container.
 // This function should be called from the webhook to ensure the env vars are available immediately.
 //
+// The gatewayURL parameter is the pre-configured gateway URL (from startup env var).
+// If empty, the function will fall back to looking up the Gateway instance.
+//
 // It may set the following environment variables:
 //   - MLFLOW_K8S_INTEGRATION: set to 'true' when the 'opendatahub.io/mlflow-instance'
 //     annotation is present and non-empty. If the annotation is absent or empty, this
@@ -255,16 +284,15 @@ func (r *OpenshiftNotebookReconciler) ReconcileMLflowIntegration(notebook *nbv1.
 //     namespace-scoped authentication.
 //   - MLFLOW_TRACKING_URI: set when the 'opendatahub.io/mlflow-instance' annotation
 //     contains a non-empty instance name and a tracking URI can be determined.
-func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) {
+func HandleMLflowEnvVars(
+	ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger, gatewayURL string,
+) {
 	// Determine mlflow instance annotation (if present)
 	instanceName, instanceEnabled := getMLflowInstanceAnnotation(notebook)
 
 	// Only inject MLflow env vars when the mlflow-instance annotation is present (non-empty).
 	if !instanceEnabled {
-		// Ensure all MLflow vars are removed when not enabled
-		removeNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar)
-		removeNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar)
-		removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
+		CleanupMLflowEnvVars(notebook)
 		return
 	}
 
@@ -279,7 +307,7 @@ func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.
 	}
 
 	// Integration is enabled - try to get and set the tracking URI
-	trackingURI, err := getMLflowTrackingURI(ctx, cli, log, instanceName)
+	trackingURI, err := getMLflowTrackingURI(ctx, cli, log, instanceName, gatewayURL)
 	if err != nil {
 		log.Error(err, "Unable to determine MLflow tracking URI, skipping injection")
 		// Don't fail webhook - just skip MLflow integration
@@ -288,7 +316,15 @@ func HandleMLflowEnvVars(ctx context.Context, cli client.Client, notebook *nbv1.
 	}
 
 	// Set the tracking URI
-	if err = setNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar, trackingURI); err != nil {
-		log.Error(err, "Notebook image container not found, skipping MLflow tracking URI injection")
+	if err := setNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar, trackingURI); err != nil {
+		log.Error(err, "Notebook image container not found, skipping MLflow tracking URI env var injection")
 	}
+}
+
+// CleanupMLflowEnvVars removes all MLflow-related environment variables from the notebook.
+// Called when the mlflow-instance annotation is removed from a notebook.
+func CleanupMLflowEnvVars(notebook *nbv1.Notebook) {
+	removeNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar)
+	removeNotebookContainerEnvVar(notebook, MLflowTrackingAuthEnvVar)
+	removeNotebookContainerEnvVar(notebook, MLflowTrackingURIEnvVar)
 }

@@ -87,6 +87,9 @@ type OpenshiftNotebookReconciler struct {
 	Log           logr.Logger
 	Config        *rest.Config
 	EventRecorder record.EventRecorder
+	// MLflow configuration (read once at startup from env vars)
+	MLflowEnabled bool
+	GatewayURL    string
 }
 
 // ClusterRole permissions
@@ -488,16 +491,21 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	// Call the MLflow integration reconciler
-	// This will reconcile RoleBinding based on the MLflow integration annotation
-	// Note: RoleBinding cleanup is handled automatically via ownerReference, no finalizer needed
-	mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
-	if err != nil {
-		log.Error(err, "Unable to reconcile MLflow integration")
-		return ctrl.Result{}, err
-	}
-	if mlflowResult.RequeueAfter > 0 {
-		return mlflowResult, nil
+	// Reconcile MLflow integration (RoleBinding based on mlflow-instance annotation).
+	//
+	// MLflowEnabled=false intentionally skips cleanup of existing notebooks.
+	// OwnerReferences on RoleBindings ensure they are garbage-collected when
+	// the notebook is deleted. To revoke access immediately from a running
+	// notebook, remove the opendatahub.io/mlflow-instance annotation.
+	if r.MLflowEnabled {
+		mlflowResult, err := r.ReconcileMLflowIntegration(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Unable to reconcile MLflow integration")
+			return ctrl.Result{}, err
+		}
+		if mlflowResult.RequeueAfter > 0 {
+			return mlflowResult, nil
+		}
 	}
 
 	// Remove the reconciliation lock annotation

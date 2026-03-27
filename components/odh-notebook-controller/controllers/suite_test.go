@@ -219,6 +219,8 @@ var _ = BeforeSuite(func() {
 		Namespace:     odhNotebookControllerTestNamespace,
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		MLflowEnabled: true,
+		GatewayURL:    "gateway.example.com",
 	}).SetupWithManager(mgr)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -233,7 +235,9 @@ var _ = BeforeSuite(func() {
 			KubeRbacProxyConfig: KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
 			},
-			Decoder: admission.NewDecoder(mgr.GetScheme()),
+			Decoder:       admission.NewDecoder(mgr.GetScheme()),
+			MLflowEnabled: true,
+			GatewayURL:    "gateway.example.com",
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)

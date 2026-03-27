@@ -62,6 +62,9 @@ type NotebookWebhook struct {
 	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
 	Namespace string
+	// MLflow configuration (read once at startup from env vars)
+	MLflowEnabled bool
+	GatewayURL    string
 }
 
 var proxyEnvVars = make(map[string]string, 3)
@@ -444,8 +447,14 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			unmountFeastConfig(notebook)
 		}
 
-		// Handle MLflow environment variables (ODH integration flag and tracking URI)
-		HandleMLflowEnvVars(ctx, w.Client, notebook, log)
+		// Handle MLflow environment variables (ODH integration flag and tracking URI).
+		//
+		// MLflowEnabled=false intentionally skips cleanup of existing notebooks.
+		// Env vars are already baked into running pods; to revoke access immediately,
+		// remove the opendatahub.io/mlflow-instance annotation from the notebook.
+		if w.MLflowEnabled {
+			HandleMLflowEnvVars(ctx, w.Client, notebook, log, w.GatewayURL)
+		}
 	}
 
 	// Inject the kube-rbac-proxy if the annotation is present
