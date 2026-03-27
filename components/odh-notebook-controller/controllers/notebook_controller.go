@@ -132,6 +132,25 @@ func KubeRbacProxyInjectionIsEnabled(meta metav1.ObjectMeta) bool {
 	}
 }
 
+// PodTemplateHasKubeRbacProxy checks if the notebook pod template contains kube-rbac-proxy artifacts
+func PodTemplateHasKubeRbacProxy(notebook *nbv1.Notebook) bool {
+	// Check for kube-rbac-proxy container
+	for _, container := range notebook.Spec.Template.Spec.Containers {
+		if container.Name == "kube-rbac-proxy" {
+			return true
+		}
+	}
+
+	// Check for kube-rbac-proxy volumes
+	for _, volume := range notebook.Spec.Template.Spec.Volumes {
+		if volume.Name == "kube-rbac-proxy-config" || volume.Name == "kube-rbac-proxy-tls-certificates" {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ReconciliationLockIsEnabled returns true if the reconciliation lock
 // annotation is present in the notebook.
 func ReconciliationLockIsEnabled(meta metav1.ObjectMeta) bool {
@@ -475,20 +494,23 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 
-		// Clean up any existing kube-rbac-proxy resources when switching away from auth mode
-		err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+		// Clean up any existing kube-rbac-proxy resources only if they exist in the pod template
+		// This ensures we only cleanup when transitioning from auth→off and the sidecar has been removed
+		if !PodTemplateHasKubeRbacProxy(notebook) {
+			err = r.CleanupKubeRbacProxyClusterRoleBinding(notebook, ctx)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 
-		err = r.CleanupKubeRbacProxyService(notebook, ctx)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+			err = r.CleanupKubeRbacProxyService(notebook, ctx)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 
-		err = r.CleanupKubeRbacProxyConfigMap(notebook, ctx)
-		if err != nil {
-			return ctrl.Result{}, err
+			err = r.CleanupKubeRbacProxyConfigMap(notebook, ctx)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 
 		// Call the regular HTTPRoute reconciler (see notebook_route.go file)

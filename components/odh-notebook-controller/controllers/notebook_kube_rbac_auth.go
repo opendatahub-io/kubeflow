@@ -393,7 +393,10 @@ func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyService(notebook *nbv1
 }
 
 // CleanupKubeRbacProxyConfigMap removes the kube-rbac-proxy ConfigMap when auth is disabled
-func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyConfigMap(notebook *nbv1.Notebook, ctx context.Context) error {
+func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyConfigMap(
+	notebook *nbv1.Notebook,
+	ctx context.Context,
+) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 

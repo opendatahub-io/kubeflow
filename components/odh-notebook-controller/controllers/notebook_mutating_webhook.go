@@ -176,11 +176,14 @@ func parseAndValidateAuthSidecarResources(notebook *nbv1.Notebook) (*resourceCon
 // RemoveKubeRbacProxy removes the kube-rbac-proxy sidecar container and associated volumes
 // from the Notebook spec when auth is disabled
 func RemoveKubeRbacProxy(notebook *nbv1.Notebook) {
+	removedProxyArtifacts := false
+
 	// Remove the kube-rbac-proxy container
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	for index, container := range *notebookContainers {
 		if container.Name == ContainerNameKubeRbacProxy {
 			*notebookContainers = append((*notebookContainers)[:index], (*notebookContainers)[index+1:]...)
+			removedProxyArtifacts = true
 			break
 		}
 	}
@@ -190,6 +193,7 @@ func RemoveKubeRbacProxy(notebook *nbv1.Notebook) {
 	for index, volume := range *notebookVolumes {
 		if volume.Name == KubeRbacProxyConfigVolumeName {
 			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
+			removedProxyArtifacts = true
 			break
 		}
 	}
@@ -198,13 +202,14 @@ func RemoveKubeRbacProxy(notebook *nbv1.Notebook) {
 	for index, volume := range *notebookVolumes {
 		if volume.Name == KubeRbacProxyTLSCertsVolumeName {
 			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
+			removedProxyArtifacts = true
 			break
 		}
 	}
 
 	// Reset service account name to default if it was set to notebook name for kube-rbac-proxy
-	// Only reset if it matches the notebook name (which indicates it was set by kube-rbac-proxy)
-	if notebook.Spec.Template.Spec.ServiceAccountName == notebook.Name {
+	// Only reset if we actually removed proxy artifacts and it matches the notebook name
+	if removedProxyArtifacts && notebook.Spec.Template.Spec.ServiceAccountName == notebook.Name {
 		notebook.Spec.Template.Spec.ServiceAccountName = ""
 	}
 }
