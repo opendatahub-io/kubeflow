@@ -164,7 +164,7 @@ func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, centralNamespace
 
 	// Update the backend to point to the kube-rbac-proxy service instead of the main service
 	httpRoute.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(notebook.Name + KubeRbacProxyServiceSuffix)
-	httpRoute.Spec.Rules[0].BackendRefs[0].Port = (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0])
+	httpRoute.Spec.Rules[0].BackendRefs[0].Port = &[]gatewayv1.PortNumber{8443}[0]
 
 	return httpRoute
 }

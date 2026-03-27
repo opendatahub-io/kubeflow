@@ -92,7 +92,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
+									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
 								},
 							},
 						},
@@ -104,7 +104,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
-										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										Port:      &[]gatewayv1.PortNumber{8888}[0],
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -594,7 +594,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
+									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
 								},
 							},
 						},
@@ -606,7 +606,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
-										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										Port:      &[]gatewayv1.PortNumber{8888}[0],
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -1062,7 +1062,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 							{
 								Path: &gatewayv1.HTTPPathMatch{
 									Type:  &pathPrefix,
-									Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + Name}[0]),
+									Value: &[]string{"/notebook/" + Namespace + "/" + Name}[0],
 								},
 							},
 						},
@@ -1074,7 +1074,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
 										Name:      gatewayv1.ObjectName(Name + KubeRbacProxyServiceSuffix),
 										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
-										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8443}[0]),
+										Port:      &[]gatewayv1.PortNumber{8443}[0],
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},

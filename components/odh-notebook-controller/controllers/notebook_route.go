@@ -117,7 +117,7 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 								BackendObjectReference: gatewayv1.BackendObjectReference{
 									Name:      gatewayv1.ObjectName(notebook.Name),
 									Namespace: (*gatewayv1.Namespace)(&notebook.Namespace), // Cross-namespace reference
-									Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									Port:      &[]gatewayv1.PortNumber{8888}[0],
 								},
 							},
 						},
