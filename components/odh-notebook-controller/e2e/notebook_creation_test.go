@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"net/http/httputil"
 	"strings"
 	"testing"
 	"time"
@@ -605,13 +603,4 @@ func (tc *testContext) testNotebookRBACProxySidecarResources(nbMeta *metav1.Obje
 		}
 	}
 	return nil
-}
-
-func errorWithBody(resp *http.Response) error {
-	dump, err := httputil.DumpResponse(resp, false)
-	if err != nil {
-		return err
-	}
-
-	return fmt.Errorf("unexpected response from Notebook Endpoint:\n%+v", string(dump))
 }
