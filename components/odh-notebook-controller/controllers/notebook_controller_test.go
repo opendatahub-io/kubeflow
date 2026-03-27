@@ -798,8 +798,18 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					},
 				},
 				Data: map[string]string{
-					"ca-bundle.crt":     "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\nMzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\ndNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n-----END CERTIFICATE-----",
-					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\nMzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\nAxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n-----END CERTIFICATE-----",
+					"ca-bundle.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI3MzdaFw0yNTExMTMy\n" +
+						"MzI3MzdaMAAwKjAFBgMrZXADIQDEMMlJ1P0gyxEV7A8PgpNosvKZgE4ttDDpu/w9\n" +
+						"35BHzjAFBgMrZXADQQDHT8ulalOcI6P5lGpoRcwLzpa4S/5pyqtbqw2zuj7dIJPI\n" +
+						"dNb1AkbARd82zc9bF+7yDkCNmLIHSlDORUYgTNEL\n" +
+						"-----END CERTIFICATE-----",
+					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\n" +
+						"MzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n" +
+						"0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\n" +
+						"AxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n" +
+						"-----END CERTIFICATE-----",
 				},
 			}
 
@@ -817,7 +827,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(cli.Create(ctx, serviceCACertBundle)).Should(Succeed())
 
 			By("By creating a new Notebook")
-			notebook := createNotebook(Name, Namespace)
+			cleanupTestName := "test-notebook-cleanup-cert"
+			notebook := createNotebook(cleanupTestName, Namespace)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By verifying workbench-trusted-ca-bundle is created")
@@ -851,7 +862,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				}
 
 				// Check that cert-related env variables are removed
-				certEnvVars := []string{"PIP_CERT", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "PIPELINES_SSL_SA_CERTS", "GIT_SSL_CAINFO", "KF_PIPELINES_SSL_SA_CERTS"}
+				certEnvVars := []string{
+					"PIP_CERT",
+					"REQUESTS_CA_BUNDLE",
+					"SSL_CERT_FILE",
+					"PIPELINES_SSL_SA_CERTS",
+					"GIT_SSL_CAINFO",
+					"KF_PIPELINES_SSL_SA_CERTS",
+				}
 				for _, container := range updatedNotebook.Spec.Template.Spec.Containers {
 					if container.Name == notebook.Name {
 						for _, env := range container.Env {
@@ -875,6 +893,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(BeTrue())
 
 			// Clean up
+			if err := cli.Delete(ctx, notebook); err != nil {
+				logger.Info("Error occurred during deletion of Notebook", "error", err)
+			}
 			if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
 				logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 			}

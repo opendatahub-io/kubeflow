@@ -552,6 +552,8 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 						return err
 					}
 					log.Info("Deleted workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace)
+				} else if !apierrs.IsNotFound(err) {
+					log.Info("Unable to check workbench-trusted-ca-bundle ConfigMap existence, skipping cleanup", "error", err)
 				}
 				return nil
 			}
