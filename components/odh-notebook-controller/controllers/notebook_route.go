@@ -117,7 +117,9 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 								BackendObjectReference: gatewayv1.BackendObjectReference{
 									Name:      gatewayv1.ObjectName(notebook.Name),
 									Namespace: (*gatewayv1.Namespace)(&notebook.Namespace), // Cross-namespace reference
-									Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+									// Fix for RHOAIENG-39253: Use Service port (80), not container port (8888)
+									// Gateway API BackendRef.Port must reference the Service's exposed port
+									Port: (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{80}[0]),
 								},
 							},
 						},
@@ -297,7 +299,8 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 			backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
 			isKubeRbacProxyRoute := (backendName == notebook.Name+KubeRbacProxyServiceSuffix) || (backendPort != nil && *backendPort == 8443)
-			isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
+			// Fix for RHOAIENG-39253: Regular routes now use port 80 (Service port)
+			isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 80)
 
 			// Delete conflicting routes:
 			// - If switching TO auth mode, delete regular routes
