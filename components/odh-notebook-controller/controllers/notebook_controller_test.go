@@ -819,7 +819,14 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					Namespace: "default",
 				},
 				Data: map[string]string{
-					"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\nNjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\nj8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\nBBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\nZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\nB8i0efvecoLP/mqmXNyl7KgTnC4D\n-----END CERTIFICATE-----",
+					"service-ca.crt": "-----BEGIN CERTIFICATE-----\n" +
+						"MIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\n" +
+						"NjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\n" +
+						"j8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\n" +
+						"BBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\n" +
+						"ZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\n" +
+						"B8i0efvecoLP/mqmXNyl7KgTnC4D\n" +
+						"-----END CERTIFICATE-----",
 				},
 			}
 
