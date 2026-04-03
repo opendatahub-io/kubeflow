@@ -1,0 +1,74 @@
+---
+name: ODH Kubeflow Release Tag
+
+on:
+  push:
+    branches:
+      - v1.10-branch
+    paths:
+      - ".tekton/odh-notebook-controller-push.yaml"
+      - ".tekton/odh-kf-notebook-controller-push.yaml"
+
+env:
+  REPO_ORG: opendatahub-io
+  REPO_NAME: kubeflow
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, 'chore: release ')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Extract release version
+        id: extract-version
+        run: |
+          # Extract version from tekton output-image tag
+          VERSION=$(grep -oP 'output-image.*odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
+
+          if [ -z "$VERSION" ]; then
+            echo "Failed to extract version from tekton files"
+            exit 1
+          fi
+
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.extract-version.outputs.version }}
+        run: |
+          if gh release view "$VERSION" --repo "$REPO_ORG/$REPO_NAME" &>/dev/null; then
+            echo "Release $VERSION already exists, skipping"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Release $VERSION does not exist, will create"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check-release.outputs.exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.extract-version.outputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            --repo "$REPO_ORG/$REPO_NAME" \
+            --title "$VERSION" \
+            --target "${{ github.sha }}" \
+            --generate-notes
+
+          echo "## Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** https://github.com/$REPO_ORG/$REPO_NAME/releases/tag/$VERSION" >> $GITHUB_STEP_SUMMARY

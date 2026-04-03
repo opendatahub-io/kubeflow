@@ -1,0 +1,185 @@
+---
+name: ODH Kubeflow Release Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      new-image-version:
+        description: "New image version tag for tekton pipeline (e.g., v1.10.0-12)"
+        required: true
+        type: string
+
+env:
+  REPO_ORG: opendatahub-io
+  REPO_NAME: kubeflow
+  RELEASE_BRANCH: v1.10-branch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # Step 1: Sync main -> stable
+  sync-main-to-stable:
+    name: Sync main to stable
+    uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
+    with:
+      source: "main"
+      target: "stable"
+
+  # Step 2: Sync stable -> v1.10-branch
+  sync-stable-to-release:
+    name: Sync stable to release branch
+    needs: sync-main-to-stable
+    uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
+    with:
+      source: "stable"
+      target: "v1.10-branch"
+
+  # Step 3: Update image versions and create PR
+  update-and-create-pr:
+    name: Update image versions and create PR
+    needs: sync-stable-to-release
+    runs-on: ubuntu-latest
+    outputs:
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+      pr_number: ${{ steps.create-pr.outputs.pr_number }}
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_BRANCH }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Extract current tekton image tags
+        id: extract-tags
+        run: |
+          # Extract current output-image tags from tekton push files
+          ODH_TAG=$(grep -oP 'output-image.*odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
+          KF_TAG=$(grep -oP 'output-image.*kubeflow-notebook-controller:\K[^\s"]+' .tekton/odh-kf-notebook-controller-push.yaml)
+
+          echo "Current ODH Notebook Controller tag: $ODH_TAG"
+          echo "Current KF Notebook Controller tag: $KF_TAG"
+
+          echo "odh_tag=$ODH_TAG" >> $GITHUB_OUTPUT
+          echo "kf_tag=$KF_TAG" >> $GITHUB_OUTPUT
+
+      - name: Update params.env and makefile-vars.mk with current tags
+        env:
+          ODH_TAG: ${{ steps.extract-tags.outputs.odh_tag }}
+          KF_TAG: ${{ steps.extract-tags.outputs.kf_tag }}
+        run: |
+          # Update odh-notebook-controller params.env
+          sed -i "s|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:.*|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:${ODH_TAG}|" \
+            components/odh-notebook-controller/config/base/params.env
+
+          # Update notebook-controller params.env (openshift overlay)
+          sed -i "s|odh-kf-notebook-controller-image=quay.io/opendatahub/kubeflow-notebook-controller:.*|odh-kf-notebook-controller-image=quay.io/opendatahub/kubeflow-notebook-controller:${KF_TAG}|" \
+            components/notebook-controller/config/overlays/openshift/params.env
+
+          # Update makefile-vars.mk
+          sed -i "s|KF_TAG ?= .*|KF_TAG ?= ${KF_TAG}|" \
+            components/odh-notebook-controller/makefile-vars.mk
+
+          echo "Updated params files with current tekton tags"
+
+      - name: Update tekton files with new version
+        env:
+          NEW_VERSION: ${{ inputs.new-image-version }}
+        run: |
+          # Update odh-notebook-controller tekton push file
+          sed -i "s|value: quay.io/opendatahub/odh-notebook-controller:.*|value: quay.io/opendatahub/odh-notebook-controller:${NEW_VERSION}|" \
+            .tekton/odh-notebook-controller-push.yaml
+
+          # Update odh-kf-notebook-controller tekton push file
+          sed -i "s|value: quay.io/opendatahub/kubeflow-notebook-controller:.*|value: quay.io/opendatahub/kubeflow-notebook-controller:${NEW_VERSION}|" \
+            .tekton/odh-kf-notebook-controller-push.yaml
+
+          echo "Updated tekton files with new version: ${NEW_VERSION}"
+
+      - name: Show changes
+        run: |
+          echo "=== Changes to be committed ==="
+          git diff
+
+      - name: Create branch and commit changes
+        env:
+          NEW_VERSION: ${{ inputs.new-image-version }}
+        run: |
+          BRANCH_NAME="release/${NEW_VERSION}"
+          git checkout -b "$BRANCH_NAME"
+
+          git add -A
+          git commit -m "chore: release ${NEW_VERSION}
+
+          - Update controller image references to current build
+          - Set tekton pipeline to track ${NEW_VERSION}
+
+          Signed-off-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+
+          git push origin "$BRANCH_NAME"
+
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Create Pull Request
+        id: create-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ inputs.new-image-version }}
+        run: |
+          PR_URL=$(gh pr create \
+            --repo "$REPO_ORG/$REPO_NAME" \
+            --base "$RELEASE_BRANCH" \
+            --head "$branch_name" \
+            --title "chore: release ${NEW_VERSION}" \
+            --body "## Release ${NEW_VERSION}
+
+          This PR prepares the release by:
+
+          1. **Updating controller image references** to the current tekton build tags
+          2. **Setting tekton pipeline** to track \`${NEW_VERSION}\` for future builds
+
+          ### Files Updated
+
+          - \`components/odh-notebook-controller/config/base/params.env\`
+          - \`components/notebook-controller/config/overlays/openshift/params.env\`
+          - \`components/odh-notebook-controller/makefile-vars.mk\`
+          - \`.tekton/odh-notebook-controller-push.yaml\`
+          - \`.tekton/odh-kf-notebook-controller-push.yaml\`
+
+          ### After Merge
+
+          Once this PR is merged, a GitHub release \`${NEW_VERSION}\` will be automatically created.
+
+          ---
+          *Generated by ODH Kubeflow Release Pipeline*")
+
+          PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq '.number')
+
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+          echo "Created PR: $PR_URL"
+
+  summary:
+    name: Release Pipeline Summary
+    needs: update-and-create-pr
+    runs-on: ubuntu-latest
+    steps:
+      - name: Output summary
+        env:
+          PR_URL: ${{ needs.update-and-create-pr.outputs.pr_url }}
+          NEW_VERSION: ${{ inputs.new-image-version }}
+        run: |
+          echo "## ODH Kubeflow Release Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Version: ${NEW_VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review and merge the PR: ${PR_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "2. Once merged, the release will be automatically created" >> $GITHUB_STEP_SUMMARY
