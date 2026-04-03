@@ -31,7 +31,8 @@ jobs:
         id: extract-version
         run: |
           # Extract version from tekton output-image tag
-          VERSION=$(grep -oP 'output-image.*odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
+          # Format: value: quay.io/opendatahub/odh-notebook-controller:TAG
+          VERSION=$(grep -oP 'quay\.io/opendatahub/odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
 
           if [ -z "$VERSION" ]; then
             echo "Failed to extract version from tekton files"

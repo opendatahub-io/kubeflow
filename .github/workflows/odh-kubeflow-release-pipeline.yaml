@@ -51,17 +51,32 @@ jobs:
           ref: ${{ env.RELEASE_BRANCH }}
           fetch-depth: 0
 
+      - name: Fetch latest release branch after sync
+        run: |
+          # Ensure we have the latest v1.10-branch after sync jobs completed
+          git fetch origin ${{ env.RELEASE_BRANCH }}
+          git reset --hard origin/${{ env.RELEASE_BRANCH }}
+          echo "Checked out latest ${{ env.RELEASE_BRANCH }} at $(git rev-parse HEAD)"
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Extract current tekton image tags
+      - name: Extract current tekton image tags from release branch
         id: extract-tags
         run: |
           # Extract current output-image tags from tekton push files
-          ODH_TAG=$(grep -oP 'output-image.*odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
-          KF_TAG=$(grep -oP 'output-image.*kubeflow-notebook-controller:\K[^\s"]+' .tekton/odh-kf-notebook-controller-push.yaml)
+          # Format: value: quay.io/opendatahub/odh-notebook-controller:TAG
+          ODH_TAG=$(grep -oP 'quay\.io/opendatahub/odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
+          KF_TAG=$(grep -oP 'quay\.io/opendatahub/kubeflow-notebook-controller:\K[^\s"]+' .tekton/odh-kf-notebook-controller-push.yaml)
+
+          if [ -z "$ODH_TAG" ] || [ -z "$KF_TAG" ]; then
+            echo "Failed to extract tags from tekton files"
+            echo "ODH_TAG: $ODH_TAG"
+            echo "KF_TAG: $KF_TAG"
+            exit 1
+          fi
 
           echo "Current ODH Notebook Controller tag: $ODH_TAG"
           echo "Current KF Notebook Controller tag: $KF_TAG"
