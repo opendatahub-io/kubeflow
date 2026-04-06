@@ -13,14 +13,13 @@ env:
   REPO_ORG: opendatahub-io
   REPO_NAME: kubeflow
 
-permissions:
-  contents: write
-
 jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    if: startsWith(github.event.head_commit.message, 'chore: release ')
+    permissions:
+      contents: write
+    if: "${{ startsWith(github.event.head_commit.message, 'chore: release ') }}"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -36,6 +35,12 @@ jobs:
 
           if [ -z "$VERSION" ]; then
             echo "Failed to extract version from tekton files"
+            exit 1
+          fi
+
+          # Validate version format (alphanumeric, dots, underscores, hyphens only)
+          if ! [[ "$VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Invalid version format: $VERSION"
             exit 1
           fi
 

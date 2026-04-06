@@ -14,10 +14,6 @@ env:
   REPO_NAME: kubeflow
   RELEASE_BRANCH: v1.10-branch
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   # Step 1: Sync main -> stable
   sync-main-to-stable:
@@ -41,10 +37,25 @@ jobs:
     name: Update image versions and create PR
     needs: sync-stable-to-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       pr_url: ${{ steps.create-pr.outputs.pr_url }}
       pr_number: ${{ steps.create-pr.outputs.pr_number }}
     steps:
+      - name: Validate version input
+        env:
+          NEW_VERSION: ${{ inputs.new-image-version }}
+        run: |
+          # Validate version format (alphanumeric, dots, underscores, hyphens only)
+          if ! [[ "$NEW_VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Invalid version format: $NEW_VERSION"
+            echo "Version must contain only alphanumeric characters, dots, underscores, and hyphens"
+            exit 1
+          fi
+          echo "Version format validated: $NEW_VERSION"
+
       - name: Checkout release branch
         uses: actions/checkout@v6
         with:
