@@ -1,3 +1,3 @@
 module github.com/kubeflow/kubeflow/components/common
 
-go 1.25.7
+go 1.25.8

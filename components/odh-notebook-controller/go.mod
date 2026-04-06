@@ -1,6 +1,6 @@
 module github.com/opendatahub-io/kubeflow/components/odh-notebook-controller
 
-go 1.25.7
+go 1.25.8
 
 require (
 	github.com/go-logr/logr v1.4.3
