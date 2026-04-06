@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       new-image-version:
-        description: "New image version tag for tekton pipeline (e.g., v1.10.0-12)"
+        description: "NEXT version (n+1) for tekton to track. Must be higher than current tekton tag."
         required: true
         type: string
 
@@ -76,6 +76,8 @@ jobs:
 
       - name: Extract current tekton image tags from release branch
         id: extract-tags
+        env:
+          NEW_VERSION: ${{ inputs.new-image-version }}
         run: |
           # Extract current output-image tags from tekton push files
           # Format: value: quay.io/opendatahub/odh-notebook-controller:TAG
@@ -83,14 +85,35 @@ jobs:
           KF_TAG=$(grep -oP 'quay\.io/opendatahub/kubeflow-notebook-controller:\K[^\s"]+' .tekton/odh-kf-notebook-controller-push.yaml)
 
           if [ -z "$ODH_TAG" ] || [ -z "$KF_TAG" ]; then
-            echo "Failed to extract tags from tekton files"
+            echo "::error::Failed to extract tags from tekton files"
             echo "ODH_TAG: $ODH_TAG"
             echo "KF_TAG: $KF_TAG"
             exit 1
           fi
 
+          echo "## Current Tekton Tags" >> $GITHUB_STEP_SUMMARY
+          echo "- ODH Notebook Controller: \`$ODH_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- KF Notebook Controller: \`$KF_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## New Version (input): \`$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
+
+          # Validate: new version must be different from current tekton tag
+          if [ "$NEW_VERSION" = "$ODH_TAG" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "::error::New version ($NEW_VERSION) is the same as current tekton tag ($ODH_TAG)"
+            echo "**ERROR:** New version must be n+1 of current version, not the same!" >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "The input version ($NEW_VERSION) equals the current tekton tag."
+            echo "This would not advance the tekton tracking tag."
+            echo ""
+            echo "If current tag is $ODH_TAG, you likely want the NEXT version."
+            echo "Example: if current is v1.10.0-11, input should be v1.10.0-12"
+            exit 1
+          fi
+
           echo "Current ODH Notebook Controller tag: $ODH_TAG"
           echo "Current KF Notebook Controller tag: $KF_TAG"
+          echo "New version to set: $NEW_VERSION"
 
           echo "odh_tag=$ODH_TAG" >> $GITHUB_OUTPUT
           echo "kf_tag=$KF_TAG" >> $GITHUB_OUTPUT
