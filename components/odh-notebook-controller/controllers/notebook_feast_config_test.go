@@ -27,6 +27,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testNotebookName       = "test-notebook"
+	testFeastConfigMapName = "test-notebook-feast-config"
+)
+
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
 
 func randStringRunes(n int) string {
@@ -41,7 +46,7 @@ var _ = Describe("isFeastEnabled", func() {
 	It("should return false when label is not present", func() {
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-notebook",
+				Name:      testNotebookName,
 				Namespace: "default",
 				Labels:    map[string]string{},
 			},
@@ -53,7 +58,7 @@ var _ = Describe("isFeastEnabled", func() {
 	It("should return true when label is set to 'true'", func() {
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-notebook",
+				Name:      testNotebookName,
 				Namespace: "default",
 				Labels: map[string]string{
 					feastLabelKey: "true",
@@ -67,7 +72,7 @@ var _ = Describe("isFeastEnabled", func() {
 	It("should return false when label is set to 'false'", func() {
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-notebook",
+				Name:      testNotebookName,
 				Namespace: "default",
 				Labels: map[string]string{
 					feastLabelKey: "false",
@@ -81,7 +86,7 @@ var _ = Describe("isFeastEnabled", func() {
 	It("should return false when label has invalid value", func() {
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-notebook",
+				Name:      testNotebookName,
 				Namespace: "default",
 				Labels: map[string]string{
 					feastLabelKey: "yes",
@@ -95,7 +100,7 @@ var _ = Describe("isFeastEnabled", func() {
 	It("should handle nil labels", func() {
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-notebook",
+				Name:      testNotebookName,
 				Namespace: "default",
 				Labels:    nil,
 			},
@@ -107,8 +112,8 @@ var _ = Describe("isFeastEnabled", func() {
 
 var _ = Describe("mountFeastConfig", func() {
 	It("should add volume and volume mount to notebook container", func() {
-		notebookName := "test-notebook"
-		configMapName := "test-notebook-feast-config"
+		notebookName := testNotebookName
+		configMapName := testFeastConfigMapName
 
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
@@ -164,8 +169,8 @@ var _ = Describe("mountFeastConfig", func() {
 	})
 
 	It("should update existing volume and volume mount", func() {
-		notebookName := "test-notebook"
-		configMapName := "test-notebook-feast-config"
+		notebookName := testNotebookName
+		configMapName := testFeastConfigMapName
 		oldConfigMapName := "old-config-map"
 
 		notebook := &nbv1.Notebook{
@@ -224,8 +229,8 @@ var _ = Describe("mountFeastConfig", func() {
 	})
 
 	It("should return error when container not found", func() {
-		notebookName := "test-notebook"
-		configMapName := "test-notebook-feast-config"
+		notebookName := testNotebookName
+		configMapName := testFeastConfigMapName
 
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
@@ -252,8 +257,8 @@ var _ = Describe("mountFeastConfig", func() {
 	})
 
 	It("should handle multiple containers and update only the matching one", func() {
-		notebookName := "test-notebook"
-		configMapName := "test-notebook-feast-config"
+		notebookName := testNotebookName
+		configMapName := testFeastConfigMapName
 
 		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
@@ -303,8 +308,8 @@ var _ = Describe("mountFeastConfig", func() {
 
 var _ = Describe("unmountFeastConfig", func() {
 	It("should remove volume and volume mount from notebook", func() {
-		notebookName := "test-notebook"
-		configMapName := "test-notebook-feast-config"
+		notebookName := testNotebookName
+		configMapName := testFeastConfigMapName
 
 		// Create notebook with Feast config already mounted
 		notebook := &nbv1.Notebook{

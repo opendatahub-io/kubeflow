@@ -61,6 +61,7 @@ const MaxStatefulsetNameLength = 52
 // The default fsGroup of PodSecurityContext.
 // https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/#podsecuritycontext-v1-core
 const DefaultFSGroup = int64(100)
+const trueString = "true"
 
 /*
 We generally want to ignore (not requeue) NotFound errors, since we'll get a
@@ -234,7 +235,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Reconcile virtual service if we use ISTIO.
-	if os.Getenv("USE_ISTIO") == "true" {
+	if os.Getenv("USE_ISTIO") == trueString {
 		err = r.reconcileVirtualService(instance)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -261,7 +262,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	annotations := instance.GetAnnotations()
 	notebookRestart, ok := annotations[AnnotationNotebookRestart]
 
-	if ok && notebookRestart == "true" {
+	if ok && notebookRestart == trueString {
 
 		log.Info("Annotation restart-pod is set, working on restarting the pod")
 
@@ -510,7 +511,7 @@ func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv
 	// This allows for those platforms to bypass the automatic addition of the fsGroup
 	// and will allow for the Pod Security Policy controller to make an appropriate choice
 	// https://github.com/kubernetes-sigs/controller-runtime/issues/4617
-	if value, exists := os.LookupEnv("ADD_FSGROUP"); !exists || value == "true" {
+	if value, exists := os.LookupEnv("ADD_FSGROUP"); !exists || value == trueString {
 		if podSpec.SecurityContext == nil {
 			fsGroup := DefaultFSGroup
 			podSpec.SecurityContext = &corev1.PodSecurityContext{
@@ -809,7 +810,7 @@ func (r *NotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(mapEventToRequest),
 			builder.WithPredicates(predNBEvents(r)))
 	// watch Istio virtual service
-	if os.Getenv("USE_ISTIO") == "true" {
+	if os.Getenv("USE_ISTIO") == trueString {
 		virtualService := &unstructured.Unstructured{}
 		virtualService.SetAPIVersion("networking.istio.io/v1alpha3")
 		virtualService.SetKind("VirtualService")

@@ -2,11 +2,9 @@ package e2e
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +58,7 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gatewayv1.HTTPRoute, error) {
 	nbHTTPRouteList := gatewayv1.HTTPRouteList{}
 
-	var opts []client.ListOption
+	opts := make([]client.ListOption, 0, 2)
 	opts = append(opts, client.InNamespace(nbMeta.Namespace))
 	opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
 	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
@@ -98,57 +96,6 @@ func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name 
 	})
 
 	return nbNetworkPolicy, err
-}
-
-func (tc *testContext) curlNotebookEndpoint(nbMeta metav1.ObjectMeta) (*http.Response, error) {
-	nbHTTPRoute, err := tc.getNotebookHTTPRoute(&nbMeta)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the Gateway hostname from the Gateway resource
-	// since HTTPRoute doesn't have hostnames set by our controller
-	var hostname string
-	if len(nbHTTPRoute.Spec.Hostnames) > 0 {
-		// Use hostname from HTTPRoute if available
-		hostname = string(nbHTTPRoute.Spec.Hostnames[0])
-	} else {
-		// Try to get hostname from the Gateway resource
-		gatewayName := string(nbHTTPRoute.Spec.ParentRefs[0].Name)
-		gatewayNamespace := string(*nbHTTPRoute.Spec.ParentRefs[0].Namespace)
-
-		gateway := &gatewayv1.Gateway{}
-		err := tc.customClient.Get(tc.ctx, client.ObjectKey{
-			Name:      gatewayName,
-			Namespace: gatewayNamespace,
-		}, gateway)
-		if err != nil {
-			return nil, fmt.Errorf("unable to get Gateway %s/%s: %v", gatewayNamespace, gatewayName, err)
-		}
-
-		// Extract hostname from Gateway status or use a default
-		if len(gateway.Status.Addresses) > 0 {
-			hostname = gateway.Status.Addresses[0].Value
-		} else {
-			// If no hostname is available, skip the traffic test
-			return nil, fmt.Errorf("no hostname available in Gateway %s/%s status", gatewayNamespace, gatewayName)
-		}
-	}
-
-	notebookEndpoint := "https://" + hostname + "/notebook/" +
-		nbMeta.Namespace + "/" + nbMeta.Name + "/api"
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	httpClient := &http.Client{Transport: tr}
-
-	req, err := http.NewRequest("GET", notebookEndpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return httpClient.Do(req)
 }
 
 func (tc *testContext) rolloutDeployment(depMeta metav1.ObjectMeta) error {
@@ -460,7 +407,7 @@ func (tc *testContext) dumpControllerLogs(t *testing.T) {
 		}
 
 		// Build label selector from the deployment's spec.selector.matchLabels
-		var selectorParts []string
+		selectorParts := make([]string, 0, len(dep.Spec.Selector.MatchLabels))
 		for k, v := range dep.Spec.Selector.MatchLabels {
 			selectorParts = append(selectorParts, fmt.Sprintf("%s=%s", k, v))
 		}
@@ -476,7 +423,7 @@ func (tc *testContext) dumpControllerLogs(t *testing.T) {
 
 		for _, pod := range pods.Items {
 			// Collect all container names (init + regular)
-			var containerNames []string
+			containerNames := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
 			for _, c := range pod.Spec.InitContainers {
 				containerNames = append(containerNames, c.Name)
 			}

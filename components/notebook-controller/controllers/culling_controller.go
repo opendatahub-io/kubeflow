@@ -535,7 +535,7 @@ func initGlobalVars() error {
 	log := logf.Log.WithName("Culler")
 
 	devMode := GetEnvDefault("DEV", DEFAULT_DEV)
-	if devMode == "true" {
+	if devMode == trueString {
 		DEV = true
 	}
 
@@ -550,7 +550,7 @@ func initGlobalVars() error {
 	CULL_IDLE_TIME = realIdleTime
 
 	enableCulling := GetEnvDefault("ENABLE_CULLING", DEFAULT_ENABLE_CULLING)
-	if enableCulling == "true" {
+	if enableCulling == trueString {
 		ENABLE_CULLING = true
 	}
 

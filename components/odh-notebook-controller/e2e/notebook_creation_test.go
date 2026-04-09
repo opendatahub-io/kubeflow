@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"net/http/httputil"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +24,8 @@ const (
 	KubeRbacProxyServiceSuffix = "-kube-rbac-proxy"
 	// mimics definition in notebook_network.go
 	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
+	// mimics definition in notebook_mutating_webhook.go
+	ContainerNameKubeRbacProxy = "kube-rbac-proxy"
 )
 
 func creationTestSuite(t *testing.T) {
@@ -242,7 +242,7 @@ func (tc *testContext) testNotebookRBACProxySidecar(nbMeta *metav1.ObjectMeta) e
 			return fmt.Errorf("notebook pod %v is not in Running phase", nbpod.Name)
 		}
 		for _, containerStatus := range nbpod.Status.ContainerStatuses {
-			if containerStatus.Name == "kube-rbac-proxy" {
+			if containerStatus.Name == ContainerNameKubeRbacProxy {
 				if !containerStatus.Ready {
 					return fmt.Errorf("kube-rbac-proxy container is not in Ready state for pod %v", nbpod.Name)
 				}
@@ -326,7 +326,7 @@ func (tc *testContext) testNotebookServiceConnectivity(nbMeta *metav1.ObjectMeta
 	for _, pod := range pods.Items {
 		if pod.Status.Phase == v1.PodRunning {
 			for _, containerStatus := range pod.Status.ContainerStatuses {
-				if containerStatus.Name == "kube-rbac-proxy" && containerStatus.Ready {
+				if containerStatus.Name == ContainerNameKubeRbacProxy && containerStatus.Ready {
 					readyPods++
 					break
 				}
@@ -540,7 +540,7 @@ func (tc *testContext) testNotebookRBACProxySidecarResources(nbMeta *metav1.Obje
 		// Find rbac-proxy container
 		var rbacContainer *v1.Container
 		for _, container := range nbpod.Spec.Containers {
-			if container.Name == "kube-rbac-proxy" {
+			if container.Name == ContainerNameKubeRbacProxy {
 				rbacContainer = &container
 				break
 			}
@@ -603,13 +603,4 @@ func (tc *testContext) testNotebookRBACProxySidecarResources(nbMeta *metav1.Obje
 		}
 	}
 	return nil
-}
-
-func errorWithBody(resp *http.Response) error {
-	dump, err := httputil.DumpResponse(resp, false)
-	if err != nil {
-		return err
-	}
-
-	return fmt.Errorf("unexpected response from Notebook Endpoint:\n%+v", string(dump))
 }

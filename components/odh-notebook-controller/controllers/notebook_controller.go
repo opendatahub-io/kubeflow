@@ -74,9 +74,13 @@ const (
 )
 
 const (
-	OdhConfigMapName        = "odh-trusted-ca-bundle"    // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
-	SelfSignedConfigMapName = "kube-root-ca.crt"         // Self-Signed Certs Contains ca.crt
-	ServiceCAConfigMapName  = "openshift-service-ca.crt" // Service CA Bundle Contains service-ca.crt
+	OdhConfigMapName             = "odh-trusted-ca-bundle"    // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
+	SelfSignedConfigMapName      = "kube-root-ca.crt"         // Self-Signed Certs Contains ca.crt
+	ServiceCAConfigMapName       = "openshift-service-ca.crt" // Service CA Bundle Contains service-ca.crt
+	CaBundleCertKey              = "ca-bundle.crt"
+	OdhCABundleCertKey           = "odh-ca-bundle.crt"
+	WorkbenchTrustedCABundleName = "workbench-trusted-ca-bundle"
+	trueString                   = "true"
 )
 
 // OpenshiftNotebookReconciler holds the controller configuration.
@@ -409,7 +413,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Call the Rolebinding reconciler
-	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_RBAC"))) == "true" {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_RBAC"))) == trueString {
 		err = r.ReconcileRoleBindings(notebook, ctx)
 		if err != nil {
 			log.Error(err, "Unable to Reconcile Rolebinding")
@@ -418,7 +422,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Call the Elyra pipeline secret reconciler
-	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == trueString {
 		err = r.ReconcileElyraRuntimeConfigSecret(notebook, ctx)
 		if err != nil {
 			log.Error(err, "Unable to Reconcile Elyra runtime config secret")
@@ -535,7 +539,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 
 	configMapList := []string{OdhConfigMapName, SelfSignedConfigMapName, ServiceCAConfigMapName}
 	configMapFileNames := map[string][]string{
-		OdhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
+		OdhConfigMapName:        {CaBundleCertKey, OdhCABundleCertKey},
 		SelfSignedConfigMapName: {"ca.crt"},
 		ServiceCAConfigMapName:  {"service-ca.crt"},
 	}
@@ -563,7 +567,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 			// If ca-bundle.crt is not found in the ConfigMap odh-trusted-ca-bundle
 			// no need to create the workbench-trusted-ca-bundle, as it is created
 			// by annotation inject-ca-bundle: "true"
-			if !ok || certFile == "ca-bundle.crt" && certData == "" {
+			if !ok || certFile == CaBundleCertKey && certData == "" {
 				return nil
 			}
 			if !ok || certData == "" {
@@ -590,12 +594,12 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 	if len(rootCertPool) > 0 {
 		desiredTrustedCAConfigMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "workbench-trusted-ca-bundle",
+				Name:      WorkbenchTrustedCABundleName,
 				Namespace: notebook.Namespace,
 				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
 			},
 			Data: map[string]string{
-				"ca-bundle.crt": string(bytes.Join(rootCertPool, []byte("\n"))),
+				CaBundleCertKey: string(bytes.Join(rootCertPool, []byte("\n"))),
 			},
 		}
 
@@ -642,7 +646,7 @@ func (r *OpenshiftNotebookReconciler) IsConfigMapDeleted(notebook *nbv1.Notebook
 	foundTrustedCAConfigMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, client.ObjectKey{
 		Namespace: notebook.Namespace,
-		Name:      "workbench-trusted-ca-bundle",
+		Name:      WorkbenchTrustedCABundleName,
 	}, foundTrustedCAConfigMap)
 	if err == nil {
 		workbenchConfigMapExists = true
@@ -650,7 +654,7 @@ func (r *OpenshiftNotebookReconciler) IsConfigMapDeleted(notebook *nbv1.Notebook
 
 	if !workbenchConfigMapExists {
 		for _, volume := range notebook.Spec.Template.Spec.Volumes {
-			if volume.ConfigMap != nil && volume.ConfigMap.Name == "workbench-trusted-ca-bundle" {
+			if volume.ConfigMap != nil && volume.ConfigMap.Name == WorkbenchTrustedCABundleName {
 				log.Info("workbench-trusted-ca-bundle ConfigMap is deleted and used by the notebook as a volume")
 				return true
 			}
@@ -707,7 +711,7 @@ func (r *OpenshiftNotebookReconciler) UnsetNotebookCertConfig(notebook *nbv1.Not
 
 	// Unset Volume in the notebook
 	for index, volume := range *notebookVolumes {
-		if volume.ConfigMap != nil && volume.ConfigMap.Name == "workbench-trusted-ca-bundle" {
+		if volume.ConfigMap != nil && volume.ConfigMap.Name == WorkbenchTrustedCABundleName {
 			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
 			notebookSpecChanged = true
 			break
@@ -843,7 +847,7 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				// If the ConfigMap is workbench-trusted-ca-bundle
 				// trigger a reconcile event for all the notebooks in the namespace
 				// containing the ConfigMap workbench-trusted-ca-bundle as a volume.
-				if o.GetName() == "workbench-trusted-ca-bundle" {
+				if o.GetName() == WorkbenchTrustedCABundleName {
 					// List all the notebooks in the namespace and trigger a reconcile event
 					var nbList nbv1.NotebookList
 					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {

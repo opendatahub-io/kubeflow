@@ -296,7 +296,7 @@ func HandleMLflowEnvVars(
 		return
 	}
 
-	if err := setNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar, "true"); err != nil {
+	if err := setNotebookContainerEnvVar(notebook, MLflowK8sIntegrationEnvVar, trueString); err != nil {
 		log.Error(err, "Notebook image container not found, skipping MLflow K8s integration env var injection")
 		// Don't fail webhook - MLflow integration is optional
 		return
