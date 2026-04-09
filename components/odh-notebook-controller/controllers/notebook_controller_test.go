@@ -104,7 +104,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(), // Cross-namespace reference
-										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										// Fix for RHOAIENG-39253: Use Service port (80)
+										Port: (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{80}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -606,7 +607,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
-										Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+										// Fix for RHOAIENG-39253: Use Service port (80)
+										Port: (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{80}[0]),
 									},
 									Weight: func() *int32 { w := int32(1); return &w }(),
 								},
@@ -1413,11 +1415,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the regular service (port 8888)
+			// Verify it points to the regular service (port 80)
 			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name))
-			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
+			// Fix for RHOAIENG-39253: Unauthenticated route uses Service port (80)
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(80)))
 
 			By("Updating the notebook to add kube-rbac-proxy sidecar container")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
@@ -1509,11 +1512,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the regular service (port 8888)
+			// Verify it points to the regular service (port 80)
 			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular"))
-			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
+			// Fix for RHOAIENG-39253: Unauthenticated route uses Service port (80)
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(80)))
 
 			By("Cleaning up the test notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -1563,7 +1567,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(len(httpRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(httpRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)).To(Equal(Name))
-			Expect(*httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port).To(Equal(gatewayv1.PortNumber(8888)))
+			// Fix for RHOAIENG-39253: Unauthenticated HTTPRoute should use Service port (80)
+			Expect(*httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port).To(Equal(gatewayv1.PortNumber(80)))
 		})
 	})
 
