@@ -25,6 +25,8 @@ jobs:
   # where syncs happen asynchronously and are gated by test results.
   sync-main-to-stable:
     name: Sync main to stable
+    permissions:
+      contents: write
     if: ${{ inputs.allow-sync }}
     uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
     with:
@@ -34,6 +36,8 @@ jobs:
   # Step 2 (Optional): Sync stable -> v1.10-branch
   sync-stable-to-release:
     name: Sync stable to release branch
+    permissions:
+      contents: write
     if: ${{ inputs.allow-sync }}
     needs: sync-main-to-stable
     uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
@@ -107,19 +111,17 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## New Version (input): \`$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
 
-          # Validate: new version must be different from current tekton tag
-          if [ "$NEW_VERSION" = "$ODH_TAG" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "::error::New version ($NEW_VERSION) is the same as current tekton tag ($ODH_TAG)"
-            echo "**ERROR:** New version must be n+1 of current version, not the same!" >> $GITHUB_STEP_SUMMARY
-            echo ""
-            echo "The input version ($NEW_VERSION) equals the current tekton tag."
-            echo "This would not advance the tekton tracking tag."
-            echo ""
-            echo "If current tag is $ODH_TAG, you likely want the NEXT version."
-            echo "Example: if current is v1.10.0-11, input should be v1.10.0-12"
-            exit 1
-          fi
+          # Validate: NEW_VERSION must be strictly greater than both current tags
+          for CURRENT_TAG in "$ODH_TAG" "$KF_TAG"; do
+            if [ "$NEW_VERSION" = "$CURRENT_TAG" ]; then
+              echo "::error::New version ($NEW_VERSION) must be greater than current tag ($CURRENT_TAG)"
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$CURRENT_TAG" "$NEW_VERSION" | sort -V | tail -n1)" != "$NEW_VERSION" ]; then
+              echo "::error::New version ($NEW_VERSION) must be greater than current tag ($CURRENT_TAG)"
+              exit 1
+            fi
+          done
 
           echo "Current ODH Notebook Controller tag: $ODH_TAG"
           echo "Current KF Notebook Controller tag: $KF_TAG"
@@ -230,6 +232,7 @@ jobs:
     needs: update-and-create-pr
     if: ${{ always() && needs.update-and-create-pr.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Output summary
         env:
