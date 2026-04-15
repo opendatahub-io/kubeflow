@@ -8,6 +8,11 @@ on:
         description: "NEXT version (n+1) for tekton to track. Must be higher than current tekton tag."
         required: true
         type: string
+      allow-sync:
+        description: "Run branch sync (main→stable→v1.10-branch)? Disabled by default."
+        required: false
+        type: boolean
+        default: false
 
 env:
   REPO_ORG: opendatahub-io
@@ -15,17 +20,21 @@ env:
   RELEASE_BRANCH: v1.10-branch
 
 jobs:
-  # Step 1: Sync main -> stable
+  # Step 1 (Optional): Sync main -> stable
+  # Disabled by default - branch syncs should follow Bodies of Water approach
+  # where syncs happen asynchronously and are gated by test results.
   sync-main-to-stable:
     name: Sync main to stable
+    if: ${{ inputs.allow-sync }}
     uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
     with:
       source: "main"
       target: "stable"
 
-  # Step 2: Sync stable -> v1.10-branch
+  # Step 2 (Optional): Sync stable -> v1.10-branch
   sync-stable-to-release:
     name: Sync stable to release branch
+    if: ${{ inputs.allow-sync }}
     needs: sync-main-to-stable
     uses: opendatahub-io/kubeflow/.github/workflows/sync-branches.yaml@main
     with:
@@ -36,6 +45,7 @@ jobs:
   update-and-create-pr:
     name: Update image versions and create PR
     needs: sync-stable-to-release
+    if: ${{ always() && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -218,6 +228,7 @@ jobs:
   summary:
     name: Release Pipeline Summary
     needs: update-and-create-pr
+    if: ${{ always() && needs.update-and-create-pr.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Output summary
