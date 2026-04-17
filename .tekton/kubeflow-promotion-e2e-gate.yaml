@@ -1,0 +1,53 @@
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/kubeflow?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-cel-expression: >-
+      event == "pull_request" &&
+      (target_branch == "stable" || target_branch == "v1.10-branch")
+    pipelinesascode.tekton.dev/on-comment: "^/run-e2e-gate"
+  name: kubeflow-promotion-e2e-gate
+  namespace: open-data-hub-tenant
+  labels:
+    appstudio.openshift.io/application: group-testing
+    appstudio.openshift.io/component: kubeflow-promotion-gate
+    pipelines.appstudio.openshift.io/type: test
+spec:
+  timeouts:
+    pipeline: 4h
+    tasks: 3h
+  params:
+  - name: group-components
+    value: '{ "odh-notebook-controller-ci": "opendatahub/odh-notebook-controller", "odh-kf-notebook-controller-ci": "opendatahub/kubeflow-notebook-controller" }'
+  - name: catalog-source-image
+    value: quay.io/opendatahub/opendatahub-operator-catalog:odh-stable
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/opendatahub-io/odh-konflux-central.git
+    - name: revision
+      value: main
+    - name: pathInRepo
+      value: integration-tests/kubeflow/promotion-e2e-gate-pipeline.yaml
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        konflux-ci.dev/workload: konflux-tenants
+      tolerations:
+      - effect: NoSchedule
+        key: konflux-ci.dev/workload
+        operator: Equal
+        value: konflux-tenants
+    serviceAccountName: konflux-integration-runner
+  workspaces:
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
