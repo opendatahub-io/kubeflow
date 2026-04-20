@@ -17,7 +17,7 @@ metadata:
   namespace: open-data-hub-tenant
   labels:
     appstudio.openshift.io/application: group-testing
-    appstudio.openshift.io/component: kubeflow-promotion-gate
+    appstudio.openshift.io/component: kubeflow-group
     pipelines.appstudio.openshift.io/type: test
 spec:
   timeouts:
