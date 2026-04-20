@@ -32,9 +32,9 @@ spec:
     resolver: git
     params:
     - name: url
-      value: https://github.com/opendatahub-io/odh-konflux-central.git
+      value: https://github.com/jstourac/odh-konflux-central.git
     - name: revision
-      value: main
+      value: e2eGatePipeline
     - name: pathInRepo
       value: integration-tests/kubeflow/promotion-e2e-gate-pipeline.yaml
   taskRunTemplate:
