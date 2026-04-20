@@ -10,7 +10,7 @@ metadata:
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: >-
-      event == "pull_request" &&
+      event == "group-test" &&
       (target_branch == "stable" || target_branch == "v1.10-branch")
     pipelinesascode.tekton.dev/on-comment: "^/run-e2e-gate"
   name: kubeflow-promotion-e2e-gate
