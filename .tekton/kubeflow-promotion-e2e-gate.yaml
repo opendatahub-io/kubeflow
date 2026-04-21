@@ -27,7 +27,8 @@ spec:
   - name: group-components
     value: '{ "odh-notebook-controller-ci": "opendatahub/odh-notebook-controller", "odh-kf-notebook-controller-ci": "opendatahub/kubeflow-notebook-controller" }'
   - name: catalog-source-image
-    value: quay.io/opendatahub/opendatahub-operator-catalog:odh-stable
+    # value: quay.io/opendatahub/opendatahub-operator-catalog:odh-stable
+    value: quay.io/opendatahub/opendatahub-operator-catalog@sha256:39e2febf62715e54d7b73cee21ef8f54854d9cd4784b441578e314ffaae90b78
   pipelineRef:
     resolver: git
     params:
