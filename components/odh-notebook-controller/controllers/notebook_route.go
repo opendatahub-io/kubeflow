@@ -133,9 +133,23 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 
 // CompareNotebookHTTPRoutes checks if two HTTPRoutes are equal, if not return false
 func CompareNotebookHTTPRoutes(r1 gatewayv1.HTTPRoute, r2 gatewayv1.HTTPRoute) bool {
-	// Two HTTPRoutes will be equal if the labels and spec are identical
-	return reflect.DeepEqual(r1.Labels, r2.Labels) &&
-		reflect.DeepEqual(r1.Spec, r2.Spec)
+	// Only compare labels that are managed by this controller.
+	// Extra labels (e.g., added for sharding / policy / ops tooling) should not
+	// cause perpetual reconciliation.
+	managedLabelKeys := []string{
+		"notebook-name",
+		"notebook-namespace",
+	}
+
+	for _, k := range managedLabelKeys {
+		v1, ok1 := r1.Labels[k]
+		v2, ok2 := r2.Labels[k]
+		if ok1 != ok2 || v1 != v2 {
+			return false
+		}
+	}
+
+	return reflect.DeepEqual(r1.Spec, r2.Spec)
 }
 
 // reconcileHTTPRoute will manage the creation, update and deletion of the HTTPRoute returned
@@ -204,9 +218,17 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 			}, foundHTTPRoute); err != nil {
 				return err
 			}
-			// Reconcile labels and spec field
+			// Reconcile spec and ONLY the controller-managed labels.
+			// Preserve any other labels (e.g., used for ingress sharding).
 			foundHTTPRoute.Spec = desiredHTTPRoute.Spec
-			foundHTTPRoute.Labels = desiredHTTPRoute.Labels
+
+			if foundHTTPRoute.Labels == nil {
+				foundHTTPRoute.Labels = map[string]string{}
+			}
+			for k, v := range desiredHTTPRoute.Labels {
+				foundHTTPRoute.Labels[k] = v
+			}
+
 			return r.Update(ctx, foundHTTPRoute)
 		})
 		if err != nil {
