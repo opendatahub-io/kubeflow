@@ -195,11 +195,12 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 	dspaSpec := dspaInstance.Spec
 	objectStorage := dspaSpec.ObjectStorage
 	if objectStorage == nil {
-		return nil, fmt.Errorf("invalid DSPA CR: missing 'objectStorage'")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage' is not configured")
 	}
+
 	externalStorage := objectStorage.ExternalStorage
 	if externalStorage == nil {
-		return nil, fmt.Errorf("invalid DSPA CR: missing 'externalStorage'")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage' is not configured")
 	}
 
 	// Validate required fields
@@ -222,9 +223,13 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 
 	s3CredentialsSecret := externalStorage.S3CredentialSecret
 	if s3CredentialsSecret == nil {
-		return nil, fmt.Errorf("invalid DSPA CR: missing 'S3CredentialSecret'")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret' is not configured")
 	}
+
 	cosSecret := s3CredentialsSecret.SecretName
+	if cosSecret == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.secretName' is empty")
+	}
 	usernameKey := s3CredentialsSecret.AccessKey
 	passwordKey := s3CredentialsSecret.SecretKey
 
