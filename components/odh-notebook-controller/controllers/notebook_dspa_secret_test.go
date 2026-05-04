@@ -644,6 +644,66 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.secretName' is empty"))
 			Expect(result).To(BeNil())
 		})
+
+		It("should return error when S3CredentialSecret.AccessKey is empty", func() {
+			dspa := &dspav1.DataSciencePipelinesApplication{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dspa",
+					Namespace: "test-namespace",
+				},
+				Spec: dspav1.DSPASpec{
+					ObjectStorage: &dspav1.ObjectStorage{
+						ExternalStorage: &dspav1.ExternalStorage{
+							Host:   "minio.example.com",
+							Bucket: "my-bucket",
+							S3CredentialSecret: &dspav1.S3CredentialSecret{
+								SecretName: "my-secret",
+								AccessKey:  "",
+								SecretKey:  "secretkey",
+							},
+						},
+					},
+				},
+			}
+			notebook := createTestNotebook("notebook", "test-namespace")
+
+			fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
+
+			result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.accessKey' is empty"))
+			Expect(result).To(BeNil())
+		})
+
+		It("should return error when S3CredentialSecret.SecretKey is empty", func() {
+			dspa := &dspav1.DataSciencePipelinesApplication{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dspa",
+					Namespace: "test-namespace",
+				},
+				Spec: dspav1.DSPASpec{
+					ObjectStorage: &dspav1.ObjectStorage{
+						ExternalStorage: &dspav1.ExternalStorage{
+							Host:   "minio.example.com",
+							Bucket: "my-bucket",
+							S3CredentialSecret: &dspav1.S3CredentialSecret{
+								SecretName: "my-secret",
+								AccessKey:  "accesskey",
+								SecretKey:  "",
+							},
+						},
+					},
+				},
+			}
+			notebook := createTestNotebook("notebook", "test-namespace")
+
+			fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
+
+			result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.secretKey' is empty"))
+			Expect(result).To(BeNil())
+		})
 	})
 
 	It("should return error when DSPA host is empty", func() {
