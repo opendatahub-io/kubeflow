@@ -231,7 +231,13 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.secretName' is empty")
 	}
 	usernameKey := s3CredentialsSecret.AccessKey
+	if usernameKey == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.accessKey' is empty")
+	}
 	passwordKey := s3CredentialsSecret.SecretKey
+	if passwordKey == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.secretKey' is empty")
+	}
 
 	// Fetch secret containing credentials
 	dspaCOSSecret := &corev1.Secret{}
