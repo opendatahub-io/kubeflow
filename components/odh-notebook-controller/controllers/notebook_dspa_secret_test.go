@@ -1028,7 +1028,7 @@ var _ = Describe("SyncElyraRuntimeConfigSecret", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should return error without panic when DSPA has nil ObjectStorage", func() {
+	It("should skip gracefully without panic when DSPA has nil ObjectStorage", func() {
 		dspa := &dspav1.DataSciencePipelinesApplication{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "dspa",
@@ -1047,11 +1047,10 @@ var _ = Describe("SyncElyraRuntimeConfigSecret", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
 
 		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("'objectStorage' is not configured"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should return error without panic when DSPA has nil ExternalStorage", func() {
+	It("should skip gracefully without panic when DSPA has nil ExternalStorage", func() {
 		dspa := &dspav1.DataSciencePipelinesApplication{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "dspa",
@@ -1072,11 +1071,10 @@ var _ = Describe("SyncElyraRuntimeConfigSecret", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
 
 		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage' is not configured"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should return error without panic when DSPA has nil S3CredentialSecret", func() {
+	It("should skip gracefully without panic when DSPA has nil S3CredentialSecret", func() {
 		dspa := &dspav1.DataSciencePipelinesApplication{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "dspa",
@@ -1101,7 +1099,6 @@ var _ = Describe("SyncElyraRuntimeConfigSecret", func() {
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
 
 		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage.s3CredentialSecret' is not configured"))
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

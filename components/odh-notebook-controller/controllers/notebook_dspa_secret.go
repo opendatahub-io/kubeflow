@@ -322,8 +322,11 @@ func SyncElyraRuntimeConfigSecret(ctx context.Context, cli client.Client, notebo
 	// Generate DSPA-based Elyra config
 	dspData, err := extractElyraRuntimeConfigInfo(ctx, gatewayInstance, dspaInstance, cli, notebook, log)
 	if err != nil {
-		log.Error(err, "Failed to extract Elyra runtime config info")
-		return err
+		// Treat a misconfigured/incomplete DSPA the same as a missing one: log a
+		// warning and skip. The Elyra integration is supplemental and must not
+		// block notebook creation or reconciliation.
+		log.Info("DSPA CR is incomplete, skipping Elyra secret creation", "namespace", notebook.Namespace, "reason", err.Error())
+		return nil
 	}
 	if dspData == nil {
 		return nil
