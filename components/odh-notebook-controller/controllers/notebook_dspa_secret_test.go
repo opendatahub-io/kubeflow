@@ -641,7 +641,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 
 			result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.secretName' is empty"))
+			Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage.s3CredentialSecret.secretName' is empty"))
 			Expect(result).To(BeNil())
 		})
 
@@ -671,7 +671,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 
 			result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.accessKey' is empty"))
+			Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage.s3CredentialSecret.accessKey' is empty"))
 			Expect(result).To(BeNil())
 		})
 
@@ -701,7 +701,7 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 
 			result, err := extractElyraRuntimeConfigInfo(testCtx, nil, dspa, fakeClient, notebook, log)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("'s3CredentialSecret.secretKey' is empty"))
+			Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage.s3CredentialSecret.secretKey' is empty"))
 			Expect(result).To(BeNil())
 		})
 	})
@@ -996,5 +996,112 @@ var _ = Describe("extractElyraRuntimeConfigInfo", func() {
 		Expect(metadata["cos_username"]).To(Equal("myaccesskey"))
 		Expect(metadata["cos_password"]).To(Equal("mysecretkey"))
 		Expect(metadata["cos_secret"]).To(Equal("cos-secret"))
+	})
+})
+
+var _ = Describe("SyncElyraRuntimeConfigSecret", func() {
+	var (
+		testCtx    context.Context
+		testScheme *runtime.Scheme
+		log        = ctrl.Log.WithName("test")
+	)
+
+	BeforeEach(func() {
+		testCtx = context.Background()
+		testScheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(testScheme)).To(Succeed())
+		Expect(routev1.AddToScheme(testScheme)).To(Succeed())
+		Expect(dspav1.AddToScheme(testScheme)).To(Succeed())
+		Expect(gatewayv1.Install(testScheme)).To(Succeed())
+	})
+
+	It("should skip gracefully when DSPA CR does not exist", func() {
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notebook",
+				Namespace: "test-namespace",
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).Build()
+
+		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("should return error without panic when DSPA has nil ObjectStorage", func() {
+		dspa := &dspav1.DataSciencePipelinesApplication{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "dspa",
+				Namespace: "test-namespace",
+			},
+			Spec: dspav1.DSPASpec{
+				ObjectStorage: nil,
+			},
+		}
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notebook",
+				Namespace: "test-namespace",
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
+
+		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("'objectStorage' is not configured"))
+	})
+
+	It("should return error without panic when DSPA has nil ExternalStorage", func() {
+		dspa := &dspav1.DataSciencePipelinesApplication{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "dspa",
+				Namespace: "test-namespace",
+			},
+			Spec: dspav1.DSPASpec{
+				ObjectStorage: &dspav1.ObjectStorage{
+					ExternalStorage: nil,
+				},
+			},
+		}
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notebook",
+				Namespace: "test-namespace",
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
+
+		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage' is not configured"))
+	})
+
+	It("should return error without panic when DSPA has nil S3CredentialSecret", func() {
+		dspa := &dspav1.DataSciencePipelinesApplication{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "dspa",
+				Namespace: "test-namespace",
+			},
+			Spec: dspav1.DSPASpec{
+				ObjectStorage: &dspav1.ObjectStorage{
+					ExternalStorage: &dspav1.ExternalStorage{
+						Host:               "minio.example.com",
+						Bucket:             "my-bucket",
+						S3CredentialSecret: nil,
+					},
+				},
+			},
+		}
+		notebook := &nbv1.Notebook{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "notebook",
+				Namespace: "test-namespace",
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(dspa).Build()
+
+		err := SyncElyraRuntimeConfigSecret(testCtx, fakeClient, notebook, log)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("'objectStorage.externalStorage.s3CredentialSecret' is not configured"))
 	})
 })

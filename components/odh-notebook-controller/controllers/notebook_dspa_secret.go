@@ -191,7 +191,12 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
 
-	// Extract info from DSPA spec
+	// Extract info from DSPA spec.
+	// ObjectStorage, ExternalStorage, and S3CredentialSecret are embedded pointer
+	// fields in the DSPA API types (e.g. *ObjectStorage, *ExternalStorage,
+	// *S3CredentialSecret). Although the CRD schema marks them as required, a
+	// partially-configured or transitional DSPA CR can still have these as nil at
+	// the Go struct level, causing a nil pointer dereference panic if unchecked.
 	dspaSpec := dspaInstance.Spec
 	objectStorage := dspaSpec.ObjectStorage
 	if objectStorage == nil {
@@ -228,15 +233,15 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 
 	cosSecret := s3CredentialsSecret.SecretName
 	if cosSecret == "" {
-		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.secretName' is empty")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.secretName' is empty")
 	}
 	usernameKey := s3CredentialsSecret.AccessKey
 	if usernameKey == "" {
-		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.accessKey' is empty")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.accessKey' is empty")
 	}
 	passwordKey := s3CredentialsSecret.SecretKey
 	if passwordKey == "" {
-		return nil, fmt.Errorf("invalid DSPA CR: 's3CredentialSecret.secretKey' is empty")
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.secretKey' is empty")
 	}
 
 	// Fetch secret containing credentials
