@@ -33,6 +33,7 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -731,6 +732,39 @@ func (r *OpenshiftNotebookReconciler) UnsetNotebookCertConfig(notebook *nbv1.Not
 	return nil
 }
 
+// notebooksForDSPA maps a DSPA change to reconcile requests for all notebooks
+// in the same namespace. This triggers Elyra secret reconciliation when DSPA
+// configuration changes (e.g., credential rotation, storage update, deletion).
+// Fix for RHOAIENG-4531.
+func (r *OpenshiftNotebookReconciler) notebooksForDSPA(ctx context.Context, o client.Object) []reconcile.Request {
+	// Only trigger if Elyra secret sync is enabled
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) != "true" {
+		return []reconcile.Request{}
+	}
+
+	log := r.Log.WithValues("namespace", o.GetNamespace(), "dspa", o.GetName())
+
+	var nbList nbv1.NotebookList
+	if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+		log.Error(err, "Unable to list Notebooks when handling DSPA change")
+		return []reconcile.Request{}
+	}
+
+	requests := make([]reconcile.Request, len(nbList.Items))
+	for i, nb := range nbList.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      nb.Name,
+				Namespace: nb.Namespace,
+			},
+		}
+	}
+	if len(requests) > 0 {
+		log.Info("Triggering notebook reconciliation due to DSPA change", "notebookCount", len(requests))
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
@@ -810,6 +844,15 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 				return []reconcile.Request{}
 			}),
+		).
+
+		// Watch for DSPA changes to keep the Elyra runtime config secret in sync.
+		// When a DSPA is created, updated, or deleted, reconcile all notebooks in
+		// the same namespace so the ds-pipeline-config secret is updated.
+		// Fix for RHOAIENG-4531: without this Watch, credential rotations and
+		// external DSPA deletions are not detected.
+		Watches(&dspav1.DataSciencePipelinesApplication{},
+			handler.EnqueueRequestsFromMapFunc(r.notebooksForDSPA),
 		).
 
 		// Watch for all the required ConfigMaps
