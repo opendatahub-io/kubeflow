@@ -191,10 +191,22 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
 
-	// Extract info from DSPA spec
+	// Extract info from DSPA spec.
+	// ObjectStorage, ExternalStorage, and S3CredentialSecret are embedded pointer
+	// fields in the DSPA API types (e.g. *ObjectStorage, *ExternalStorage,
+	// *S3CredentialSecret). Although the CRD schema marks them as required, a
+	// partially-configured or transitional DSPA CR can still have these as nil at
+	// the Go struct level, causing a nil pointer dereference panic if unchecked.
 	dspaSpec := dspaInstance.Spec
 	objectStorage := dspaSpec.ObjectStorage
+	if objectStorage == nil {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage' is not configured")
+	}
+
 	externalStorage := objectStorage.ExternalStorage
+	if externalStorage == nil {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage' is not configured")
+	}
 
 	// Validate required fields
 	host := externalStorage.Host
@@ -215,9 +227,22 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance *gateway
 	}
 
 	s3CredentialsSecret := externalStorage.S3CredentialSecret
+	if s3CredentialsSecret == nil {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret' is not configured")
+	}
+
 	cosSecret := s3CredentialsSecret.SecretName
+	if cosSecret == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.secretName' is empty")
+	}
 	usernameKey := s3CredentialsSecret.AccessKey
+	if usernameKey == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.accessKey' is empty")
+	}
 	passwordKey := s3CredentialsSecret.SecretKey
+	if passwordKey == "" {
+		return nil, fmt.Errorf("invalid DSPA CR: 'objectStorage.externalStorage.s3CredentialSecret.secretKey' is empty")
+	}
 
 	// Fetch secret containing credentials
 	dspaCOSSecret := &corev1.Secret{}
@@ -297,8 +322,11 @@ func SyncElyraRuntimeConfigSecret(ctx context.Context, cli client.Client, notebo
 	// Generate DSPA-based Elyra config
 	dspData, err := extractElyraRuntimeConfigInfo(ctx, gatewayInstance, dspaInstance, cli, notebook, log)
 	if err != nil {
-		log.Error(err, "Failed to extract Elyra runtime config info")
-		return err
+		// Treat a misconfigured/incomplete DSPA the same as a missing one: log a
+		// warning and skip. The Elyra integration is supplemental and must not
+		// block notebook creation or reconciliation.
+		log.Info("DSPA CR is incomplete, skipping Elyra secret creation", "namespace", notebook.Namespace, "reason", err.Error())
+		return nil
 	}
 	if dspData == nil {
 		return nil
