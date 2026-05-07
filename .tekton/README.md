@@ -36,3 +36,17 @@ Key differences from the stable branch push pipelines:
 - `pipeline-type` is set to `"kubeflow-main-build"` instead of the default `"push"`. This deliberately prevents the `trigger-operator-build` task from running, which would otherwise kick off downstream operator, operator-bundle, and FBC fragment CI builds. Those downstream triggers are not needed on the `main` branch.
 - `enable-group-testing` is set to `"true"` to run e2e tests after a successful build.
 - Push-built images use the `:odh-main` tag and do not expire.
+
+## Promotion e2e gate
+
+The `kubeflow-promotion-e2e-gate.yaml` pipeline runs as a quality gate for branch promotions (`main` → `stable`, `stable` → `v1.10-branch`). It triggers automatically on PRs targeting `stable` or `v1.10-branch`, and can be re-triggered manually with a `/run-e2e-gate` comment.
+
+Unlike the group test (which deploys controllers directly via kustomize), this pipeline:
+
+1. Provisions an ephemeral HyperShift cluster via Konflux EaaS.
+2. Installs the full ODH operator from the `odh-stable` CatalogSource (`quay.io/opendatahub/opendatahub-operator-catalog:odh-stable`).
+3. Patches the deployed controller images with the PR-built versions of `odh-notebook-controller` and `kubeflow-notebook-controller`.
+4. Creates a `DataScienceCluster` and waits for all components to be ready.
+5. Runs the workbenches e2e test suite from [`opendatahub-io/opendatahub-tests`](https://github.com/opendatahub-io/opendatahub-tests) (`uv run pytest tests/workbenches/`).
+
+The pipeline definition lives in [`odh-konflux-central`](https://github.com/opendatahub-io/odh-konflux-central) at `integration-tests/kubeflow/promotion-e2e-gate-pipeline.yaml`.
