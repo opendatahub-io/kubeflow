@@ -31,7 +31,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/opendatahub/kubeflow-notebook-controller:odh-main
+    value: quay.io/opendatahub/kubeflow-notebook-controller:main
   - name: dockerfile
     value: notebook-controller/Dockerfile
   - name: path-context
