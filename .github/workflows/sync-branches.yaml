@@ -42,6 +42,9 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Preserve merge script before switching branches
+      run: cp "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh" /tmp/merge-source-into-head.sh
+
     - name: Merge source branch into target and push
       run: |
         set -e
@@ -52,7 +55,7 @@ jobs:
 
         # Run shared merge script (exit 10 = nothing to commit)
         set +e
-        bash "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh"
+        bash /tmp/merge-source-into-head.sh
         ec=$?
         set -e
 

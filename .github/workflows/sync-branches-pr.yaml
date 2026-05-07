@@ -42,6 +42,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Preserve merge script before switching branches
+        run: cp "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh" /tmp/merge-source-into-head.sh
+
       - name: Set up Git
         run: |
           git config --global user.name "github-actions[bot]"
@@ -58,7 +61,7 @@ jobs:
           git checkout -B "$HEAD_BRANCH"
 
           set +e
-          bash "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh"
+          bash /tmp/merge-source-into-head.sh
           ec=$?
           set -e
 
@@ -102,6 +105,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Preserve merge script before switching branches
+        run: cp "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh" /tmp/merge-source-into-head.sh
+
       - name: Set up Git
         run: |
           git config --global user.name "github-actions[bot]"
@@ -118,7 +124,7 @@ jobs:
           git checkout -B "$HEAD_BRANCH"
 
           set +e
-          bash "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh"
+          bash /tmp/merge-source-into-head.sh
           ec=$?
           set -e
 
