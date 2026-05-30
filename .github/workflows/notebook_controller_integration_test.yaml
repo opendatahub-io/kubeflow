@@ -8,6 +8,7 @@ on:
       - v1.10-branch
     paths:
       - .github/workflows/notebook_controller_integration_test.yaml
+      - components/common/**
       - components/notebook-controller/**
   workflow_dispatch:
 
