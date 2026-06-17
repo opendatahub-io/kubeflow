@@ -16,6 +16,8 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
@@ -37,9 +39,12 @@ import (
 	imagev1 "github.com/openshift/api/image/v1"
 	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
+	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -59,6 +64,18 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+// intermediateCiphers is the Mozilla Intermediate cipher set, used as the
+// hardened default on non-OpenShift clusters where the APIServer TLS profile
+// is not available.
+var intermediateCiphers = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -158,16 +175,55 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fetch the cluster TLS security profile for webhook and metrics servers (OpenShift only)
+	nextProtos := []string{"h2", "http/1.1"}
+	var tlsOpts []func(*tls.Config)
+	var profile configv1.TLSProfileSpec
+	hasOpenShiftConfigAPI := false
+	restCfg := ctrl.GetConfigOrDie()
+	bootstrapClient, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create bootstrap client for TLS profile")
+		os.Exit(1)
+	}
+
+	if profile, err = tlspkg.FetchAPIServerTLSProfile(context.Background(), bootstrapClient); err != nil {
+		switch {
+		case apimeta.IsNoMatchError(err):
+			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+		case k8serr.IsNotFound(err):
+			setupLog.Info("APIServer resource not found, using hardened defaults")
+		default:
+			setupLog.Error(err, "unable to read APIServer TLS profile, refusing to start with unknown TLS posture")
+			os.Exit(1)
+		}
+		tlsOpts = append(tlsOpts, func(c *tls.Config) {
+			c.MinVersion = tls.VersionTLS12
+			c.CipherSuites = intermediateCiphers
+			c.NextProtos = nextProtos
+		})
+	} else {
+		hasOpenShiftConfigAPI = true
+		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
+		if len(unsupportedCiphers) > 0 {
+			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
+		}
+		tlsOpts = append(tlsOpts, tlsConfigFn, func(c *tls.Config) {
+			c.NextProtos = nextProtos
+		})
+	}
+
 	// Setup controller manager
 	mgrConfig := ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsOpts},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "odh-notebook-controller",
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port:    webhookPort,
 			CertDir: webhookCertDir,
+			TLSOpts: tlsOpts,
 		}),
 		Cache: cache.Options{
 			DefaultTransform: cache.TransformStripManagedFields(),
@@ -192,7 +248,7 @@ func main() {
 		},
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrConfig)
+	mgr, err := ctrl.NewManager(restCfg, mgrConfig)
 	if err != nil {
 		setupLog.Error(err, "Unable to start manager")
 		os.Exit(1)
@@ -265,8 +321,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+	defer cancel()
+	if hasOpenShiftConfigAPI {
+		watcher := &tlspkg.SecurityProfileWatcher{
+			Client:                mgr.GetClient(),
+			InitialTLSProfileSpec: profile,
+			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
+				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
+				cancel()
+			},
+		}
+		if err := watcher.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to register TLS security profile watcher")
+			os.Exit(1)
+		}
+	}
+
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
