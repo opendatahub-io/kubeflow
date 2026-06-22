@@ -119,7 +119,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
@@ -190,7 +190,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create a ReferenceGrant when creating a Notebook", func() {
 			By("By creating a new Notebook")
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the controller has created the ReferenceGrant")
 			Eventually(func() error {
@@ -273,7 +273,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should keep ReferenceGrant when deleting notebook if other notebooks exist", func() {
 			By("By creating a second notebook in the same namespace")
 			notebook2 := createNotebook(Name+"-second", Namespace)
-			createNotebookWithSA(ctx, cli, notebook2)
+			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
 
 			// Wait for second notebook to be reconciled
 			time.Sleep(interval)
@@ -309,7 +309,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should share one ReferenceGrant across multiple notebooks", func() {
 			By("By creating first notebook")
 			notebook1 := createNotebook(Name1, Namespace)
-			createNotebookWithSA(ctx, cli, notebook1)
+			Expect(cli.Create(ctx, notebook1)).Should(Succeed())
 
 			By("By verifying ReferenceGrant exists or is created")
 			referenceGrant := &gatewayv1beta1.ReferenceGrant{}
@@ -322,8 +322,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By creating second and third notebooks")
 			notebook2 := createNotebook(Name2, Namespace)
 			notebook3 := createNotebook(Name3, Namespace)
-			createNotebookWithSA(ctx, cli, notebook2)
-			createNotebookWithSA(ctx, cli, notebook3)
+			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
+			Expect(cli.Create(ctx, notebook3)).Should(Succeed())
 
 			// Wait for reconciliation
 			time.Sleep(interval)
@@ -382,11 +382,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should create a RoleBinding when the referenced Role exists", func() {
-			By("Creating a Notebook and ensuring the Role exists")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
-
-			// Simulate the Role required by RoleBinding
+			By("Creating the Role before the Notebook so the reconciler finds it")
 			role := &rbacv1.Role{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      roleRefName,
@@ -399,6 +395,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					GinkgoT().Logf("Failed to delete Role: %v", err)
 				}
 			}()
+
+			By("Creating the Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("Checking that the RoleBinding is created")
 			roleBinding := &rbacv1.RoleBinding{}
@@ -621,7 +620,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 			time.Sleep(interval)
 
 			By("By checking that the controller has created the HTTPRoute")
@@ -731,8 +730,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("When notebook CR is updated, should mount a trusted-ca if it exists on the given namespace", func() {
 			logger := logr.Discard()
 
-			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
-			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
+			By("By simulating the existence of odh-trusted-ca-bundle and service-ca ConfigMaps")
 			workbenchTrustedCACertBundle := WorkbenchTrustedCABundleName
 			trustedCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -747,23 +745,51 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					OdhCABundleCertKey: "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
 				},
 			}
-			// Create the ConfigMap
+			serviceCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openshift-service-ca.crt",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\nNjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\nj8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\nBBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\nZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\nB8i0efvecoLP/mqmXNyl7KgTnC4D\n-----END CERTIFICATE-----",
+				},
+			}
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
+			err := cli.Create(ctx, serviceCACertBundle)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
 			defer func() {
-				// Clean up the ConfigMap after the test
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
-					// Log the error without failing the test
+					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
+				}
+				if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
 					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
 			}()
 
-			By("By updating the Notebook's image")
+			By("By stopping the notebook so the webhook allows pod-template mutations")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			Eventually(func() error {
+				if err := cli.Get(ctx, key, notebook); err != nil {
+					return err
+				}
+				if notebook.Annotations == nil {
+					notebook.Annotations = make(map[string]string)
+				}
+				notebook.Annotations[culler.STOP_ANNOTATION] = "true"
+				return cli.Update(ctx, notebook)
+			}, duration, interval).Should(Succeed())
 
+			By("By updating the Notebook's image")
 			updatedImage := "registry.redhat.io/ubi9/ubi:updated"
-			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			Eventually(func() error {
+				if err := cli.Get(ctx, key, notebook); err != nil {
+					return err
+				}
+				notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
+				return cli.Update(ctx, notebook)
+			}, duration, interval).Should(Succeed())
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
@@ -918,7 +944,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create network policies to restrict undesired traffic", func() {
 			By("By creating a new Notebook")
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that the controller has created Network policy to allow only controller traffic")
 			Eventually(func() error {
@@ -1404,7 +1430,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should clean up unauthenticated HTTPRoutes when enabling kube-rbac-proxy", func() {
 			By("Creating a notebook without kube-rbac-proxy initially")
 			notebook := createNotebook(Name, Namespace)
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("Verifying an unauthenticated HTTPRoute is created")
 			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
@@ -1530,7 +1556,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create a Notebook without kube-rbac-proxy proxy", func() {
 			By("By creating a new Notebook without inject-auth annotation")
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("By checking that no kube-rbac-proxy proxy container was injected")
 			Eventually(func() error {
@@ -1676,7 +1702,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Creating Notebook")
 			notebook := createNotebook(notebookName, Namespace)
-			createNotebookWithSA(ctx, cli, notebook)
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
 
 			By("Waiting for ds-pipeline-config Secret to be created")
 			Eventually(func() error {
@@ -1859,28 +1885,6 @@ func createExpectedServiceAccount(name, namespace string) corev1.ServiceAccount 
 			},
 		},
 	}
-}
-
-// createNotebookWithSA pre-creates a ServiceAccount with a dummy ImagePullSecret
-// before creating the notebook, so that RemoveReconciliationLock returns immediately
-// instead of blocking the single reconciler worker with retries (the SA never gets
-// real pull secrets in envtest). Use this for non-kube-rbac-proxy notebooks only;
-// kube-rbac-proxy tests rely on the reconciler creating the SA with ownerReferences.
-func createNotebookWithSA(ctx context.Context, cli client.Client, notebook *nbv1.Notebook) {
-	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      notebook.Name,
-			Namespace: notebook.Namespace,
-		},
-		ImagePullSecrets: []corev1.LocalObjectReference{
-			{Name: "default-dockercfg-dummy"},
-		},
-	}
-	err := cli.Create(ctx, sa)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		Expect(err).NotTo(HaveOccurred())
-	}
-	Expect(cli.Create(ctx, notebook)).Should(Succeed())
 }
 
 // CompareNotebookServiceAccounts compares two ServiceAccount objects for testing
