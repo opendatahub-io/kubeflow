@@ -129,6 +129,19 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
 		})
 
+		It("Should remove the reconciliation lock without blocking the reconciler", func() {
+			By("By verifying the lock is removed promptly (non-blocking)")
+			nonBlockingTimeout := 5 * time.Second
+			Eventually(func() (map[string]string, error) {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return nil, err
+				}
+				return notebook.Annotations, nil
+			}, nonBlockingTimeout, interval).Should(Not(HaveKey(culler.STOP_ANNOTATION)))
+		})
+
 		It("Should reconcile the HTTPRoute when modified", func() {
 			By("By simulating a manual HTTPRoute modification")
 			patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"rules":[{"backendRefs":[{"name":"foo","port":8888}]}]}}`))
