@@ -119,7 +119,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("By checking that the controller has created the HTTPRoute")
 			Eventually(func() error {
@@ -190,7 +190,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create a ReferenceGrant when creating a Notebook", func() {
 			By("By creating a new Notebook")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("By checking that the controller has created the ReferenceGrant")
 			Eventually(func() error {
@@ -273,7 +273,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should keep ReferenceGrant when deleting notebook if other notebooks exist", func() {
 			By("By creating a second notebook in the same namespace")
 			notebook2 := createNotebook(Name+"-second", Namespace)
-			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook2)
 
 			// Wait for second notebook to be reconciled
 			time.Sleep(interval)
@@ -309,7 +309,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should share one ReferenceGrant across multiple notebooks", func() {
 			By("By creating first notebook")
 			notebook1 := createNotebook(Name1, Namespace)
-			Expect(cli.Create(ctx, notebook1)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook1)
 
 			By("By verifying ReferenceGrant exists or is created")
 			referenceGrant := &gatewayv1beta1.ReferenceGrant{}
@@ -322,8 +322,8 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			By("By creating second and third notebooks")
 			notebook2 := createNotebook(Name2, Namespace)
 			notebook3 := createNotebook(Name3, Namespace)
-			Expect(cli.Create(ctx, notebook2)).Should(Succeed())
-			Expect(cli.Create(ctx, notebook3)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook2)
+			createNotebookWithSA(ctx, cli, notebook3)
 
 			// Wait for reconciliation
 			time.Sleep(interval)
@@ -621,7 +621,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create an HTTPRoute to expose the traffic externally", func() {
 			By("By creating a new Notebook")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 			time.Sleep(interval)
 
 			By("By checking that the controller has created the HTTPRoute")
@@ -918,7 +918,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create network policies to restrict undesired traffic", func() {
 			By("By creating a new Notebook")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("By checking that the controller has created Network policy to allow only controller traffic")
 			Eventually(func() error {
@@ -1404,7 +1404,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should clean up unauthenticated HTTPRoutes when enabling kube-rbac-proxy", func() {
 			By("Creating a notebook without kube-rbac-proxy initially")
 			notebook := createNotebook(Name, Namespace)
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("Verifying an unauthenticated HTTPRoute is created")
 			unauthenticatedRoute := &gatewayv1.HTTPRoute{}
@@ -1530,7 +1530,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 		It("Should create a Notebook without kube-rbac-proxy proxy", func() {
 			By("By creating a new Notebook without inject-auth annotation")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("By checking that no kube-rbac-proxy proxy container was injected")
 			Eventually(func() error {
@@ -1676,7 +1676,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("Creating Notebook")
 			notebook := createNotebook(notebookName, Namespace)
-			Expect(cli.Create(ctx, notebook)).To(Succeed())
+			createNotebookWithSA(ctx, cli, notebook)
 
 			By("Waiting for ds-pipeline-config Secret to be created")
 			Eventually(func() error {
@@ -1859,6 +1859,28 @@ func createExpectedServiceAccount(name, namespace string) corev1.ServiceAccount 
 			},
 		},
 	}
+}
+
+// createNotebookWithSA pre-creates a ServiceAccount with a dummy ImagePullSecret
+// before creating the notebook, so that RemoveReconciliationLock returns immediately
+// instead of blocking the single reconciler worker with retries (the SA never gets
+// real pull secrets in envtest). Use this for non-kube-rbac-proxy notebooks only;
+// kube-rbac-proxy tests rely on the reconciler creating the SA with ownerReferences.
+func createNotebookWithSA(ctx context.Context, cli client.Client, notebook *nbv1.Notebook) {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      notebook.Name,
+			Namespace: notebook.Namespace,
+		},
+		ImagePullSecrets: []corev1.LocalObjectReference{
+			{Name: "default-dockercfg-dummy"},
+		},
+	}
+	err := cli.Create(ctx, sa)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+	Expect(cli.Create(ctx, notebook)).Should(Succeed())
 }
 
 // CompareNotebookServiceAccounts compares two ServiceAccount objects for testing

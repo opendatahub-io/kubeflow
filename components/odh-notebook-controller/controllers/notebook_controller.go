@@ -159,7 +159,7 @@ func (r *OpenshiftNotebookReconciler) RemoveReconciliationLock(notebook *nbv1.No
 	if err := retry.OnError(wait.Backoff{
 		Steps:    3,
 		Duration: 1 * time.Second,
-		Factor:   1.0,
+		Factor:   5.0,
 	}, func(error) bool { return true },
 		func() error {
 			serviceAccount := &corev1.ServiceAccount{}
