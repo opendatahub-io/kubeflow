@@ -790,7 +790,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				if notebook.Annotations == nil {
 					notebook.Annotations = make(map[string]string)
 				}
-				notebook.Annotations[culler.STOP_ANNOTATION] = "true"
+				notebook.Annotations[culler.STOP_ANNOTATION] = trueString
 				return cli.Update(ctx, notebook)
 			}, duration, interval).Should(Succeed())
 
