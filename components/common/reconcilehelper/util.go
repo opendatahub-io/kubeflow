@@ -106,19 +106,32 @@ func VirtualService(ctx context.Context, r client.Client, virtualServiceName, na
 // Returns true if the fields copied from don't match to.
 func CopyStatefulSetFields(from, to *appsv1.StatefulSet) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
+	// Reconcile only the labels provided by `from` (controller-owned).
+	// Preserve any extra labels already present on `to`.
+	for k, v := range from.Labels {
+		if to.Labels == nil || to.Labels[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Labels = from.Labels
+	if to.Labels == nil {
+		to.Labels = map[string]string{}
+	}
+	for k, v := range from.Labels {
+		to.Labels[k] = v
+	}
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
+	// Same approach for annotations: reconcile only controller-owned keys.
+	for k, v := range from.Annotations {
+		if to.Annotations == nil || to.Annotations[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Annotations = from.Annotations
+	if to.Annotations == nil {
+		to.Annotations = map[string]string{}
+	}
+	for k, v := range from.Annotations {
+		to.Annotations[k] = v
+	}
 
 	if *from.Spec.Replicas != *to.Spec.Replicas {
 		*to.Spec.Replicas = *from.Spec.Replicas
@@ -135,19 +148,29 @@ func CopyStatefulSetFields(from, to *appsv1.StatefulSet) bool {
 
 func CopyDeploymentSetFields(from, to *appsv1.Deployment) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
+	for k, v := range from.Labels {
+		if to.Labels == nil || to.Labels[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Labels = from.Labels
+	if to.Labels == nil {
+		to.Labels = map[string]string{}
+	}
+	for k, v := range from.Labels {
+		to.Labels[k] = v
+	}
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
+	for k, v := range from.Annotations {
+		if to.Annotations == nil || to.Annotations[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Annotations = from.Annotations
+	if to.Annotations == nil {
+		to.Annotations = map[string]string{}
+	}
+	for k, v := range from.Annotations {
+		to.Annotations[k] = v
+	}
 
 	if from.Spec.Replicas != to.Spec.Replicas {
 		to.Spec.Replicas = from.Spec.Replicas
@@ -165,19 +188,29 @@ func CopyDeploymentSetFields(from, to *appsv1.Deployment) bool {
 // CopyServiceFields copies the owned fields from one Service to another
 func CopyServiceFields(from, to *corev1.Service) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
+	for k, v := range from.Labels {
+		if to.Labels == nil || to.Labels[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Labels = from.Labels
+	if to.Labels == nil {
+		to.Labels = map[string]string{}
+	}
+	for k, v := range from.Labels {
+		to.Labels[k] = v
+	}
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
+	for k, v := range from.Annotations {
+		if to.Annotations == nil || to.Annotations[k] != v {
 			requireUpdate = true
 		}
 	}
-	to.Annotations = from.Annotations
+	if to.Annotations == nil {
+		to.Annotations = map[string]string{}
+	}
+	for k, v := range from.Annotations {
+		to.Annotations[k] = v
+	}
 
 	// Don't copy the entire Spec, because we can't overwrite the clusterIp field
 
