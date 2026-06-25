@@ -17,6 +17,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"reflect"
@@ -45,13 +47,42 @@ const (
 // - NOTEBOOK_GATEWAY_NAME: Override the Gateway name (default: "data-science-gateway")
 // - NOTEBOOK_GATEWAY_NAMESPACE: Override the Gateway namespace (default: "openshift-ingress")
 
+// generateHTTPRouteName creates a deterministic, collision-free HTTPRoute name.
+// For short names (<=63 chars), it uses the direct format: nb-{namespace}-{notebook-name}.
+// For long names, it uses a hash-based format: nb-{12-char-hash} to stay under the 63-char limit.
+// Fix for RHOAIENG-49720: Hash-based naming ensures deterministic, collision-free names.
+func generateHTTPRouteName(namespace, notebookName string) string {
+	// Try the direct format first: nb-{namespace}-{notebook-name}
+	directName := "nb-" + namespace + "-" + notebookName
+
+	// If it fits within the 63-character limit, use it (more human-readable)
+	if len(directName) <= HTTPRouteSubDomainMaxLen {
+		return directName
+	}
+
+	// For long names, use hash-based naming for deterministic, collision-free names
+	// Create a unique identifier from namespace and notebook name
+	identifier := namespace + "/" + notebookName
+
+	// Generate SHA-256 hash
+	hash := sha256.Sum256([]byte(identifier))
+	hashStr := hex.EncodeToString(hash[:])
+
+	// Use first 12 characters of hash
+	// Format: nb-{12-char-hash}
+	// Length: 3 + 12 = 15 chars (well under 63-char limit)
+	// This provides ~2^48 unique combinations, sufficient for collision avoidance
+	return "nb-" + hashStr[:12]
+}
+
 // NewNotebookHTTPRoute defines the desired HTTPRoute object in the central namespace.
 // The HTTPRoute is created in the controller's namespace and references
 // the backend Service in the user's namespace using cross-namespace references.
 func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gatewayv1.HTTPRoute {
-	// Create a unique name combining namespace and notebook name to avoid conflicts
-	// Format: nb-{user-namespace}-{notebook-name}
-	httpRouteName := "nb-" + notebook.Namespace + "-" + notebook.Name
+	// Generate a deterministic route name (handles both short and long names)
+	// Fix for RHOAIENG-49720: Use hash-based naming for long names to ensure
+	// deterministic, collision-free names that stay under the 63-character limit
+	httpRouteName := generateHTTPRouteName(notebook.Namespace, notebook.Name)
 
 	routeMetadata := metav1.ObjectMeta{
 		Name:      httpRouteName,
@@ -60,20 +91,12 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 			"notebook-name":      notebook.Name,
 			"notebook-namespace": notebook.Namespace, // Critical for filtering and cleanup
 		},
-	}
-
-	// If the HTTPRoute name (namespace-notebook) is greater than 63 characters, use generateName
-	if len(httpRouteName) > HTTPRouteSubDomainMaxLen {
-		// Use a prefix that includes namespace info
-		prefix := "nb-" + notebook.Namespace[:min(len(notebook.Namespace), 10)] + "-" + notebook.Name[:min(len(notebook.Name), 10)] + "-"
-		routeMetadata = metav1.ObjectMeta{
-			GenerateName: prefix,
-			Namespace:    centralNamespace,
-			Labels: map[string]string{
-				"notebook-name":      notebook.Name,
-				"notebook-namespace": notebook.Namespace,
-			},
-		}
+		Annotations: map[string]string{
+			// Store original identifiers for debugging and troubleshooting
+			// This helps operators understand which notebook this route belongs to
+			"notebook-namespace": notebook.Namespace,
+			"notebook-name":      notebook.Name,
+		},
 	}
 
 	// Get Gateway configuration from environment or use defaults
@@ -179,7 +202,11 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 		return fmt.Errorf("multiple HTTPRoutes found for notebook")
 	} else {
 		// If the HTTPRoute is not found, create it
-		log.Info("Creating HTTPRoute " + desiredHTTPRoute.Name + " in central namespace " + r.Namespace)
+		log.Info("Creating HTTPRoute",
+			"route-name", desiredHTTPRoute.Name,
+			"central-namespace", r.Namespace,
+			"notebook-namespace", notebook.Namespace,
+			"notebook-name", notebook.Name)
 		// NOTE: We CANNOT use SetControllerReference because HTTPRoute is in a different namespace
 		// than the Notebook. Cross-namespace owner references are not supported in Kubernetes.
 		// We will use finalizers for cleanup instead.
@@ -189,7 +216,9 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 			return err
 		}
 		justCreated = true
-		log.Info("Successfully created HTTPRoute in central namespace")
+		log.Info("Successfully created HTTPRoute",
+			"route-name", desiredHTTPRoute.Name,
+			"central-namespace", r.Namespace)
 	}
 
 	// Reconcile the HTTPRoute spec if it has been manually modified
