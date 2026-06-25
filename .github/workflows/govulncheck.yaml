@@ -30,7 +30,10 @@ jobs:
           cache-dependency-path: ${{ matrix.component }}/go.sum
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        # TODO: Revert to @latest once govulncheck releases a fix for the
+        # ForEachElement panic with Go 1.26 (x/tools v0.46.0 bug).
+        # Tracking issue: https://github.com/golang/go/issues/80059
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
 
       - name: Run govulncheck
         id: vulncheck
