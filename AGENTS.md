@@ -50,28 +50,88 @@ Pass `E2E_TEST_FLAGS="--skip-deletion=true"` to skip notebook deletion tests.
 ## Chaos Validation (operator-chaos)
 
 This repo integrates [operator-chaos](https://github.com/opendatahub-io/operator-chaos)
-for shift-left upgrade validation (**Level 1 + L2 elements**).
+for shift-left upgrade validation (**Level 1-3**).
+
+### Knowledge model and CI (L1 + L2)
 
 A repo-local knowledge model at `chaos/knowledge/workbenches.yaml` describes
 the operator topology (Deployments, ServiceAccounts, webhooks, steady-state
-checks). A GitHub Actions workflow (`.github/workflows/operator_chaos_validation.yaml`)
-runs on PRs that touch API types, controllers, CRDs, or the knowledge model and:
+checks). Experiment definitions live in `chaos/experiments/` — these are
+declarative YAML descriptions of chaos scenarios (pod-kill, network-partition,
+etc.) that are **schema-validated in CI only**; they are not executed against a
+cluster at this maturity level and are prepared for future L4 runtime execution
+via `operator-chaos run`.
+
+A GitHub Actions workflow (`.github/workflows/operator_chaos_validation.yaml`)
+runs on PRs that touch API types, controllers, CRDs, or the chaos artifacts and:
 
 - validates the knowledge model (`validate --knowledge`, `preflight --local`)
+- validates experiment definitions (`validate` for each YAML in `chaos/experiments/`)
 - diffs the knowledge model between base and PR branches (`diff --breaking`)
 - diffs the Notebook CRD schema between base and PR branches (`diff-crds`)
 - previews upgrade experiments (`simulate-upgrade --dry-run`)
+- runs ChaosClient SDK integration tests (`make test-chaos` in both components)
+
+### ChaosClient SDK tests (L3)
+
+L3 tests are **per-component** — each controller is tested independently for
+its resilience to Kubernetes API faults. This is because each controller has its
+own reconcile loop and must handle failures (retries, requeues, idempotency) on
+its own. Combined system-level resilience testing (controller cooperation under
+failure) is the domain of L4 runtime experiments.
+
+The knowledge model (L1/L2) already covers both components as a single operator
+because topology, drift detection, and upgrade simulation operate at the
+operator level, not per-component.
+
+**odh-notebook-controller** (`chaostests/chaos_test.go`):
+Uses an **isolated envtest** (no controller manager) so the chaos reconciler is
+the only actor touching the API server. This eliminates race conditions and
+makes all fault scenarios — including Create and Delete — fully deterministic.
+
+Covered scenarios:
+- Get errors propagate as `sdk.ChaosError`
+- Transient Get recovery: reconciler converges after `FaultConfig.Deactivate()`
+- Create errors propagate as `sdk.ChaosError`
+- Transient Create recovery: reconciler converges after deactivation
+- List errors propagate as `sdk.ChaosError`
+- Transient List recovery
+- Update faults with no drift: reconciler stays healthy
+- Delete errors during finalization: reconciler propagates errors
+- Transient Delete recovery: finalization completes after faults clear
+- Intermittent errors (15% Get + List + Create rate): reconciler converges
+
+**notebook-controller** (`chaostests/chaos_test.go`):
+Same isolated envtest pattern. The upstream reconciler always updates the
+StatefulSet on every reconcile (via `CopyStatefulSetFields`), so the
+"Update-no-drift" scenario does not apply here.
+
+Covered scenarios:
+- Get errors propagate as `sdk.ChaosError`
+- Transient Get recovery
+- Create errors propagate as `sdk.ChaosError`
+- Transient Create recovery
+- List errors propagate as `sdk.ChaosError`
+- Transient List recovery
+- Intermittent errors (15% Get + List + Create rate): reconciler converges
 
 ### Local validation
 ```sh
 cd components/odh-notebook-controller
 make chaos-validate   # validates knowledge model + preflight
+make test-chaos       # runs ChaosClient SDK integration tests
+
+cd components/notebook-controller
+make test-chaos       # runs ChaosClient SDK integration tests
 ```
 
 ### Maintenance
 
 When CRDs, webhooks, or managed resources change, update
-`chaos/knowledge/workbenches.yaml` in the same PR.
+`chaos/knowledge/workbenches.yaml` and the experiment YAMLs in
+`chaos/experiments/` in the same PR. If the reconciler gains new
+sub-reconcilers or API operations, add corresponding
+chaos test scenarios in `chaostests/chaos_test.go`.
 
 ## Debug
 

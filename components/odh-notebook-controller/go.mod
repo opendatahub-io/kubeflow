@@ -36,6 +36,8 @@ require (
 
 require github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
 
+require github.com/opendatahub-io/operator-chaos v0.0.0-20260525094355-9e6ac9668b9a
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

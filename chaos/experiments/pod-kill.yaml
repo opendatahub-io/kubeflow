@@ -1,0 +1,36 @@
+apiVersion: chaos.operatorchaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: workbenches-pod-kill
+spec:
+  tier: 1
+  target:
+    operator: workbenches
+    component: odh-notebook-controller
+    resource: Deployment/odh-notebook-controller-manager
+  steadyState:
+    timeout: "30s"
+    checks:
+      - type: conditionTrue
+        apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        conditionType: Available
+  injection:
+    type: PodKill
+    parameters:
+      labelSelector: app=odh-notebook-controller
+      count: 1
+      ttl: "300s"
+  hypothesis:
+    description: >-
+      When the odh-notebook-controller pod is killed, Kubernetes should
+      recreate it within the recovery timeout. The controller should
+      resume managing notebook workbenches without interrupting running
+      notebook sessions.
+    recoveryTimeout: 120s
+  blastRadius:
+    maxPodsAffected: 1
+    allowedNamespaces:
+      - opendatahub

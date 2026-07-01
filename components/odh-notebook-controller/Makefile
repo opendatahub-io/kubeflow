@@ -108,6 +108,11 @@ chaos-validate: operator-chaos ## Validate chaos knowledge model and run preflig
 	$(OPERATOR_CHAOS) validate --knowledge ../../chaos/knowledge/workbenches.yaml
 	$(OPERATOR_CHAOS) preflight --knowledge ../../chaos/knowledge/workbenches.yaml --local
 
+.PHONY: test-chaos
+test-chaos: envtest ## Run chaos resilience tests (isolated envtest, no manager).
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+		go test ./chaostests/... -ginkgo.v -test.v -coverpkg=./controllers/... -coverprofile cover-chaos.out
+
 .PHONY: test test-with-rbac-false test-with-rbac-true
 test: test-with-rbac-false test-with-rbac-true
 test-with-rbac-false: manifests generate fmt vet envtest ## Run tests.

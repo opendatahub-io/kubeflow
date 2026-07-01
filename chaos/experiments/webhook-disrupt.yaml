@@ -1,0 +1,44 @@
+apiVersion: chaos.operatorchaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: workbenches-webhook-disrupt
+spec:
+  tier: 4
+  target:
+    operator: workbenches
+    component: odh-notebook-controller
+    resource: MutatingWebhookConfiguration/odh-notebook-controller-mutating-webhook-configuration
+  steadyState:
+    timeout: "30s"
+    checks:
+      - type: conditionTrue
+        apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        conditionType: Available
+  # WARNING: This experiment sets failurePolicy to Ignore, creating a
+  # temporary fail-open admission path. During the 60s TTL window, Notebook
+  # CREATEs may bypass sidecar/OAuth-proxy injection. This experiment MUST
+  # only be executed in isolated test clusters — never in environments where
+  # real workloads can be created. It is schema-validated in CI only and is
+  # prepared for future L4 runtime execution.
+  injection:
+    type: WebhookDisrupt
+    dangerLevel: high
+    parameters:
+      webhookName: odh-notebook-controller-mutating-webhook-configuration
+      webhookType: mutating
+      action: setFailurePolicy
+      value: Ignore
+      ttl: "60s"
+  hypothesis:
+    description: >-
+      When the notebook mutating webhook failurePolicy is weakened from
+      Fail to Ignore, new notebooks may be created without the required
+      sidecar injection and OAuth proxy configuration. The chaos framework
+      restores the original failurePolicy via TTL-based cleanup after 60s.
+    recoveryTimeout: 120s
+  blastRadius:
+    maxPodsAffected: 1
+    allowDangerous: true

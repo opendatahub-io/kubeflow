@@ -1,0 +1,36 @@
+apiVersion: chaos.operatorchaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: workbenches-rbac-revoke
+spec:
+  tier: 4
+  target:
+    operator: workbenches
+    component: odh-notebook-controller
+    resource: ClusterRoleBinding/odh-notebook-controller-manager-rolebinding
+  steadyState:
+    timeout: "30s"
+    checks:
+      - type: conditionTrue
+        apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        conditionType: Available
+  injection:
+    type: RBACRevoke
+    dangerLevel: high
+    parameters:
+      bindingName: odh-notebook-controller-manager-rolebinding
+      bindingType: ClusterRoleBinding
+      ttl: "60s"
+  hypothesis:
+    description: >-
+      When the odh-notebook-controller ClusterRoleBinding subjects are
+      revoked, the controller should lose its ability to manage notebook
+      resources across namespaces and surface permission-denied errors.
+      Once permissions are restored, reconciliation should resume.
+    recoveryTimeout: 120s
+  blastRadius:
+    maxPodsAffected: 1
+    allowDangerous: true

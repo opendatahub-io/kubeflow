@@ -167,6 +167,36 @@ Make sure all the tests are passing after you add a new feature:
 make test
 ```
 
+### Chaos validation (operator-chaos)
+
+This controller is part of the
+[operator-chaos](https://github.com/opendatahub-io/operator-chaos) shift-left
+integration for the workbenches operator (see the ODH notebook controller README
+for the full L1–L3 overview).
+
+L3 ChaosClient SDK tests (`chaostests/chaos_test.go`) run in an **isolated
+envtest** (no controller manager) so the chaos reconciler is the only actor
+touching the API server — all fault scenarios are fully deterministic.
+
+Covered scenarios:
+- Get/Create/List errors propagate as `sdk.ChaosError`
+- Transient Get/Create/List recovery: reconciler converges after deactivation
+- Intermittent errors (15% Get + List + Create rate): reconciler converges
+
+The "Update-no-drift" scenario is not applicable here because the upstream
+reconciler always calls `CopyStatefulSetFields` which triggers an Update on
+every reconcile pass (this test is present in the ODH controller's suite).
+
+L1/L2 (knowledge model validation, breaking-change detection) are handled at the
+operator level in `chaos/knowledge/workbenches.yaml` which covers both the
+notebook-controller and odh-notebook-controller as a single operator. L3 is
+per-component because each reconciler must independently prove its resilience to
+API faults.
+
+```shell
+make test-chaos   # runs chaos tests (isolated envtest, no manager)
+```
+
 ## TODO
 
 - e2e test (we have one testing the jsonnet-metacontroller one, we should make it run on this one)

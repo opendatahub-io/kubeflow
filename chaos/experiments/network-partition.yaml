@@ -1,0 +1,35 @@
+apiVersion: chaos.operatorchaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: workbenches-network-partition
+spec:
+  tier: 2
+  target:
+    operator: workbenches
+    component: odh-notebook-controller
+    resource: Deployment/odh-notebook-controller-manager
+  steadyState:
+    timeout: "30s"
+    checks:
+      - type: conditionTrue
+        apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        conditionType: Available
+  injection:
+    type: NetworkPartition
+    parameters:
+      labelSelector: app=odh-notebook-controller
+      ttl: "300s"
+  hypothesis:
+    description: >-
+      When the odh-notebook-controller pod is network-partitioned from
+      the API server, it should stop reconciling notebook resources.
+      Running notebooks should continue operating independently. Once the
+      partition is removed, the controller should resume normal operation.
+    recoveryTimeout: 360s
+  blastRadius:
+    maxPodsAffected: 1
+    allowedNamespaces:
+      - opendatahub

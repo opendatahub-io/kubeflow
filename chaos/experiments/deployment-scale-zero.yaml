@@ -1,0 +1,37 @@
+apiVersion: chaos.operatorchaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: workbenches-deployment-scale-zero
+spec:
+  tier: 3
+  target:
+    operator: workbenches
+    component: odh-notebook-controller
+    resource: Deployment/odh-notebook-controller-manager
+  steadyState:
+    timeout: "30s"
+    checks:
+      - type: conditionTrue
+        apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        conditionType: Available
+  injection:
+    type: DeploymentScaleZero
+    dangerLevel: high
+    parameters:
+      name: odh-notebook-controller-manager
+      ttl: "300s"
+  hypothesis:
+    description: >-
+      Scaling the deployment to zero replicas removes all operator pods.
+      Tests whether the platform detects the unavailable deployment and
+      restores it. Without the operator, no reconciliation occurs but
+      existing operands continue running.
+    recoveryTimeout: 180s
+  blastRadius:
+    maxPodsAffected: 1
+    allowDangerous: true
+    allowedNamespaces:
+      - opendatahub

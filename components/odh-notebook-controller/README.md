@@ -167,3 +167,52 @@ for Notebook deletion.
 ```shell
 make e2e-test -e K8S_NAMESPACE=<YOUR_NAMESPACE> -e E2E_TEST_FLAGS="--skip-deletion=true"
 ```
+
+### Chaos validation (operator-chaos)
+
+This controller integrates
+[operator-chaos](https://github.com/opendatahub-io/operator-chaos) for
+shift-left upgrade and resilience validation. The integration currently covers
+maturity **Levels 1–3**:
+
+| Level | What it does | Artifacts |
+|-------|-------------|-----------|
+| L1 | Schema validation of knowledge model and experiment definitions | `chaos/knowledge/workbenches.yaml`, `chaos/experiments/*.yaml` |
+| L2 | Breaking-change detection (knowledge diffs, CRD schema diffs, upgrade simulation) | CI workflow diffs against base branch |
+| L3 | ChaosClient SDK integration tests — injects API-level faults into the reconciler | `chaostests/chaos_test.go` (both components) |
+
+A GitHub Actions workflow (`.github/workflows/operator_chaos_validation.yaml`)
+runs automatically on PRs that touch controllers, API types, CRDs, or chaos
+artifacts.
+
+**Experiment YAMLs** (`chaos/experiments/`) are declarative descriptions of
+chaos scenarios (pod-kill, network-partition, webhook-disrupt, etc.). At the
+current maturity level they are **schema-validated only** — they are not executed
+against a live cluster. They are prepared for future L4 runtime execution via
+`operator-chaos run`.
+
+L3 tests are **per-component** because each controller has its own reconcile
+loop and must independently handle API faults (retries, requeues, idempotency).
+The ODH controller chaos tests run in an **isolated envtest** (separate
+`chaostests/` package, no controller manager) so that the chaos reconciler is
+the only actor touching the API server. This makes all fault scenarios —
+including Create and Delete — fully deterministic.
+
+#### Running locally
+
+```shell
+make chaos-validate   # validates knowledge model + experiment YAMLs + preflight
+make test-chaos       # runs ChaosClient SDK tests (isolated envtest, no manager)
+
+# notebook-controller chaos tests:
+cd ../notebook-controller
+make test-chaos
+```
+
+#### Maintenance
+
+When CRDs, webhooks, or managed resources change, update
+`chaos/knowledge/workbenches.yaml` and the experiment YAMLs in
+`chaos/experiments/` in the same PR. If the reconciler gains new sub-reconcilers
+or API operations, add corresponding chaos test scenarios in
+`chaostests/chaos_test.go`.

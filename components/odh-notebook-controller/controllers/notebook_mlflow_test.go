@@ -71,7 +71,7 @@ var _ = Describe("MLflow Integration", func() {
 						Containers: []corev1.Container{
 							{
 								Name:  Name,
-								Image: "registry.redhat.io/ubi9/ubi:latest",
+								Image: testNotebookImage,
 							},
 						},
 					},
@@ -431,7 +431,7 @@ var _ = Describe("MLflow Integration", func() {
 								Containers: []corev1.Container{
 									{
 										Name:  WebhookTestName,
-										Image: "registry.redhat.io/ubi9/ubi:latest",
+										Image: testNotebookImage,
 									},
 								},
 							},
@@ -499,7 +499,7 @@ var _ = Describe("MLflow Integration", func() {
 								Containers: []corev1.Container{
 									{
 										Name:  WebhookTestName,
-										Image: "registry.redhat.io/ubi9/ubi:latest",
+										Image: testNotebookImage,
 									},
 								},
 							},

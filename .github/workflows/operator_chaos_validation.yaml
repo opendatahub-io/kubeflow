@@ -10,8 +10,10 @@ name: Operator Chaos Validation
       - .github/workflows/operator_chaos_validation.yaml
       - components/notebook-controller/api/**
       - components/notebook-controller/controllers/**
+      - components/notebook-controller/chaostests/**
       - components/notebook-controller/config/crd/**
       - components/odh-notebook-controller/controllers/**
+      - components/odh-notebook-controller/chaostests/**
       - components/odh-notebook-controller/config/**
       - chaos/**
   workflow_dispatch:
@@ -63,6 +65,15 @@ jobs:
         run: |
           set -euo pipefail
           operator-chaos validate --knowledge chaos/knowledge/workbenches.yaml
+
+      - name: Validate experiment definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in chaos/experiments/*.yaml; do
+            echo "Validating ${f}..."
+            operator-chaos validate "${f}"
+          done
 
       - name: Run local preflight
         shell: bash
@@ -152,3 +163,25 @@ jobs:
             --source "${base_knowledge}" \
             --target chaos/knowledge \
             --dry-run
+
+      - name: Run chaos SDK tests (odh-notebook-controller)
+        shell: bash
+        working-directory: components/odh-notebook-controller
+        run: |
+          set -euo pipefail
+          make test-chaos
+
+      - name: Run chaos SDK tests (notebook-controller)
+        shell: bash
+        working-directory: components/notebook-controller
+        run: |
+          set -euo pipefail
+          make test-chaos
+
+      - name: Upload chaos coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./components/odh-notebook-controller/cover-chaos.out,./components/notebook-controller/cover-chaos.out
+          flags: chaos
+          disable_search: true

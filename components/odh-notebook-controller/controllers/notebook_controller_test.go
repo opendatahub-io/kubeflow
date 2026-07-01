@@ -1823,7 +1823,7 @@ func createNotebook(name, namespace string) *nbv1.Notebook {
 			Template: nbv1.NotebookTemplateSpec{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
 					Name:  name,
-					Image: "registry.redhat.io/ubi9/ubi:latest",
+					Image: testNotebookImage,
 				}}}},
 		},
 	}
@@ -1842,7 +1842,7 @@ func createNotebookWithKubeRbacProxy(name, namespace string) *nbv1.Notebook {
 			Template: nbv1.NotebookTemplateSpec{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
 					Name:  name,
-					Image: "registry.redhat.io/ubi9/ubi:latest",
+					Image: testNotebookImage,
 				}}}},
 		},
 	}
