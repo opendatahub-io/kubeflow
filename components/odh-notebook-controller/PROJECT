@@ -1,0 +1,6 @@
+domain: opendatahub.io
+layout:
+- go.kubebuilder.io/v3
+projectName: odh-notebook-controller
+repo: github.com/opendatahub-io/kubeflow/components/odh-notebook-controller
+version: "3"

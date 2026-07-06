@@ -1,0 +1,154 @@
+---
+name: Operator Chaos Validation
+"on":
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+    paths:
+      - .github/workflows/operator_chaos_validation.yaml
+      - components/notebook-controller/api/**
+      - components/notebook-controller/controllers/**
+      - components/notebook-controller/config/crd/**
+      - components/odh-notebook-controller/controllers/**
+      - components/odh-notebook-controller/config/**
+      - chaos/**
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base ref to compare against for manual runs"
+        required: false
+        default: main
+
+jobs:
+  operator-chaos:
+    name: operator-chaos shift-left validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/notebook-controller/go.mod
+
+      - name: Install operator-chaos
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/bin"
+          GOBIN="${RUNNER_TEMP}/bin" go install github.com/opendatahub-io/operator-chaos/cmd/operator-chaos@latest
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Checkout base branch assets
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base_ref || github.event.repository.default_branch }}
+          path: base-branch
+          persist-credentials: false
+          sparse-checkout: |
+            chaos/knowledge
+            components/notebook-controller/config/crd/bases/kubeflow.org_notebooks.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Validate knowledge model
+        shell: bash
+        run: |
+          set -euo pipefail
+          operator-chaos validate --knowledge chaos/knowledge/workbenches.yaml
+
+      - name: Run local preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          operator-chaos preflight --knowledge chaos/knowledge/workbenches.yaml --local
+
+      - name: Diff knowledge model
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_knowledge="base-branch/chaos/knowledge"
+          if [[ ! -d "${base_knowledge}" ]]; then
+            echo "No base knowledge model found; skipping knowledge diff for bootstrap PR."
+            exit 0
+          fi
+
+          output_dir="${RUNNER_TEMP}/operator-chaos"
+          mkdir -p "${output_dir}"
+          knowledge_diff_json="${output_dir}/knowledge-diff.json"
+
+          operator-chaos diff \
+            --source "${base_knowledge}" \
+            --target chaos/knowledge \
+            --breaking \
+            --format json > "${knowledge_diff_json}"
+          operator-chaos diff \
+            --source "${base_knowledge}" \
+            --target chaos/knowledge \
+            --breaking
+
+          knowledge_breaking=$(jq -r '.summary.breakingChanges // 0' "${knowledge_diff_json}")
+          if (( knowledge_breaking > 0 )); then
+            echo "operator-chaos detected ${knowledge_breaking} breaking knowledge change(s)."
+            exit 1
+          fi
+
+      - name: Diff Notebook CRD schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_crd="base-branch/components/notebook-controller/config/crd/bases/kubeflow.org_notebooks.yaml"
+          target_crd="components/notebook-controller/config/crd/bases/kubeflow.org_notebooks.yaml"
+          if [[ ! -f "${source_crd}" || ! -f "${target_crd}" ]]; then
+            echo "Base or current Notebook CRD not found; skipping CRD diff for bootstrap PR."
+            exit 0
+          fi
+
+          output_dir="${RUNNER_TEMP}/operator-chaos"
+          mkdir -p "${output_dir}"
+          source_dir="${output_dir}/source-crds"
+          target_dir="${output_dir}/target-crds"
+          crd_diff_json="${output_dir}/crd-diff.json"
+          rm -rf "${source_dir}" "${target_dir}"
+          mkdir -p "${source_dir}" "${target_dir}"
+          cp "${source_crd}" "${source_dir}/"
+          cp "${target_crd}" "${target_dir}/"
+
+          operator-chaos diff-crds \
+            --source-crds "${source_dir}" \
+            --target-crds "${target_dir}" \
+            --format json > "${crd_diff_json}"
+          operator-chaos diff-crds \
+            --source-crds "${source_dir}" \
+            --target-crds "${target_dir}"
+
+          crd_breaking=$(jq -r '
+            reduce ((.crds // [])[]?.apiVersions[]?.schemaChanges[]?) as $change
+              (0; if ($change.severity | ascii_downcase) == "breaking" then . + 1 else . end)
+          ' "${crd_diff_json}")
+          if (( crd_breaking > 0 )); then
+            echo "operator-chaos detected ${crd_breaking} breaking CRD schema change(s)."
+            exit 1
+          fi
+
+      - name: Preview upgrade simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_knowledge="base-branch/chaos/knowledge"
+          if [[ ! -d "${base_knowledge}" ]]; then
+            echo "No base knowledge model found; skipping simulate-upgrade for bootstrap PR."
+            exit 0
+          fi
+
+          operator-chaos simulate-upgrade \
+            --source "${base_knowledge}" \
+            --target chaos/knowledge \
+            --dry-run

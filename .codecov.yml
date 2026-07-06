@@ -1,0 +1,32 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        target: auto
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
+
+flags:
+  notebook-controller:
+    paths:
+      - components/notebook-controller/
+    carryforward: true
+  odh-notebook-controller:
+    paths:
+      - components/odh-notebook-controller/
+    carryforward: true
+
+ignore:
+  - "**/*_test.go"
+  - "**/zz_generated.*.go"
+  - "**/testdata/**"

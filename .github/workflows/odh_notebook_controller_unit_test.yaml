@@ -1,0 +1,39 @@
+name: Run ODH Notebook Controller unit tests
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+    paths:
+      - .github/workflows/odh_notebook_controller_unit_test.yaml
+      - components/odh-notebook-controller/**
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Install Go
+      uses: actions/setup-go@v6
+      with:
+        check-latest: true
+        go-version-file: components/odh-notebook-controller/go.mod
+        cache-dependency-path: components/odh-notebook-controller/go.sum
+
+    - name: Run unit tests
+      run: |
+        cd components/odh-notebook-controller
+        make test
+
+    - name: Upload results to Codecov
+      uses: codecov/codecov-action@v7
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./components/odh-notebook-controller/cover-rbac-false.out,./components/odh-notebook-controller/cover-rbac-true.out
+        flags: odh-notebook-controller
+        disable_search: true

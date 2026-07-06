@@ -1,0 +1,245 @@
+
+include makefile-vars.mk
+
+# Image URL to use all building/pushing image targets
+IMG ?= quay.io/opendatahub/odh-notebook-controller
+TAG ?= $(shell git describe --tags --always)
+ARCH ?= linux/amd64
+
+KF_IMG ?= quay.io/opendatahub/kubeflow-notebook-controller
+KF_TAG ?= $(KF_TAG)
+
+CONTAINER_ENGINE ?= podman
+
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+# We should try to use the kubernetes version that is used in the oldest OpenShift we support: https://access.redhat.com/solutions/4870701
+# Right now we target the OCP 4.19 as the oldest one: https://access.redhat.com/articles/rhoai-supported-configs
+ENVTEST_K8S_VERSION = 1.32
+
+# Kubernetes configuration
+K8S_NAMESPACE ?= odh-notebook-controller-system
+
+# Webhook configuration
+WEBHOOK_PORT = 8443
+WEBHOOK_CERT_DIR = /tmp/k8s-webhook-server/serving-certs
+
+# E2E tests additional flags
+E2E_TEST_FLAGS = "--skip-deletion=false" # See README.md
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set).
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# This is a requirement for 'setup-envtest.sh' in the test target.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
+.PHONY: all
+all: build
+
+##@ General
+
+# The help target prints out all targets with their descriptions organized
+# beneath their categories. The categories are represented by '##@' and the
+# target descriptions by '##'. The awk commands is responsible for reading the
+# entire set of makefiles included in this invocation, looking for lines of the
+# file as xyz: ## something, and then pretty-format the target and help. Then,
+# if there's a line with ##@ something, that gets pretty-printed as a category.
+# More info on the usage of ANSI control characters for terminal formatting:
+# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
+# More info on the awk command:
+# http://linuxcommand.org/lc3_adv_awk.php
+
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Development
+
+.PHONY: manifests
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+
+external-manifests: controller-gen ## Generate CustomResourceDefinition objects for 3rd party APIs.
+    # Openshift CRDs
+	go get github.com/openshift/api
+	$(CONTROLLER_GEN) crd \
+		paths=${GOPATH}/pkg/mod/github.com/openshift/api@v3.9.0+incompatible/route/v1 \
+		output:crd:artifacts:config=config/crd/external
+    # Kubeflow CRDS
+	$(KUSTOMIZE) build ../notebook-controller/config/crd > config/crd/external/kubeflow.org_notebooks.yaml
+
+.PHONY: license
+license: ## Generate third-party license
+	go list -m all | cut -d ' ' -f 1 > ./third_party/dep.txt
+	cd ./third_party && python3 ./concatenate_license.py --output=./license.txt
+
+.PHONY: generate
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+
+.PHONY: fmt
+fmt: ## Run go fmt against code.
+	go fmt ./...
+
+.PHONY: vet
+vet: ## Run go vet against code.
+	go vet ./...
+
+# Extract go version from go.mod (e.g., "1.23.6" from "go 1.23.6")
+GO_VERSION = $(shell grep '^go ' go.mod | awk '{print $$2}')
+.PHONY: govulncheck
+govulncheck: ## Run govulncheck against code. Uses the Go version specified in go.mod.
+	@if [ -z "$(GO_VERSION)" ]; then \
+		echo "Warning: No go version directive found in go.mod, using default Go version"; \
+		go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...; \
+	else \
+		echo "Using Go version: $(GO_VERSION)"; \
+		GOVERSION=go$(GO_VERSION) go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...; \
+	fi
+
+.PHONY: chaos-validate
+chaos-validate: operator-chaos ## Validate chaos knowledge model and run preflight checks.
+	$(OPERATOR_CHAOS) validate --knowledge ../../chaos/knowledge/workbenches.yaml
+	$(OPERATOR_CHAOS) preflight --knowledge ../../chaos/knowledge/workbenches.yaml --local
+
+.PHONY: test test-with-rbac-false test-with-rbac-true
+test: test-with-rbac-false test-with-rbac-true
+test-with-rbac-false: manifests generate fmt vet envtest ## Run tests.
+	export SET_PIPELINE_RBAC=false && \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover-rbac-false.out
+test-with-rbac-true: manifests generate fmt vet envtest ## Run tests.
+	export SET_PIPELINE_RBAC=true && \
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+		go test ./controllers/... -ginkgo.v -ginkgo.progress -test.v -coverprofile cover-rbac-true.out
+
+##@ Build
+
+.PHONY: build
+build: generate fmt vet ## Build manager binary.
+	go build -o bin/manager main.go
+
+.PHONY: run
+run: manifests generate fmt vet certificates ktunnel ## Run a controller from your host.
+	$(KTUNNEL) inject deployment odh-notebook-controller-ktunnel \
+		$(WEBHOOK_PORT) --eject=false --namespace $(K8S_NAMESPACE) &
+	go run ./main.go
+
+.PHONY: docker-build-no-test
+docker-build-no-test: ## Build docker image with the manager (without running tests).
+	cd ../ && "${CONTAINER_ENGINE}" build . --platform="${ARCH}" -t "${IMG}:${TAG}" -f odh-notebook-controller/Dockerfile
+
+.PHONY: docker-build
+docker-build: test docker-build-no-test ## Build docker image with the manager.
+
+.PHONY: docker-push
+docker-push: ## Push docker image with the manager.
+	"${CONTAINER_ENGINE}" push "${IMG}:${TAG}"
+
+.PHONY: image
+image: docker-build docker-push ## Build and push docker image with the manager.
+
+##@ Deployment
+
+ifndef ignore-not-found
+  ignore-not-found = false
+endif
+
+.PHONY: setup-kf
+setup-kf: kustomize ## Replace Kustomize manifests with your environment configuration.
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' \
+		../notebook-controller/config/overlays/openshift/kustomization.yaml
+	sed -i'' -e "s,odh-kf-notebook-controller-image=.*,odh-kf-notebook-controller-image=${KF_IMG}:${KF_TAG}," \
+		../notebook-controller/config/overlays/openshift/params.env
+
+.PHONY: setup
+setup: manifests kustomize ## Replace Kustomize manifests with your environment configuration.
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ./config/default/kustomization.yaml
+	sed -i'' -e "s,odh-notebook-controller-image=.*,odh-notebook-controller-image=${IMG}:${TAG}," ./config/base/params.env
+
+
+.PHONY: deploy-kf
+deploy-kf: setup-kf ## Deploy kubeflow controller to the Openshift cluster.
+	$(KUSTOMIZE) build ../notebook-controller/config/overlays/openshift | oc apply -f -
+
+.PHONY: deploy
+deploy: setup deploy-kf ## Deploy controller to the Openshift cluster.
+	$(KUSTOMIZE) build config/base | oc apply -f -
+
+
+.PHONY: deploy-dev
+deploy-dev: setup deploy-kf ## Deploy controller to the Openshift cluster.
+	$(KUSTOMIZE) build config/development | oc apply -f -
+
+.PHONY: certificates
+certificates: ## Extract webhook certificates generated by the Openshift CA.
+	mkdir -p $(WEBHOOK_CERT_DIR)
+	oc get secret odh-notebook-controller-webhook-cert \
+		-o go-template='{{index .data "tls.crt" | base64decode }}' > $(WEBHOOK_CERT_DIR)/tls.crt
+	oc get secret odh-notebook-controller-webhook-cert \
+		-o go-template='{{index .data "tls.key" | base64decode }}' > $(WEBHOOK_CERT_DIR)/tls.key
+
+.PHONY: undeploy-kf
+undeploy-kf: setup-kf ## Undeploy kubeflow controller from the Openshift cluster.
+	$(KUSTOMIZE) build ../notebook-controller/config/overlays/openshift | oc delete --ignore-not-found=true -f -
+
+.PHONY: undeploy
+undeploy: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
+	$(KUSTOMIZE) build config/base | oc delete --ignore-not-found=true -f -
+
+.PHONY: undeploy-dev
+undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
+	$(KUSTOMIZE) build config/development | oc delete --ignore-not-found=true -f -
+
+.PHONY: e2e-test
+e2e-test: ## Run e2e tests for the controller
+	# Default timeout is 10m but we need to increase it to 30m for the e2e tests
+	go test ./e2e/ -timeout=30m -run ^TestE2ENotebookController -v \
+		--nb-namespace=$(K8S_NAMESPACE) \
+		${E2E_TEST_FLAGS}
+
+.PHONY: run-ci-e2e-tests
+run-ci-e2e-tests:
+	bash ./run-e2e-test.sh
+
+
+##@ Build Dependencies
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN): ## Ensure that the directory exists
+	mkdir -p $(LOCALBIN)
+
+CONTROLLER_GEN = $(LOCALBIN)/controller-gen
+.PHONY: controller-gen
+controller-gen: ## Download controller-gen locally if necessary.
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0
+
+KUSTOMIZE = $(LOCALBIN)/kustomize
+.PHONY: kustomize
+kustomize: ## Download kustomize locally if necessary.
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@v5.0.2
+
+ENVTEST = $(LOCALBIN)/setup-envtest
+ENVTEST_VERSION?=v0.0.0-20250723164028-948d554cd9c7
+
+.PHONY: envtest
+envtest: ## Download setup-envtest locally if necessary - https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest#section-readme
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+OPERATOR_CHAOS ?= $(LOCALBIN)/operator-chaos
+.PHONY: operator-chaos
+operator-chaos: $(OPERATOR_CHAOS) ## Download operator-chaos locally if necessary.
+$(OPERATOR_CHAOS): $(LOCALBIN)
+	test -s $(OPERATOR_CHAOS) || GOBIN=$(LOCALBIN) go install github.com/opendatahub-io/operator-chaos/cmd/operator-chaos@latest
+
+KTUNNEL = $(LOCALBIN)/ktunnel
+.PHONY: ktunnel
+ktunnel: ## Download ktunnel locally if necessary.
+	GOBIN=$(LOCALBIN) go install github.com/omrikiei/ktunnel@v1.4.8

@@ -1,0 +1,39 @@
+name: Run Notebook Controller unit tests
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+    paths:
+      - .github/workflows/notebook_controller_unit_test.yaml
+      - components/notebook-controller/**
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Install Go
+      uses: actions/setup-go@v6
+      with:
+        check-latest: true
+        go-version-file: components/notebook-controller/go.mod
+        cache-dependency-path: components/notebook-controller/go.sum
+
+    - name: Run unit tests
+      run: |
+        cd components/notebook-controller
+        make test
+
+    - name: Upload results to Codecov
+      uses: codecov/codecov-action@v7
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./components/notebook-controller/cover.out
+        flags: notebook-controller
+        disable_search: true

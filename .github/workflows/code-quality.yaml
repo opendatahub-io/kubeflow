@@ -1,0 +1,102 @@
+---
+name: Code static analysis
+"on":
+  push:
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/notebook-controller/go.mod
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      # Skip hooks that already have dedicated jobs with richer PR integration (e.g. only-new-issues, inline annotations)
+      - uses: pre-commit/action@v3.0.1
+        env:
+          SKIP: golangci-lint-notebook-controller,golangci-lint-odh-notebook-controller
+
+  golangci:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - components/notebook-controller
+          - components/odh-notebook-controller
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: ${{ matrix.component }}/go.mod
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+
+      - name: golangci-lint
+        if: "${{ !cancelled() }}"
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --timeout=5m
+          version: v2.12.2
+          only-new-issues: true
+          working-directory: ${{ matrix.component }}
+
+      # additional checks not part of golangci-lint
+
+      # https://github.com/golangci/golangci-lint/issues/4123
+      - name: go mod verify
+        if: "${{ !cancelled() }}"
+        run: go mod verify
+        working-directory: ${{ matrix.component }}
+
+  check-generated-code:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rerun all code generators we have
+        run: bash ci/generate_code.sh
+
+      - name: Check there aren't any modified files present
+        run: |
+          clean=$(git status --porcelain)
+          if [[ -z "$clean" ]]; then
+              echo "Empty git status --porcelain: $clean"
+          else
+              echo "::error::Please run 'bash ci/generate_code.sh' (the command from the previous step), commit the changed files locally, and push again."
+              echo "Uncommitted file changes detected: $clean"
+              git diff
+              exit 1
+          fi
+
+  code-static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # This simply checks that the manifests and respective kustomization.yaml finishes without an error.
+      - name: Check kustomize manifest
+        id: kustomize-manifests
+        run: |
+          ./ci/kustomize.sh

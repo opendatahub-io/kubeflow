@@ -1,0 +1,16 @@
+# https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/#audit-policy
+# This is extremely verbose kube-apiserver logging that may be enabled for debugging of envtest-based tests
+---
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log all requests in `developer` namespace at the RequestResponse (maximum verbosity) level.
+  - level: RequestResponse
+    namespaces: ["developer"]
+
+# Use jq to analyze the log file this produces. For example:
+
+# jq 'select((.objectRef.apiGroup == "dscinitialization.opendatahub.io"
+#              or .objectRef.apiGroup == "datasciencecluster.opendatahub.io")
+#            and .user.username != "system:serviceaccount:redhat-ods-operator:redhat-ods-operator-controller-manager"
+#            and .verb != "get" and .verb != "watch" and .verb != "list")' < /tmp/kube-apiserver-audit.log

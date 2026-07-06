@@ -1,0 +1,74 @@
+---
+name: Update go.mod go directive
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump-go-directive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/notebook-controller/go.mod
+          cache: false
+
+      - name: Update go.mod go directives to latest patch
+        id: update-go
+        run: ./ci/bump-go-mod-go-version.sh
+
+      - name: Commit and open/update PR with GitHub CLI
+        if: ${{ steps.update-go.outputs.updated == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="automation/go-directive-patch-bump"
+          BASE_BRANCH="${{ github.ref_name }}"
+          COMMIT_MSG="chore(go): bump go directive patch versions"
+          PR_TITLE="chore(go): bump go directive patch versions"
+
+          cat > /tmp/go-directive-pr-body.md <<'EOF'
+          Automated update of the `go` directive patch versions in `go.mod` files.
+
+          This keeps the minimum required Go version aligned with upstream patch releases (including security fixes) while avoiding automatic minor/major jumps.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "${BRANCH}"
+          git add --all
+          git commit -m "${COMMIT_MSG}"
+          git push --force --set-upstream origin "${BRANCH}"
+
+          existing_pr_number="$(gh pr list --head "${BRANCH}" --base "${BASE_BRANCH}" --json number --jq '.[0].number // empty')"
+          if [[ -n "${existing_pr_number}" ]]; then
+            gh pr edit "${existing_pr_number}" \
+              --title "${PR_TITLE}" \
+              --body-file /tmp/go-directive-pr-body.md \
+              --add-label "dependencies" \
+              --add-label "go"
+          else
+            gh pr create \
+              --base "${BASE_BRANCH}" \
+              --head "${BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body-file /tmp/go-directive-pr-body.md \
+              --label "dependencies" \
+              --label "go"
+          fi

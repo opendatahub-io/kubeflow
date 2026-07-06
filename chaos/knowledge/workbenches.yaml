@@ -1,0 +1,86 @@
+operator:
+  name: workbenches
+  namespace: opendatahub
+  repository: https://github.com/opendatahub-io/kubeflow
+
+components:
+  - name: odh-notebook-controller
+    controller: DataScienceCluster
+    managedResources:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+        labels:
+          app: odh-notebook-controller
+          app.kubernetes.io/part-of: odh-notebook-controller
+          component.opendatahub.io/name: odh-notebook-controller
+        expectedSpec:
+          replicas: 1
+      - apiVersion: v1
+        kind: ServiceAccount
+        name: odh-notebook-controller-manager
+        namespace: opendatahub
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        name: odh-notebook-controller-manager-rolebinding
+      - apiVersion: v1
+        kind: Service
+        name: odh-notebook-controller-webhook-service
+        namespace: opendatahub
+      - apiVersion: v1
+        kind: Secret
+        name: odh-notebook-controller-webhook-cert
+        namespace: opendatahub
+    webhooks:
+      - name: notebooks.opendatahub.io
+        type: mutating
+        path: /mutate-notebook-v1
+      - name: notebooks-validation.opendatahub.io
+        type: validating
+        path: /validate-notebook-v1
+    steadyState:
+      timeout: "60s"
+      checks:
+        - type: conditionTrue
+          apiVersion: apps/v1
+          kind: Deployment
+          name: odh-notebook-controller-manager
+          namespace: opendatahub
+          conditionType: Available
+
+  - name: notebook-controller
+    controller: DataScienceCluster
+    managedResources:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: notebook-controller-deployment
+        namespace: opendatahub
+        labels:
+          app.kubernetes.io/part-of: odh-notebook-controller
+          component.opendatahub.io/name: kf-notebook-controller
+        expectedSpec:
+          replicas: 1
+      - apiVersion: v1
+        kind: ServiceAccount
+        name: notebook-controller-service-account
+        namespace: opendatahub
+      - apiVersion: v1
+        kind: ConfigMap
+        name: notebook-controller-culler-config
+        namespace: opendatahub
+    dependencies:
+      - odh-notebook-controller
+    steadyState:
+      timeout: "60s"
+      checks:
+        - type: conditionTrue
+          apiVersion: apps/v1
+          kind: Deployment
+          name: notebook-controller-deployment
+          namespace: opendatahub
+          conditionType: Available
+
+recovery:
+  reconcileTimeout: "300s"
+  maxReconcileCycles: 10

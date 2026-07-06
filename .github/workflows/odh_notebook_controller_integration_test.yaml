@@ -1,0 +1,306 @@
+name: ODH Notebook Controller Integration Test
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+    paths:
+      - .github/workflows/odh_notebook_controller_integration_test.yaml
+      - components/notebook-controller/**
+      - components/odh-notebook-controller/**
+  workflow_dispatch:
+
+env:
+  TAG: integration-test
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install podman
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/Release.key \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/keyrings/devel_kubic_libcontainers_unstable.gpg > /dev/null
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/devel_kubic_libcontainers_unstable.gpg]\
+              https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/ /" \
+            | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get -qq -y install podman
+          podman version
+
+          # temporary fix for https://github.com/containers/podman/issues/21024
+          wget https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_22.04/amd64/conmon_2.1.2~0_amd64.deb -O /tmp/conmon_2.1.2.deb
+          sudo apt install /tmp/conmon_2.1.2.deb
+
+          # Starting systemd user service
+          systemctl --user daemon-reload
+          systemctl --user start podman.socket
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          check-latest: true
+          go-version-file: components/odh-notebook-controller/go.mod
+          cache-dependency-path: components/odh-notebook-controller/go.sum
+
+      - name: Build Notebook Controller Image
+        run: |
+          cd components/notebook-controller
+          make docker-build-no-test
+        env:
+          IMG: notebook-controller
+          CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/notebook-controller/build-cache
+
+      - name: Build ODH Notebook Controller Image
+        run: |
+          cd components/odh-notebook-controller
+          make docker-build-no-test
+        env:
+          IMG: odh-notebook-controller
+          CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/odh-notebook-controller/build-cache
+
+      - name: Install KinD
+        run: ./components/testing/gh-actions/install_kind.sh
+
+      - name: Create KinD Cluster
+        run: kind create cluster --config components/testing/gh-actions/kind-1-32.yaml
+
+      - name: Load image into KinD Cluster
+        run: |
+          podman save -o ${{env.IMG}}.tar localhost/${{env.IMG}}:${{env.TAG}}
+          kind load image-archive ${{env.IMG}}.tar
+        env:
+          IMG: notebook-controller
+
+      - name: Load odh image into KinD Cluster
+        run: |
+          podman save -o ${{env.IMG}}.tar localhost/${{env.IMG}}:${{env.TAG}}
+          kind load image-archive ${{env.IMG}}.tar
+        env:
+          IMG: odh-notebook-controller
+
+      - name: Install kustomize
+        run: ./components/testing/gh-actions/install_kustomize.sh
+
+      - name: Install Istio
+        run: ./components/testing/gh-actions/install_istio.sh
+
+      - name: Install fake OpenShift CRDs
+        run: |
+          kubectl apply -f - <<EOF
+          ---
+          apiVersion: apiextensions.k8s.io/v1
+          kind: CustomResourceDefinition
+          metadata:
+            annotations:
+              crd/fake: "true"
+            name: imagestreams.image.openshift.io
+          spec:
+            group: image.openshift.io
+            names:
+              kind: ImageStream
+              listKind: ImageStreamList
+              singular: imagestream
+              plural: imagestreams
+            scope: Namespaced
+            versions:
+              - name: v1
+                schema:
+                  openAPIV3Schema:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                served: true
+                storage: true
+          EOF
+          # install gateway-api
+          kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
+
+      - name: Build & Apply manifests
+        run: |
+          set -x
+
+          cd components/notebook-controller/config/overlays/kubeflow
+          kubectl create ns kubeflow
+
+          export CURRENT_NOTEBOOK_IMG=docker.io/kubeflownotebookswg/notebook-controller
+          export PR_NOTEBOOK_IMG=localhost/${{env.IMG}}:${{env.TAG}}
+          kustomize edit set image ${CURRENT_NOTEBOOK_IMG}=${PR_NOTEBOOK_IMG}
+
+          # configure culler
+          cat <<EOF | kubectl apply -f -
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: notebook-controller-culler-config
+            namespace: kubeflow
+          data:
+            ENABLE_CULLING: "true"
+            CULL_IDLE_TIME: "60" # In minutes (1 hour)
+            IDLENESS_CHECK_PERIOD: "5" # In minutes
+          EOF
+
+          kustomize build . | sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | kubectl apply -f -
+          kubectl wait pods -n kubeflow -l app=notebook-controller --for=condition=Ready --timeout=100s
+        env:
+          IMG: notebook-controller
+
+      - name: Print logs
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n kubeflow -l app=notebook-controller
+          kubectl logs -n kubeflow -l app=notebook-controller
+
+      - name: Build & Apply ODH manifests
+        run: |
+          set -x
+
+          cd components/odh-notebook-controller/config/base
+          kubectl create ns opendatahub
+
+          sed -i "s|odh-notebook-controller-image=.*|odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}|" params.env
+
+          cat <<EOF | kubectl apply -f -
+          ---
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: notebook-controller-culler-config
+            namespace: opendatahub
+          data:
+            ENABLE_CULLING: "true"
+            CULL_IDLE_TIME: "60" # In minutes (1 hour)
+            IDLENESS_CHECK_PERIOD: "5" # In minutes
+          EOF
+
+          # odh-notebook-controller assumes that openshift-cert operator autocreates certificates when
+          # resources have the label `service.beta.openshift.io/serving-cert-secret-name`
+
+          # in kind we need to generate the certs ourselves, or use cert-operator (that's a kubebuilder recommendation)
+          openssl req -nodes -x509 -newkey rsa:4096 -sha256 -days 3650 -keyout ca-key.pem -out ca-cert.pem -subj "/CN=TestCA"
+          openssl req -nodes -newkey rsa:4096 -keyout server-key.pem -out server-csr.pem -subj "/CN=ServerC" -addext "subjectAltName = DNS:odh-notebook-controller-webhook-service.opendatahub.svc,DNS:odh-notebook-controller-webhook-service.opendatahub.svc.cluster.local"
+          openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem -out server-cert.pem -days 365 -copy_extensions copyall -ext subjectAltName
+
+          # deploy certificate for the webhook
+          openssl x509 -noout -text -in server-cert.pem
+          kubectl create secret tls -n opendatahub odh-notebook-controller-webhook-cert --cert=server-cert.pem --key=server-key.pem
+
+          # deploy certificate for the kube-rbac-proxy (needed when notebooks.opendatahub.io/inject-auth: "true")
+          kubectl create secret tls minimal-notebook-kube-rbac-proxy-tls --cert=server-cert.pem --key=server-key.pem
+
+          # deploy odh-notebook-controller manifests
+          kustomize build . | \
+            sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | \
+            sed 's|registry.redhat.io/openshift4/ose-kube-rbac-proxy.*|quay.io/brancz/kube-rbac-proxy:v0.20.0|g' | \
+            kubectl apply -f -
+
+          # patch the webhooks with our self-signed CA
+          bundlePatch=$(cat <<END
+          [{"op": "replace", "path": "/webhooks/0/clientConfig/caBundle", "value": "$(cat ca-cert.pem | base64 | tr -d '\n')" }]
+          END
+          )
+          kubectl patch MutatingWebhookConfiguration/odh-notebook-controller-mutating-webhook-configuration --type=json -p="$bundlePatch"
+          kubectl patch ValidatingWebhookConfiguration/odh-notebook-controller-validating-webhook-configuration --type=json -p="$bundlePatch"
+
+          # wait for the good result
+          kubectl wait pods -n opendatahub -l app=odh-notebook-controller --for=condition=Ready --timeout=100s
+        env:
+          IMG: odh-notebook-controller
+
+      - name: Print ODH logs
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n opendatahub -l app=odh-notebook-controller
+          kubectl logs -n opendatahub -l app=odh-notebook-controller
+
+      - name: Create notebook and check it, this is from kubeflow readme
+        run: |
+          notebook_namespace=default
+          cat <<EOF | kubectl apply -f -
+          ---
+          apiVersion: kubeflow.org/v1
+          kind: Notebook
+          metadata:
+            name: minimal-notebook
+            annotations:
+              notebooks.opendatahub.io/inject-auth: "true"
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: minimal-notebook
+                    image: quay.io/thoth-station/s2i-minimal-notebook:v0.3.0
+                    imagePullPolicy: Always
+                    workingDir: /opt/app-root/src
+                    env:
+                      - name: NOTEBOOK_ARGS
+                        value: |
+                          --ServerApp.port=8888
+                          --ServerApp.token=''
+                          --ServerApp.password=''
+                          --ServerApp.base_url=/notebook/${notebook_namespace}/minimal-notebook
+                    ports:
+                      - name: notebook-port
+                        containerPort: 8888
+                        protocol: TCP
+                    resources:
+                      requests:
+                        cpu: "1"
+                        memory: 1m
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                    livenessProbe:
+                      initialDelaySeconds: 10
+                      periodSeconds: 5
+                      timeoutSeconds: 1
+                      successThreshold: 1
+                      failureThreshold: 3
+                      httpGet:
+                        scheme: HTTP
+                        path: /notebook/${notebook_namespace}/minimal-notebook/api
+                        port: notebook-port
+          EOF
+
+          # wait for the statefulset to be created
+          timeout 100 bash -c -- 'until kubectl get statefulset minimal-notebook; do sleep 1; done'
+          # wait for the good result
+          kubectl rollout status --watch statefulset minimal-notebook
+          kubectl wait statefulset minimal-notebook --for=jsonpath='{.spec.replicas}'=1 --timeout=100s
+          kubectl rollout status --watch statefulset minimal-notebook --timeout=300s
+          kubectl wait pods minimal-notebook-0 --for=condition=Ready --timeout=100s
+
+      - name: Print notebook logs
+        if: "!cancelled()"
+        run: |
+          kubectl describe notebooks
+          kubectl describe statefulsets
+          kubectl describe pods
+          kubectl logs minimal-notebook-0
+          kubectl describe httproutes
+
+      - name: Print logs (again, at the end)
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n kubeflow -l app=notebook-controller
+          kubectl logs -n kubeflow -l app=notebook-controller
+      - name: Print ODH logs (again, at the end)
+        if: "!cancelled()"
+        run: |
+          kubectl describe pods -n opendatahub -l app=odh-notebook-controller
+          kubectl logs -n opendatahub -l app=odh-notebook-controller
