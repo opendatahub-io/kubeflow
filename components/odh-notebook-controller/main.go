@@ -98,14 +98,12 @@ func init() {
 // to types that have a per-type Transform override in ByObject.
 func stripConfigMapData(i interface{}) (interface{}, error) {
 	if cm, ok := i.(*corev1.ConfigMap); ok {
-		cp := cm.DeepCopy()
-		cp.Data = nil
-		cp.BinaryData = nil
-		if cp.Annotations != nil {
-			delete(cp.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
+		cm.Data = nil
+		cm.BinaryData = nil
+		if cm.Annotations != nil {
+			delete(cm.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 		}
-		cp.SetManagedFields(nil)
-		return cp, nil
+		cm.SetManagedFields(nil)
 	}
 	return i, nil
 }
@@ -116,14 +114,12 @@ func stripConfigMapData(i interface{}) (interface{}, error) {
 // to types that have a per-type Transform override in ByObject.
 func stripSecretData(i interface{}) (interface{}, error) {
 	if s, ok := i.(*corev1.Secret); ok {
-		cp := s.DeepCopy()
-		cp.Data = nil
-		cp.StringData = nil
-		if cp.Annotations != nil {
-			delete(cp.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
+		s.Data = nil
+		s.StringData = nil
+		if s.Annotations != nil {
+			delete(s.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 		}
-		cp.SetManagedFields(nil)
-		return cp, nil
+		s.SetManagedFields(nil)
 	}
 	return i, nil
 }
