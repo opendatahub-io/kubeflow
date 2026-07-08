@@ -187,12 +187,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if profile, err = tlspkg.FetchAPIServerTLSProfile(context.Background(), bootstrapClient); err != nil {
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bootstrapCancel()
+	if profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient); err != nil {
 		switch {
 		case apimeta.IsNoMatchError(err):
 			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
 		case k8serr.IsNotFound(err):
 			setupLog.Info("APIServer resource not found, using hardened defaults")
+		case k8serr.IsServiceUnavailable(err),
+			k8serr.IsTimeout(err),
+			k8serr.IsTooManyRequests(err):
+			hasOpenShiftConfigAPI = true // register watcher so it self-heals when the API recovers
+			setupLog.Info("Transient API error reading TLS profile, using hardened defaults", "error", err)
 		default:
 			setupLog.Error(err, "unable to read APIServer TLS profile, refusing to start with unknown TLS posture")
 			os.Exit(1)
@@ -211,6 +218,19 @@ func main() {
 		tlsOpts = append(tlsOpts, tlsConfigFn, func(c *tls.Config) {
 			c.NextProtos = nextProtos
 		})
+	}
+
+	// Fetch the TLS adherence policy (OpenShift only, requires the APIServer CRD)
+	tlsAdherenceFetched := false
+	var tlsAdherence configv1.TLSAdherencePolicy
+	if hasOpenShiftConfigAPI {
+		adherenceCtx, adherenceCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer adherenceCancel()
+		tlsAdherence, err = tlspkg.FetchAPIServerTLSAdherencePolicy(adherenceCtx, bootstrapClient)
+		if err != nil {
+			setupLog.Info("unable to fetch TLS adherence policy, watcher will retry", "error", err)
+		}
+		tlsAdherenceFetched = true // always register watcher; it self-heals when the API recovers (OCP ref: cluster-machine-approver)
 	}
 
 	// Setup controller manager
@@ -332,6 +352,13 @@ func main() {
 				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
 				cancel()
 			},
+		}
+		if tlsAdherenceFetched {
+			watcher.InitialTLSAdherencePolicy = tlsAdherence
+			watcher.OnAdherencePolicyChange = func(_ context.Context, _, _ configv1.TLSAdherencePolicy) {
+				setupLog.Info("TLS adherence policy changed, initiating shutdown to reload")
+				cancel()
+			}
 		}
 		if err := watcher.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to register TLS security profile watcher")
