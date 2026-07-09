@@ -105,6 +105,13 @@ func VirtualService(ctx context.Context, r client.Client, virtualServiceName, na
 // MergeManagedKeys merges keys from src into dst, preserving any extra keys
 // already present in dst. Returns the (possibly initialized) dst map and true
 // if any key was added or changed.
+//
+// NOTE: this function is append-only — it never removes keys from dst that
+// are absent in src. This is intentional for the generic StatefulSet /
+// Deployment / Service reconcilers where all keys in src are controller-owned
+// and key removal across releases is not expected. For resources with an
+// explicit set of managed keys (HTTPRoute, ReferenceGrant, etc.) use a
+// dedicated reconcile helper that also handles stale-key cleanup.
 func MergeManagedKeys(src, dst map[string]string) (map[string]string, bool) {
 	if len(src) == 0 {
 		return dst, false
