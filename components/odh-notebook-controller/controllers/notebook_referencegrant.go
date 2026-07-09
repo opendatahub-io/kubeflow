@@ -33,6 +33,14 @@ const (
 	ReferenceGrantName = "notebook-httproute-access"
 )
 
+// referenceGrantManagedLabelKeys lists the label keys that the controller owns
+// on ReferenceGrant resources. Used for both comparison and reconciliation to
+// keep the two paths in sync.
+var referenceGrantManagedLabelKeys = []string{
+	"app.kubernetes.io/managed-by",
+	"opendatahub.io/component",
+}
+
 // NewNotebookReferenceGrant creates a ReferenceGrant that allows HTTPRoutes from the
 // central application namespace to reference Services in the user's namespace where
 // Notebooks are created.
@@ -72,11 +80,7 @@ func NewNotebookReferenceGrant(namespace string, centralNamespace string) *gatew
 func CompareNotebookReferenceGrants(rg1 gatewayv1beta1.ReferenceGrant, rg2 gatewayv1beta1.ReferenceGrant) bool {
 	// Only compare controller-managed labels. Extra labels (e.g., added for
 	// sharding / policy / ops tooling) should not cause perpetual reconciliation.
-	managedLabelKeys := []string{
-		"app.kubernetes.io/managed-by",
-		"opendatahub.io/component",
-	}
-	for _, k := range managedLabelKeys {
+	for _, k := range referenceGrantManagedLabelKeys {
 		v1, ok1 := rg1.Labels[k]
 		v2, ok2 := rg2.Labels[k]
 		if ok1 != ok2 || v1 != v2 {
@@ -129,7 +133,7 @@ func (r *OpenshiftNotebookReconciler) ReconcileReferenceGrant(notebook *nbv1.Not
 				foundRefGrant.Labels = map[string]string{}
 			}
 			// Only reconcile controller-managed labels; preserve any others.
-			for _, k := range []string{"app.kubernetes.io/managed-by", "opendatahub.io/component"} {
+			for _, k := range referenceGrantManagedLabelKeys {
 				if desiredRefGrant.Labels != nil {
 					if v, ok := desiredRefGrant.Labels[k]; ok {
 						foundRefGrant.Labels[k] = v

@@ -157,6 +157,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			shardedNotebookName := "test-notebook-shard-label"
 			shardedNotebook := createNotebook(shardedNotebookName, Namespace)
 			Expect(cli.Create(ctx, shardedNotebook)).Should(Succeed())
+			defer func() {
+				_ = cli.Delete(ctx, shardedNotebook)
+			}()
 
 			shardedHTTPRoute := &gatewayv1.HTTPRoute{}
 
@@ -180,10 +183,10 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					CommonRouteSpec: gatewayv1.CommonRouteSpec{
 						ParentRefs: []gatewayv1.ParentReference{
 							{
-								Group:     func() *gatewayv1.Group { g := gatewayv1.Group("gateway.networking.k8s.io"); return &g }(),
-								Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Gateway"); return &k }(),
+								Group:     ptr.To(gatewayv1.Group("gateway.networking.k8s.io")),
+								Kind:      ptr.To(gatewayv1.Kind("Gateway")),
 								Name:      gatewayv1.ObjectName("data-science-gateway"),
-								Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace("openshift-ingress"); return &ns }(),
+								Namespace: ptr.To(gatewayv1.Namespace("openshift-ingress")),
 							},
 						},
 					},
@@ -193,7 +196,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								{
 									Path: &gatewayv1.HTTPPathMatch{
 										Type:  &pathPrefix,
-										Value: (*string)(&[]string{"/notebook/" + Namespace + "/" + shardedNotebookName}[0]),
+										Value: ptr.To("/notebook/" + Namespace + "/" + shardedNotebookName),
 									},
 								},
 							},
@@ -201,13 +204,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								{
 									BackendRef: gatewayv1.BackendRef{
 										BackendObjectReference: gatewayv1.BackendObjectReference{
-											Group:     func() *gatewayv1.Group { g := gatewayv1.Group(""); return &g }(),
-											Kind:      func() *gatewayv1.Kind { k := gatewayv1.Kind("Service"); return &k }(),
+											Group:     ptr.To(gatewayv1.Group("")),
+											Kind:      ptr.To(gatewayv1.Kind("Service")),
 											Name:      gatewayv1.ObjectName(shardedNotebookName),
-											Namespace: func() *gatewayv1.Namespace { ns := gatewayv1.Namespace(Namespace); return &ns }(),
-											Port:      (*gatewayv1.PortNumber)(&[]gatewayv1.PortNumber{8888}[0]),
+											Namespace: ptr.To(gatewayv1.Namespace(Namespace)),
+											Port:      ptr.To(gatewayv1.PortNumber(8888)),
 										},
-										Weight: func() *int32 { w := int32(1); return &w }(),
+										Weight: ptr.To(int32(1)),
 									},
 								},
 							},
@@ -242,9 +245,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			Expect(shardedHTTPRoute.GetLabels()).To(HaveKeyWithValue(shardLabelKey, shardLabelValue))
 			Expect(*shardedHTTPRoute).To(BeMatchingK8sResource(expectedShardedHTTPRoute, CompareNotebookHTTPRoutes))
-
-			By("By deleting the Notebook created for this test")
-			Expect(cli.Delete(ctx, shardedNotebook)).Should(Succeed())
 		})
 
 		It("Should recreate the HTTPRoute when deleted", func() {
