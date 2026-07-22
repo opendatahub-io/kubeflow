@@ -29,12 +29,14 @@ jobs:
       - name: Extract release version
         id: extract-version
         run: |
-          # Extract version from tekton output-image tag
-          # Format: value: quay.io/opendatahub/odh-notebook-controller:TAG
-          VERSION=$(grep -oP 'quay\.io/opendatahub/odh-notebook-controller:\K[^\s"]+' .tekton/odh-notebook-controller-push.yaml)
+          # Release version is the image tag promoted into params.env (what we ship),
+          # not the NEXT tag tracked in .tekton for future builds.
+          # Format: odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:TAG
+          VERSION=$(grep -oP 'odh-notebook-controller-image=quay\.io/opendatahub/odh-notebook-controller:\K[^\s"]+' \
+            components/odh-notebook-controller/config/base/params.env)
 
           if [ -z "$VERSION" ]; then
-            echo "Failed to extract version from tekton files"
+            echo "Failed to extract version from params.env"
             exit 1
           fi
 
@@ -44,7 +46,7 @@ jobs:
             exit 1
           fi
 
-          echo "Extracted version: $VERSION"
+          echo "Extracted release version from params.env: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check if release already exists
