@@ -26,7 +26,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	netv1 "k8s.io/api/networking/v1"
 
@@ -40,7 +39,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
+
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -150,36 +149,23 @@ func ReconciliationLockIsEnabled(meta metav1.ObjectMeta) bool {
 	}
 }
 
-// RemoveReconciliationLock waits until the image pull secret is mounted in the
-// notebook service account to remove the reconciliation lock annotation.
+// RemoveReconciliationLock removes the reconciliation lock annotation from the
+// notebook. It first checks whether the image pull secret is mounted in the
+// notebook service account; if not, it logs a warning but proceeds with lock
+// removal anyway (best-effort, matching the original contract). This is a
+// single non-blocking check rather than a synchronous retry loop, so the
+// reconciler worker is never stalled waiting for the pull secret.
 func (r *OpenshiftNotebookReconciler) RemoveReconciliationLock(notebook *nbv1.Notebook,
 	ctx context.Context) error {
-	// Wait until the image pull secret is mounted in the notebook service
-	// account
-	if err := retry.OnError(wait.Backoff{
-		Steps:    3,
-		Duration: 1 * time.Second,
-		Factor:   5.0,
-	}, func(error) bool { return true },
-		func() error {
-			serviceAccount := &corev1.ServiceAccount{}
-			if err := r.Get(ctx, types.NamespacedName{
-				Name:      notebook.Name,
-				Namespace: notebook.Namespace,
-			}, serviceAccount); err != nil {
-				return err
-			}
-			if len(serviceAccount.ImagePullSecrets) == 0 {
-				return errors.New("pull secret not mounted")
-			}
-			return nil
-		},
-	); err != nil {
-		// Log the error but don't fail - the lock removal is best-effort
-		r.Log.Info("Failed to wait for image pull secret", "error", err)
+	serviceAccount := &corev1.ServiceAccount{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      notebook.Name,
+		Namespace: notebook.Namespace,
+	}, serviceAccount)
+	if err != nil || len(serviceAccount.ImagePullSecrets) == 0 {
+		r.Log.Info("Image pull secret not yet available, proceeding with lock removal")
 	}
 
-	// Remove the reconciliation lock annotation
 	patch := client.RawPatch(types.MergePatchType,
 		[]byte(`{"metadata":{"annotations":{"`+culler.STOP_ANNOTATION+`":null}}}`))
 	return r.Patch(ctx, notebook, patch)
