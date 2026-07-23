@@ -53,6 +53,10 @@ oc delete --wait=true --ignore-not-found=true project "${TEST_NAMESPACE}" || ech
 # setup and deploy the controller
 oc new-project "${TEST_NAMESPACE}"
 
+# Install the DSPA CRD required by the controller's DSPA Watch (SET_PIPELINE_SECRET=true).
+# On full RHOAI clusters the CRD already exists via DSP Operator, so this is a no-op.
+oc apply -f config/crd/external/opendatahub.io_dspa.yaml
+
 # deploy and run e2e tests
 make deploy
 make e2e-test
