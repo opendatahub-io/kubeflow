@@ -1,0 +1,150 @@
+---
+name: Sync branches via PR
+
+on:
+  schedule:
+    # main → stable: every 12 hours at :00
+    - cron: "0 0,12 * * *"
+    # stable → v1.10-branch: every 12 hours at :00, offset by 4 h
+    - cron: "0 4,16 * * *"
+  workflow_dispatch:
+    inputs:
+      which:
+        description: "Which sync to run (scheduled runs use the matching cron only)"
+        type: choice
+        default: both
+        options:
+          - main-to-stable
+          - stable-to-v1.10
+          - both
+
+concurrency:
+  group: sync-branches-pr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── main → stable ─────────────────────────────────────────────────────
+  sync-main-to-stable:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.which == 'main-to-stable' || inputs.which == 'both'))
+      || (github.event_name == 'schedule' && github.event.schedule == '0 0,12 * * *')
+    env:
+      SOURCE_BRANCH: main
+      TARGET_BRANCH: stable
+      HEAD_BRANCH: automated/sync-main-to-stable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Preserve merge script before switching branches
+        run: cp "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh" /tmp/merge-source-into-head.sh
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge, push sync branch, and open/update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$TARGET_BRANCH:$TARGET_BRANCH"
+          git checkout "$TARGET_BRANCH"
+          git checkout -B "$HEAD_BRANCH"
+
+          set +e
+          bash /tmp/merge-source-into-head.sh
+          ec=$?
+          set -e
+
+          if [[ $ec -eq 10 ]]; then
+            echo "Already up to date; nothing to push."
+            exit 0
+          fi
+          if [[ $ec -ne 0 ]]; then
+            exit "$ec"
+          fi
+
+          git push -u origin "$HEAD_BRANCH" --force
+
+          repo="${{ github.repository }}"
+          existing=$(gh pr list --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" --state open --json number --jq 'length')
+          if [[ "$existing" -eq 0 ]]; then
+            gh pr create --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" \
+              --title "Sync: merge ${SOURCE_BRANCH} into ${TARGET_BRANCH}" \
+              --body "Automated sync PR created by the *Sync branches via PR* workflow. Auto-merge is enabled; the PR will merge once all required checks pass."
+          fi
+
+          pr_num=$(gh pr list --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')
+          gh pr merge "$pr_num" --repo "$repo" --auto --merge
+
+  # ── stable → v1.10-branch ─────────────────────────────────────────────
+  sync-stable-to-v1-10:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.which == 'stable-to-v1.10' || inputs.which == 'both'))
+      || (github.event_name == 'schedule' && github.event.schedule == '0 4,16 * * *')
+    env:
+      SOURCE_BRANCH: stable
+      TARGET_BRANCH: v1.10-branch
+      HEAD_BRANCH: automated/sync-stable-to-v1.10-branch
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Preserve merge script before switching branches
+        run: cp "$GITHUB_WORKSPACE/.github/scripts/merge-source-into-head.sh" /tmp/merge-source-into-head.sh
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge, push sync branch, and open/update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$TARGET_BRANCH:$TARGET_BRANCH"
+          git checkout "$TARGET_BRANCH"
+          git checkout -B "$HEAD_BRANCH"
+
+          set +e
+          bash /tmp/merge-source-into-head.sh
+          ec=$?
+          set -e
+
+          if [[ $ec -eq 10 ]]; then
+            echo "Already up to date; nothing to push."
+            exit 0
+          fi
+          if [[ $ec -ne 0 ]]; then
+            exit "$ec"
+          fi
+
+          git push -u origin "$HEAD_BRANCH" --force
+
+          repo="${{ github.repository }}"
+          existing=$(gh pr list --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" --state open --json number --jq 'length')
+          if [[ "$existing" -eq 0 ]]; then
+            gh pr create --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" \
+              --title "Sync: merge ${SOURCE_BRANCH} into ${TARGET_BRANCH}" \
+              --body "Automated sync PR created by the *Sync branches via PR* workflow. Auto-merge is enabled; the PR will merge once all required checks pass."
+          fi
+
+          pr_num=$(gh pr list --repo "$repo" --base "$TARGET_BRANCH" --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')
+          gh pr merge "$pr_num" --repo "$repo" --auto --merge
