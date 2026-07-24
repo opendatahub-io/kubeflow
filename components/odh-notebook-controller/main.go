@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -197,7 +198,9 @@ func main() {
 			setupLog.Info("APIServer resource not found, using hardened defaults")
 		case k8serr.IsServiceUnavailable(err),
 			k8serr.IsTimeout(err),
-			k8serr.IsTooManyRequests(err):
+			k8serr.IsServerTimeout(err),
+			k8serr.IsTooManyRequests(err),
+			errors.Is(err, context.DeadlineExceeded):
 			hasOpenShiftConfigAPI = true // register watcher so it self-heals when the API recovers
 			setupLog.Info("Transient API error reading TLS profile, using hardened defaults", "error", err)
 		default:
