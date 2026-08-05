@@ -11,9 +11,9 @@ jobs:
   tls-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: sebrandon1/tls-config-lint@a0d87d039a8d0c869c4bb535d013623eb93fa443 # v1
+      - uses: sebrandon1/tls-config-lint@60b40dfc1df9995e7cb032c146db7173a27d6691 # v1
         id: lint
         with:
           severity-threshold: high
