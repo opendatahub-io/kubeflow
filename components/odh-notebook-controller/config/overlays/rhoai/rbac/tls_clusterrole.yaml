@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: odh-notebook-controller-openshift-config-reader
+rules:
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - apiservers
+  - proxies
+  verbs:
+  - get
+  - list
+  - watch
