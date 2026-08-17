@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          args:
+            - --metrics-cert-path=/etc/metrics-certs
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          ports:
+            - name: nbc-metrics
+              containerPort: 8443
+              protocol: TCP
+          volumeMounts:
+            - name: metrics-certs
+              mountPath: /etc/metrics-certs
+              readOnly: true
+      volumes:
+        - name: metrics-certs
+          secret:
+            secretName: kf-notebook-controller-metrics-tls
+            optional: true

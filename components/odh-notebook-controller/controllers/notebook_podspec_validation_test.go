@@ -26,7 +26,7 @@ var _ = Describe("validatePodSpecSecurity", func() {
 		return &corev1.PodSpec{
 			Containers: []corev1.Container{{
 				Name:  "test",
-				Image: "test-image:latest",
+				Image: testContainerImage,
 			}},
 		}
 	}

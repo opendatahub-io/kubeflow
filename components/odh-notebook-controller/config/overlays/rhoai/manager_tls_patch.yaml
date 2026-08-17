@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manager
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          securityContext:
+            readOnlyRootFilesystem: true
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: metrics-certs
+              mountPath: /etc/metrics-certs
+              readOnly: true
+      volumes:
+        - name: metrics-certs
+          secret:
+            secretName: odh-notebook-controller-metrics-tls
+            optional: true
