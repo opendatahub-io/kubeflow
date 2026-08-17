@@ -30,13 +30,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	nbv1alpha1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1alpha1"
 	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/controllers"
 	controller_metrics "github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	nbtls "github.com/kubeflow/kubeflow/components/notebook-controller/pkg/tls"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -57,13 +59,17 @@ func init() {
 
 func main() {
 	var metricsAddr, leaderElectionNamespace string
+	var metricsCertPath, metricsCertName, metricsCertKey string
 	var enableLeaderElection bool
 	var probeAddr string
 	var Burst int
 	var QPS int
 	var log = logf.Log.WithName("main")
-	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
+	flag.StringVar(&metricsAddr, "metrics-addr", ":8443", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "probe-addr", ":8081", "The address the health endpoint binds to.")
+	flag.StringVar(&metricsCertPath, "metrics-cert-path", "", "Directory containing TLS cert/key for the metrics endpoint.")
+	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "Filename of the metrics TLS certificate.")
+	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "Filename of the metrics TLS private key.")
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "",
 		"Determines the namespace in which the leader election configmap will be created.")
 	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
@@ -84,9 +90,29 @@ func main() {
 		cfg.QPS = float32(QPS)
 	}
 
+	ctx := ctrl.SetupSignalHandler()
+
+	tlsResult, err := nbtls.Resolve(ctx, cfg)
+	if err != nil {
+		setupLog.Error(err, "unable to resolve TLS profile")
+		os.Exit(1)
+	}
+
+	metricsOpts := metricsserver.Options{
+		BindAddress:    metricsAddr,
+		SecureServing:  true,
+		FilterProvider: filters.WithAuthenticationAndAuthorization,
+		TLSOpts:        tlsResult.TLSOpts,
+	}
+	if metricsCertPath != "" {
+		metricsOpts.CertDir = metricsCertPath
+		metricsOpts.CertName = metricsCertName
+		metricsOpts.KeyName = metricsCertKey
+	}
+
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                  scheme,
-		Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                 metricsOpts,
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          enableLeaderElection,
 		LeaderElectionNamespace: leaderElectionNamespace,
@@ -95,6 +121,17 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
+	}
+
+	if tlsResult.APIAvailable {
+		watcher := nbtls.NewProfileWatcher(cfg, tlsResult.RawProfile, func() {
+			setupLog.Info("TLS profile changed, restarting manager")
+			os.Exit(0)
+		})
+		if err := watcher.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to set up TLS profile watcher")
+			os.Exit(1)
+		}
 	}
 
 	if err = (&controllers.NotebookReconciler{
@@ -141,7 +178,7 @@ func main() {
 	//+kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

@@ -55,6 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -141,10 +142,14 @@ func getControllerNamespace() (string, error) {
 
 func main() {
 	var metricsAddr, probeAddr, kubeRbacProxyImage, webhookCertDir string
+	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookPort int
 	var enableLeaderElection, enableDebugLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
+	flag.StringVar(&metricsCertPath, "metrics-cert-path", "", "Directory containing TLS cert/key for the metrics endpoint.")
+	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "Filename of the metrics TLS certificate.")
+	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "Filename of the metrics TLS private key.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
 	flag.StringVar(&kubeRbacProxyImage, "kube-rbac-proxy-image", "",
@@ -237,9 +242,20 @@ func main() {
 	}
 
 	// Setup controller manager
+	metricsOpts := metricsserver.Options{
+		BindAddress:    metricsAddr,
+		SecureServing:  true,
+		FilterProvider: filters.WithAuthenticationAndAuthorization,
+		TLSOpts:        tlsOpts,
+	}
+	if metricsCertPath != "" {
+		metricsOpts.CertDir = metricsCertPath
+		metricsOpts.CertName = metricsCertName
+		metricsOpts.KeyName = metricsCertKey
+	}
 	mgrConfig := ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsOpts},
+		Metrics:                metricsOpts,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "odh-notebook-controller",

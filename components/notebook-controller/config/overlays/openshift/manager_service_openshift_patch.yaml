@@ -7,4 +7,4 @@ spec:
     - name: webhook
       port: 443
     - name: nbc-metrics
-      port: 8080
+      port: 8443
