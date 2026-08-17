@@ -9,4 +9,3 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: notebook-controller-service-account
-  namespace: opendatahub
