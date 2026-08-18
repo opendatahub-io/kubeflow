@@ -38,15 +38,6 @@ rules:
   verbs:
   - create
 - apiGroups:
-  - config.openshift.io
-  resources:
-  - apiservers
-  - proxies
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - datasciencepipelinesapplications.opendatahub.io
   resources:
   - datasciencepipelinesapplications

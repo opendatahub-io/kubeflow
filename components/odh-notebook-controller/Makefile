@@ -1,4 +1,3 @@
-
 include makefile-vars.mk
 
 # Image URL to use all building/pushing image targets
@@ -176,6 +175,9 @@ deploy-kf: setup-kf ## Deploy kubeflow controller to the Openshift cluster.
 .PHONY: deploy
 deploy: setup deploy-kf ## Deploy controller to the Openshift cluster.
 	$(KUSTOMIZE) build config/base | oc apply -f -
+	oc apply -f config/overlays/rhoai/rbac/tls_clusterrole.yaml
+	sed -e 's/namespace: opendatahub/namespace: $(K8S_NAMESPACE)/' \
+		config/overlays/rhoai/rbac/tls_clusterrolebinding.yaml | oc apply -f -
 
 
 .PHONY: deploy-dev
@@ -197,6 +199,8 @@ undeploy-kf: setup-kf ## Undeploy kubeflow controller from the Openshift cluster
 .PHONY: undeploy
 undeploy: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
 	$(KUSTOMIZE) build config/base | oc delete --ignore-not-found=true -f -
+	oc delete --ignore-not-found=true -f config/overlays/rhoai/rbac/tls_clusterrole.yaml
+	oc delete --ignore-not-found=true -f config/overlays/rhoai/rbac/tls_clusterrolebinding.yaml
 
 .PHONY: undeploy-dev
 undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluster.
