@@ -40,7 +40,7 @@ func validatePodSpecSecurity(podSpec *corev1.PodSpec, notebookName string) error
 	}
 
 	for _, volume := range podSpec.Volumes {
-		if volume.VolumeSource.HostPath != nil {
+		if volume.HostPath != nil {
 			return fmt.Errorf("hostPath volume %q is not allowed in notebook pod spec", volume.Name)
 		}
 	}

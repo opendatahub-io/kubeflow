@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+- rbac
+- openshift-service-ca-configmap.yaml
+- monitor.yaml
+patches:
+- path: manager_tls_patch.yaml
+  target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: odh-notebook-controller-manager
+- path: manager_tls_args_patch.yaml
+  target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: odh-notebook-controller-manager
+- path: tls_service_patch.yaml
+  target:
+    group: ""
+    version: v1
+    kind: Service
+    name: odh-notebook-controller-service

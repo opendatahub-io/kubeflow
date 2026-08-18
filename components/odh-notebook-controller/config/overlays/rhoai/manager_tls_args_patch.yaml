@@ -1,0 +1,3 @@
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: --metrics-cert-path=/etc/metrics-certs

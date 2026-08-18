@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: odh-notebook-controller-metrics-monitor
+spec:
+  selector:
+    matchLabels:
+      app: odh-notebook-controller
+      kustomize.component: odh-notebook-controller
+  podMetricsEndpoints:
+    - port: metrics
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        serverName: odh-notebook-controller-service.opendatahub.svc
+        ca:
+          configMap:
+            name: openshift-service-ca.crt
+            key: service-ca.crt
