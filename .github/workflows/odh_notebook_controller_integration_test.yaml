@@ -126,6 +126,8 @@ jobs:
                 served: true
                 storage: true
           EOF
+          # install DSPA CRD (required by the DSPA watch in the controller)
+          kubectl apply -f components/odh-notebook-controller/config/crd/external/opendatahub.io_dspa.yaml
           # install gateway-api
           kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
 
