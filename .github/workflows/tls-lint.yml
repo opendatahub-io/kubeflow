@@ -25,7 +25,7 @@ jobs:
           # org-wide TLS compliance work is complete and findings are validated.
           # exclude-patterns: tls-profile-old,tls-profile-custom
 
-      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         if: always()
         with:
           sarif_file: tls-lint.sarif
