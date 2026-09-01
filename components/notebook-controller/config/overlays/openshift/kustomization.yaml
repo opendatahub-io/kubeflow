@@ -49,3 +49,20 @@ replacements:
       kind: Deployment
       name: deployment
       version: v1
+- source:
+    fieldPath: metadata.namespace
+    group: monitoring.coreos.com
+    kind: ServiceMonitor
+    name: notebook-controller-metrics-monitor
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.endpoints.0.tlsConfig.serverName
+    options:
+      delimiter: .
+      index: 1
+    select:
+      group: monitoring.coreos.com
+      kind: ServiceMonitor
+      name: notebook-controller-metrics-monitor
+      version: v1

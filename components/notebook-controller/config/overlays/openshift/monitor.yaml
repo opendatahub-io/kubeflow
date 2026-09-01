@@ -1,5 +1,5 @@
 apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
+kind: ServiceMonitor
 metadata:
   name: notebook-controller-metrics-monitor
 spec:
@@ -7,12 +7,12 @@ spec:
     matchLabels:
       app: notebook-controller
       kustomize.component: notebook-controller
-  podMetricsEndpoints:
+  endpoints:
     - port: nbc-metrics
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
-        serverName: notebook-controller-service.opendatahub.svc
+        serverName: notebook-controller-service.NAMESPACE_PLACEHOLDER.svc
         ca:
           configMap:
             name: openshift-service-ca.crt

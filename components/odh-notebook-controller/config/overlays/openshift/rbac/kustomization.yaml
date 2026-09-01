@@ -3,3 +3,5 @@ kind: Kustomization
 resources:
 - tls_clusterrole.yaml
 - tls_clusterrolebinding.yaml
+- metrics_auth_clusterrole.yaml
+- metrics_auth_clusterrolebinding.yaml

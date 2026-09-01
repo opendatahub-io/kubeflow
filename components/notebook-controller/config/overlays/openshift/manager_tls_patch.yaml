@@ -25,4 +25,4 @@ spec:
         - name: metrics-certs
           secret:
             secretName: kf-notebook-controller-metrics-tls
-            optional: true
+            optional: false

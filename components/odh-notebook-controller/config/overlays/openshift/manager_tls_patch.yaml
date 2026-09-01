@@ -21,4 +21,4 @@ spec:
         - name: metrics-certs
           secret:
             secretName: odh-notebook-controller-metrics-tls
-            optional: true
+            optional: false
