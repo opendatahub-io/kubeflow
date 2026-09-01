@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: odh-notebook-controller-openshift-config-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: odh-notebook-controller-openshift-config-reader
+subjects:
+- kind: ServiceAccount
+  name: odh-notebook-controller-manager
+  namespace: opendatahub
