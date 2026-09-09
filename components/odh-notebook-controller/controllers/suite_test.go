@@ -83,6 +83,7 @@ const (
 	interval                           = time.Second * 2
 	odhNotebookControllerTestNamespace = "redhat-ods-applications"
 	testNotebookImage                  = "registry.redhat.io/ubi9/ubi:latest"
+	testContainerImage                 = "test-image:latest"
 )
 
 func TestAPIs(t *testing.T) {
