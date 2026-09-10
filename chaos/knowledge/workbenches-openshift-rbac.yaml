@@ -1,0 +1,28 @@
+operator:
+  name: workbenches
+  namespace: opendatahub
+  repository: https://github.com/opendatahub-io/kubeflow
+  platform: openshift
+
+components:
+  - name: odh-notebook-controller-openshift-rbac
+    controller: DataScienceCluster
+    managedResources:
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        name: odh-notebook-controller-openshift-config-reader
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        name: odh-notebook-controller-openshift-config-reader-binding
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        name: odh-notebook-controller-metrics-auth
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        name: odh-notebook-controller-metrics-auth-binding
+    dependencies:
+      - odh-notebook-controller
+
+recovery:
+  reconcileTimeout: "300s"
+  maxReconcileCycles: 10
