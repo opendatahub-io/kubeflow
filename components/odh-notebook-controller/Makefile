@@ -177,7 +177,7 @@ setup-kf-base: kustomize ## Replace Kustomize manifests for xKS-safe kubeflow co
 .PHONY: setup
 setup: manifests kustomize ## Replace Kustomize manifests with your environment configuration.
 	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ./config/default/kustomization.yaml
-	sed -i'' -e "s,odh-notebook-controller-image=.*,odh-notebook-controller-image=${IMG}:${TAG}," ./config/base/params.env
+	sed -i'' -e "s,odh-notebook-controller-image=.*,odh-notebook-controller-image=${IMG}:${TAG}," ./config/overlays/odh/params.env
 
 
 .PHONY: deploy-kf
@@ -190,7 +190,7 @@ deploy-kf-base: setup-kf-base ## Deploy kubeflow controller without OpenShift-sp
 
 .PHONY: deploy
 deploy: setup deploy-kf ## Deploy controller to the OpenShift cluster (includes TLS RBAC overlay).
-	"$(KUSTOMIZE)" build config/overlays/openshift | oc apply -f -
+	"$(KUSTOMIZE)" build config/overlays/odh | oc apply -f -
 
 .PHONY: deploy-base
 deploy-base: setup deploy-kf-base ## Deploy controller without OpenShift-specific RBAC (xKS-safe base).
@@ -218,7 +218,7 @@ undeploy-kf-base: setup-kf-base ## Undeploy kubeflow controller without OpenShif
 
 .PHONY: undeploy
 undeploy: setup undeploy-kf ## Undeploy controller from the OpenShift cluster (includes TLS RBAC overlay).
-	"$(KUSTOMIZE)" build config/overlays/openshift | oc delete --ignore-not-found=true -f -
+	"$(KUSTOMIZE)" build config/overlays/odh | oc delete --ignore-not-found=true -f -
 
 .PHONY: undeploy-base
 undeploy-base: setup undeploy-kf-base ## Undeploy controller without OpenShift-specific RBAC (xKS-safe base).

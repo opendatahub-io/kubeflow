@@ -3,8 +3,7 @@ kind: Kustomization
 resources:
 - ../openshift
 configMapGenerator:
-- behavior: merge
-  envs:
+- envs:
   - params.env
   name: odh-notebook-controller-image-parameters
 replacements:
@@ -16,6 +15,45 @@ replacements:
   targets:
   - fieldPaths:
     - spec.template.spec.containers.0.image
+    select:
+      group: apps
+      kind: Deployment
+      name: odh-notebook-controller-manager
+      version: v1
+- source:
+    fieldPath: data.kube-rbac-proxy
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.0.args.1
+    select:
+      group: apps
+      kind: Deployment
+      name: odh-notebook-controller-manager
+      version: v1
+- source:
+    fieldPath: data.gateway-url
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=GATEWAY_URL].value
+    select:
+      group: apps
+      kind: Deployment
+      name: odh-notebook-controller-manager
+      version: v1
+- source:
+    fieldPath: data.mlflow-enabled
+    kind: ConfigMap
+    name: odh-notebook-controller-image-parameters
+    version: v1
+  targets:
+  - fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=MLFLOW_ENABLED].value
     select:
       group: apps
       kind: Deployment
