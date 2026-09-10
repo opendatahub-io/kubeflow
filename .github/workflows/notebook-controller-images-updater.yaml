@@ -109,7 +109,8 @@ jobs:
         VERSION=${{ steps.version.outputs.VERSION }}
         echo "Updating files in VERSION=${VERSION} with GIT_HASH=${GIT_HASH}"
         sed -E "s/(odh-kf-notebook-controller-image=quay\.io\/opendatahub\/kubeflow-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/notebook-controller/config/overlays/openshift/params.env
-        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/config/base/params.env
+        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/config/overlays/odh/params.env
+        sed -E "s/(odh-notebook-controller-image=quay\.io\/opendatahub\/odh-notebook-controller:)[^: -]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/config/overlays/rhoai/params.env
         sed -E "s/(KF_TAG \?= )[^\-]+(-)[^ ]+/\1$VERSION\2$GIT_HASH/" -i components/odh-notebook-controller/makefile-vars.mk
 
         git status
@@ -118,7 +119,8 @@ jobs:
           git fetch origin ${{ env.TEMP_UPDATER_BRANCH }}
           git pull origin ${{ env.TEMP_UPDATER_BRANCH }}
           git add components/notebook-controller/config/overlays/openshift/params.env
-          git add components/odh-notebook-controller/config/base/params.env
+          git add components/odh-notebook-controller/config/overlays/odh/params.env
+          git add components/odh-notebook-controller/config/overlays/rhoai/params.env
           git add components/odh-notebook-controller/makefile-vars.mk
           git commit -m "Update odh and notebook-controller with image ${VERSION}-${GIT_HASH}"
           git push origin ${{ env.TEMP_UPDATER_BRANCH }}
@@ -142,7 +144,8 @@ jobs:
 
             Have been updated the following related files:
               - components/notebook-controller/config/overlays/openshift/params.env
-              - components/odh-notebook-controller/config/base/params.env
+              - components/odh-notebook-controller/config/overlays/odh/params.env
+              - components/odh-notebook-controller/config/overlays/rhoai/params.env
               - components/odh-notebook-controller/makefile-vars.mk
 
     - name: Auto Merge Changes to Target Branch

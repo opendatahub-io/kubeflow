@@ -101,6 +101,9 @@ jobs:
 
       - name: Install fake OpenShift CRDs
         run: |
+          # ServiceMonitor is included in the odh overlay; install the CRD for KinD.
+          kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.73.2/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
+
           kubectl apply -f - <<EOF
           ---
           apiVersion: apiextensions.k8s.io/v1
@@ -169,10 +172,11 @@ jobs:
         run: |
           set -x
 
-          cd components/odh-notebook-controller/config/base
+          cd components/odh-notebook-controller/config/overlays/odh
           kubectl create ns opendatahub
 
           sed -i "s|odh-notebook-controller-image=.*|odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}|" params.env
+          sed -i "s|kube-rbac-proxy=.*|kube-rbac-proxy=quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3|" params.env
 
           cat <<EOF | kubectl apply -f -
           ---
@@ -195,9 +199,10 @@ jobs:
           openssl req -nodes -newkey rsa:4096 -keyout server-key.pem -out server-csr.pem -subj "/CN=ServerC" -addext "subjectAltName = DNS:odh-notebook-controller-webhook-service.opendatahub.svc,DNS:odh-notebook-controller-webhook-service.opendatahub.svc.cluster.local"
           openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem -out server-cert.pem -days 365 -copy_extensions copyall -ext subjectAltName
 
-          # deploy certificate for the webhook
+          # deploy certificate for the webhook and HTTPS metrics (odh overlay)
           openssl x509 -noout -text -in server-cert.pem
           kubectl create secret tls -n opendatahub odh-notebook-controller-webhook-cert --cert=server-cert.pem --key=server-key.pem
+          kubectl create secret tls -n opendatahub odh-notebook-controller-metrics-tls --cert=server-cert.pem --key=server-key.pem
 
           # deploy certificate for the kube-rbac-proxy (needed when notebooks.opendatahub.io/inject-auth: "true")
           kubectl create secret tls minimal-notebook-kube-rbac-proxy-tls --cert=server-cert.pem --key=server-key.pem
@@ -205,7 +210,7 @@ jobs:
           # deploy odh-notebook-controller manifests
           kustomize build . | \
             sed 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' | \
-            sed 's|registry.redhat.io/openshift4/ose-kube-rbac-proxy.*|quay.io/brancz/kube-rbac-proxy:v0.20.0|g' | \
+            sed 's|registry.redhat.io/openshift4/ose-kube-rbac-proxy.*|quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3|g' | \
             kubectl apply -f -
 
           # patch the webhooks with our self-signed CA

@@ -82,7 +82,8 @@ jobs:
         # Known files to resolve the conflicts
         FILES=(
           "components/notebook-controller/config/overlays/openshift/params.env"
-          "components/odh-notebook-controller/config/base/params.env"
+          "components/odh-notebook-controller/config/overlays/odh/params.env"
+          "components/odh-notebook-controller/config/overlays/rhoai/params.env"
           "components/odh-notebook-controller/makefile-vars.mk"
         )
 
