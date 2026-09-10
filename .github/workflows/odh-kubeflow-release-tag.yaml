@@ -35,7 +35,7 @@ jobs:
           # not the NEXT tag tracked in .tekton for future builds.
           # Format: odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:TAG
           VERSION=$(grep -oP 'odh-notebook-controller-image=quay\.io/opendatahub/odh-notebook-controller:\K[^\s"]+' \
-            components/odh-notebook-controller/config/base/params.env)
+            components/odh-notebook-controller/config/overlays/odh/params.env)
 
           if [ -z "$VERSION" ]; then
             echo "Failed to extract version from params.env"

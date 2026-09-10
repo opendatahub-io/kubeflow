@@ -66,7 +66,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          operator-chaos validate --knowledge chaos/knowledge/workbenches.yaml
+          for f in chaos/knowledge/*.yaml; do
+            echo "Validating ${f}..."
+            operator-chaos validate --knowledge "${f}"
+          done
 
       - name: Validate experiment definitions
         shell: bash

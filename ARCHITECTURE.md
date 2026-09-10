@@ -246,11 +246,21 @@ a central test pipeline in `odh-konflux-central` and can run for up to 10 hours.
 
 Both controllers are deployed via **kustomize** overlays:
 
-- `components/notebook-controller/config/` — CRDs, RBAC, manager deployment
-- `components/odh-notebook-controller/config/` — webhook config, RBAC,
-  manager deployment with OpenShift overlays
+- `components/notebook-controller/config/` — CRDs, RBAC, manager deployment;
+  OpenShift-specific TLS and metrics RBAC live under `config/overlays/openshift/`
+- `components/odh-notebook-controller/config/` — webhook config, RBAC, manager
+  deployment; overlays are layered as `base` → `openshift` → `odh`|`rhoai`
 
-The ODH controller's `make deploy` target deploys both controllers together.
+The shared `openshift` overlay holds OpenShift-only assets introduced by recent
+changes: `config.openshift.io` TLS profile RBAC, HTTPS metrics (ServiceMonitor,
+metrics auth RBAC), and TLS cert volume mounts. Distribution-specific image and
+runtime parameters (`params.env`) live under `config/overlays/odh/` and
+`config/overlays/rhoai/` — each overlay is the source of truth for its
+distribution.
+
+The ODH controller's `make deploy` target deploys both controllers together via
+`config/overlays/odh`. Use `make deploy-base` for xKS-safe base-only deployment
+without OpenShift RBAC.
 
 ## Relationship to Upstream
 

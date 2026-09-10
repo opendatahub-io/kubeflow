@@ -140,7 +140,9 @@ jobs:
         run: |
           # Update odh-notebook-controller params.env
           sed -i "s|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:.*|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:${ODH_TAG}|" \
-            components/odh-notebook-controller/config/base/params.env
+            components/odh-notebook-controller/config/overlays/odh/params.env
+          sed -i "s|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:.*|odh-notebook-controller-image=quay.io/opendatahub/odh-notebook-controller:${ODH_TAG}|" \
+            components/odh-notebook-controller/config/overlays/rhoai/params.env
 
           # Update notebook-controller params.env (openshift overlay)
           sed -i "s|odh-kf-notebook-controller-image=quay.io/opendatahub/kubeflow-notebook-controller:.*|odh-kf-notebook-controller-image=quay.io/opendatahub/kubeflow-notebook-controller:${KF_TAG}|" \
@@ -214,7 +216,8 @@ jobs:
 
           ### Files Updated
 
-          - \`components/odh-notebook-controller/config/base/params.env\`
+          - \`components/odh-notebook-controller/config/overlays/odh/params.env\`
+          - \`components/odh-notebook-controller/config/overlays/rhoai/params.env\`
           - \`components/notebook-controller/config/overlays/openshift/params.env\`
           - \`components/odh-notebook-controller/makefile-vars.mk\`
           - \`.tekton/odh-notebook-controller-push.yaml\`

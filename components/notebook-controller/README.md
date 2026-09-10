@@ -188,7 +188,8 @@ reconciler always calls `CopyStatefulSetFields` which triggers an Update on
 every reconcile pass (this test is present in the ODH controller's suite).
 
 L1/L2 (knowledge model validation, breaking-change detection) are handled at the
-operator level in `chaos/knowledge/workbenches.yaml` which covers both the
+operator level in `chaos/knowledge/` (`workbenches.yaml` for base resources,
+`workbenches-openshift-rbac.yaml` for OpenShift-only RBAC), which covers both the
 notebook-controller and odh-notebook-controller as a single operator. L3 is
 per-component because each reconciler must independently prove its resilience to
 API faults.

@@ -54,18 +54,26 @@ for shift-left upgrade validation (**Level 1-3**).
 
 ### Knowledge model and CI (L1 + L2)
 
-A repo-local knowledge model at `chaos/knowledge/workbenches.yaml` describes
-the operator topology (Deployments, ServiceAccounts, webhooks, steady-state
-checks). Experiment definitions live in `chaos/experiments/` — these are
-declarative YAML descriptions of chaos scenarios (pod-kill, network-partition,
-etc.) that are **schema-validated in CI only**; they are not executed against a
-cluster at this maturity level and are prepared for future L4 runtime execution
-via `operator-chaos run`.
+Repo-local knowledge models under `chaos/knowledge/` describe the workbenches
+operator topology:
+
+- `workbenches.yaml` — base managed resources (Deployments, ServiceAccounts,
+  webhooks, steady-state checks) for all platforms
+- `workbenches-openshift-rbac.yaml` — OpenShift-only RBAC (TLS profile reader,
+  metrics HTTPS auth); loaded with `operator.platform: openshift` and merged at
+  diff time with the base model
+
+Experiment definitions live in `chaos/experiments/` — these are declarative YAML
+descriptions of chaos scenarios (pod-kill, network-partition, etc.) that are
+**schema-validated in CI only**; they are not executed against a cluster at this
+maturity level and are prepared for future L4 runtime execution via
+`operator-chaos run`.
 
 A GitHub Actions workflow (`.github/workflows/operator_chaos_validation.yaml`)
 runs on PRs that touch API types, controllers, CRDs, or the chaos artifacts and:
 
-- validates the knowledge model (`validate --knowledge`, `preflight --local`)
+- validates every knowledge model YAML in `chaos/knowledge/`
+- runs local preflight against `workbenches.yaml` (`preflight --local`)
 - validates experiment definitions (`validate` for each YAML in `chaos/experiments/`)
 - diffs the knowledge model between base and PR branches (`diff --breaking`)
 - diffs the Notebook CRD schema between base and PR branches (`diff-crds`)
@@ -118,7 +126,7 @@ Covered scenarios:
 ### Local validation
 ```sh
 cd components/odh-notebook-controller
-make chaos-validate   # validates knowledge model + preflight
+make chaos-validate   # validates all chaos/knowledge/*.yaml + preflight
 make test-chaos       # runs ChaosClient SDK integration tests
 
 cd components/notebook-controller
@@ -127,10 +135,14 @@ make test-chaos       # runs ChaosClient SDK integration tests
 
 ### Maintenance
 
-When CRDs, webhooks, or managed resources change, update
-`chaos/knowledge/workbenches.yaml` and the experiment YAMLs in
-`chaos/experiments/` in the same PR. If the reconciler gains new
-sub-reconcilers or API operations, add corresponding
+When CRDs, webhooks, or managed resources change, update the knowledge model and
+experiment YAMLs in the same PR:
+
+- base/xKS resources → `chaos/knowledge/workbenches.yaml`
+- OpenShift-only resources → `chaos/knowledge/workbenches-openshift-rbac.yaml`
+- chaos scenarios → `chaos/experiments/`
+
+If the reconciler gains new sub-reconcilers or API operations, add corresponding
 chaos test scenarios in `chaostests/chaos_test.go`.
 
 ## Debug
@@ -162,12 +174,19 @@ go mod tidy -diff
 
 ## Deploy
 
+Kustomize overlays for `odh-notebook-controller` are layered as
+`base` → `openshift` → `odh`|`rhoai`. Image and runtime parameters live in
+`config/overlays/odh/params.env` and `config/overlays/rhoai/params.env`
+(distribution-specific entry points; currently equivalent).
+
 ```sh
 cd components/odh-notebook-controller
 
-make deploy -e K8S_NAMESPACE=<ns> -e IMG=<image>   # Deploy (includes upstream)
-make deploy-dev -e K8S_NAMESPACE=<ns>              # Dev overlay (ktunnel)
-make undeploy                                       # Undeploy
+make deploy -e K8S_NAMESPACE=<ns> -e IMG=<image>       # ODH overlay (OpenShift + params; includes upstream)
+make deploy-base -e K8S_NAMESPACE=<ns> -e IMG=<image>   # xKS-safe base only (no OpenShift RBAC)
+make deploy-dev -e K8S_NAMESPACE=<ns>                   # Dev overlay (ktunnel + ODH overlay)
+make undeploy                                           # Undeploy ODH overlay
+make undeploy-base                                      # Undeploy base only
 ```
 
 ## Conventions
