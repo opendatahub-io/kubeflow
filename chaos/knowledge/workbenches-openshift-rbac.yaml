@@ -20,6 +20,18 @@ components:
       - apiVersion: rbac.authorization.k8s.io/v1
         kind: ClusterRoleBinding
         name: odh-notebook-controller-metrics-auth-binding
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        name: notebook-controller-openshift-config-reader
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        name: notebook-controller-openshift-config-reader-binding
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        name: notebook-controller-metrics-auth
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        name: notebook-controller-metrics-auth-binding
     dependencies:
       - odh-notebook-controller
 

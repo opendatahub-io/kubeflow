@@ -177,6 +177,7 @@ setup-kf-base: kustomize ## Replace Kustomize manifests for xKS-safe kubeflow co
 .PHONY: setup
 setup: manifests kustomize ## Replace Kustomize manifests with your environment configuration.
 	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ./config/default/kustomization.yaml
+	sed -i'' -e 's,namespace: .*,namespace: '"${K8S_NAMESPACE}"',' ./config/overlays/odh/kustomization.yaml
 	sed -i'' -e "s,odh-notebook-controller-image=.*,odh-notebook-controller-image=${IMG}:${TAG}," ./config/overlays/odh/params.env
 
 

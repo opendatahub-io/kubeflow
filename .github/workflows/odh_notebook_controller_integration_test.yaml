@@ -196,7 +196,7 @@ jobs:
 
           # in kind we need to generate the certs ourselves, or use cert-operator (that's a kubebuilder recommendation)
           openssl req -nodes -x509 -newkey rsa:4096 -sha256 -days 3650 -keyout ca-key.pem -out ca-cert.pem -subj "/CN=TestCA"
-          openssl req -nodes -newkey rsa:4096 -keyout server-key.pem -out server-csr.pem -subj "/CN=ServerC" -addext "subjectAltName = DNS:odh-notebook-controller-webhook-service.opendatahub.svc,DNS:odh-notebook-controller-webhook-service.opendatahub.svc.cluster.local"
+          openssl req -nodes -newkey rsa:4096 -keyout server-key.pem -out server-csr.pem -subj "/CN=ServerC" -addext "subjectAltName = DNS:odh-notebook-controller-webhook-service.opendatahub.svc,DNS:odh-notebook-controller-webhook-service.opendatahub.svc.cluster.local,DNS:odh-notebook-controller-service.opendatahub.svc,DNS:odh-notebook-controller-service.opendatahub.svc.cluster.local"
           openssl x509 -req -in server-csr.pem -CA ca-cert.pem -CAkey ca-key.pem -out server-cert.pem -days 365 -copy_extensions copyall -ext subjectAltName
 
           # deploy certificate for the webhook and HTTPS metrics (odh overlay)
