@@ -136,6 +136,12 @@ Deploy the manager using the image in your registry:
 make deploy -e K8S_NAMESPACE=<YOUR_NAMESPACE> -e IMG=<YOUR_IMAGE>
 ```
 
+`make deploy` builds `config/overlays/odh` (OpenShift TLS/metrics layer plus
+distribution params). For xKS-safe base-only deployment without OpenShift RBAC,
+use `make deploy-base` instead. Kustomize overlays are layered as
+`base` → `openshift` → `odh`|`rhoai`; image and runtime parameters are defined
+in `config/overlays/odh/params.env` and `config/overlays/rhoai/params.env`.
+
 ### Run e2e Tests
 
 A user can run the e2e tests in the same namespace as the controllers. To deploy
@@ -177,7 +183,7 @@ maturity **Levels 1–3**:
 
 | Level | What it does | Artifacts |
 |-------|-------------|-----------|
-| L1 | Schema validation of knowledge model and experiment definitions | `chaos/knowledge/workbenches.yaml`, `chaos/experiments/*.yaml` |
+| L1 | Schema validation of knowledge model and experiment definitions | `chaos/knowledge/*.yaml`, `chaos/experiments/*.yaml` |
 | L2 | Breaking-change detection (knowledge diffs, CRD schema diffs, upgrade simulation) | CI workflow diffs against base branch |
 | L3 | ChaosClient SDK integration tests — injects API-level faults into the reconciler | `chaostests/chaos_test.go` (both components) |
 
@@ -201,7 +207,7 @@ including Create and Delete — fully deterministic.
 #### Running locally
 
 ```shell
-make chaos-validate   # validates knowledge model + experiment YAMLs + preflight
+make chaos-validate   # validates all chaos/knowledge/*.yaml + preflight
 make test-chaos       # runs ChaosClient SDK tests (isolated envtest, no manager)
 
 # notebook-controller chaos tests:
@@ -211,8 +217,13 @@ make test-chaos
 
 #### Maintenance
 
-When CRDs, webhooks, or managed resources change, update
-`chaos/knowledge/workbenches.yaml` and the experiment YAMLs in
-`chaos/experiments/` in the same PR. If the reconciler gains new sub-reconcilers
-or API operations, add corresponding chaos test scenarios in
-`chaostests/chaos_test.go`.
+When CRDs, webhooks, or managed resources change, update the knowledge model and
+experiment YAMLs in the same PR:
+
+- base/xKS resources → `chaos/knowledge/workbenches.yaml`
+- OpenShift-only resources (TLS profile RBAC, metrics HTTPS auth) →
+  `chaos/knowledge/workbenches-openshift-rbac.yaml`
+- chaos scenarios → `chaos/experiments/`
+
+If the reconciler gains new sub-reconcilers or API operations, add corresponding
+chaos test scenarios in `chaostests/chaos_test.go`.
