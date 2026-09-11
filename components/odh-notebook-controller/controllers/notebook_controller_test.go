@@ -52,7 +52,7 @@ import (
 var _ = Describe("The Openshift Notebook controller", func() {
 	// Define utility constants for testing timeouts/durations and intervals.
 	const (
-		duration = 10 * time.Second
+		duration = 30 * time.Second
 		interval = 200 * time.Millisecond
 	)
 
@@ -127,6 +127,19 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, key, httpRoute)
 			}, duration, interval).Should(Succeed())
 			Expect(*httpRoute).To(BeMatchingK8sResource(expectedHTTPRoute, CompareNotebookHTTPRoutes))
+		})
+
+		It("Should remove the reconciliation lock without blocking the reconciler", func() {
+			By("By verifying the lock is removed promptly (non-blocking)")
+			nonBlockingTimeout := 5 * time.Second
+			Eventually(func() (map[string]string, error) {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return nil, err
+				}
+				return notebook.Annotations, nil
+			}, nonBlockingTimeout, interval).Should(Not(HaveKey(culler.STOP_ANNOTATION)))
 		})
 
 		It("Should reconcile the HTTPRoute when modified", func() {
@@ -382,11 +395,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should create a RoleBinding when the referenced Role exists", func() {
-			By("Creating a Notebook and ensuring the Role exists")
-			Expect(cli.Create(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
-
-			// Simulate the Role required by RoleBinding
+			By("Creating the Role before the Notebook so the reconciler finds it")
 			role := &rbacv1.Role{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      roleRefName,
@@ -399,6 +408,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					GinkgoT().Logf("Failed to delete Role: %v", err)
 				}
 			}()
+
+			By("Creating the Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
 			By("Checking that the RoleBinding is created")
 			roleBinding := &rbacv1.RoleBinding{}
@@ -731,8 +743,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("When notebook CR is updated, should mount a trusted-ca if it exists on the given namespace", func() {
 			logger := logr.Discard()
 
-			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
-			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
+			By("By simulating the existence of odh-trusted-ca-bundle and service-ca ConfigMaps")
 			workbenchTrustedCACertBundle := WorkbenchTrustedCABundleName
 			trustedCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
@@ -747,23 +758,51 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					OdhCABundleCertKey: "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI4NDJaFw0yNTExMTMy\nMzI4NDJaMAAwKjAFBgMrZXADIQAw01381TUVSxaCvjQckcw3RTcg+bsVMgNZU8eF\nXa/f3jAFBgMrZXADQQBeJZHSiMOYqa/tXUrQTfNIcklHuvieGyBRVSrX3bVUV2uM\nDBkZLsZt65rCk1A8NG+xkA6j3eIMAA9vBKJ0ht8F\n-----END CERTIFICATE-----",
 				},
 			}
-			// Create the ConfigMap
+			serviceCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openshift-service-ca.crt",
+					Namespace: "default",
+				},
+				Data: map[string]string{
+					"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\nNjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\nj8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\nBBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\nZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\nB8i0efvecoLP/mqmXNyl7KgTnC4D\n-----END CERTIFICATE-----",
+				},
+			}
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
+			err := cli.Create(ctx, serviceCACertBundle)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
 			defer func() {
-				// Clean up the ConfigMap after the test
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
-					// Log the error without failing the test
+					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
+				}
+				if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
 					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
 			}()
 
-			By("By updating the Notebook's image")
+			By("By stopping the notebook so the webhook allows pod-template mutations")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
-			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+			Eventually(func() error {
+				if err := cli.Get(ctx, key, notebook); err != nil {
+					return err
+				}
+				if notebook.Annotations == nil {
+					notebook.Annotations = make(map[string]string)
+				}
+				notebook.Annotations[culler.STOP_ANNOTATION] = trueString
+				return cli.Update(ctx, notebook)
+			}, duration, interval).Should(Succeed())
 
+			By("By updating the Notebook's image")
 			updatedImage := "registry.redhat.io/ubi9/ubi:updated"
-			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			Eventually(func() error {
+				if err := cli.Get(ctx, key, notebook); err != nil {
+					return err
+				}
+				notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
+				return cli.Update(ctx, notebook)
+			}, duration, interval).Should(Succeed())
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly

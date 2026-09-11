@@ -728,11 +728,13 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 			},
 		}
 		err = cli.Create(ctx, workbenchConfigMap)
-		if err != nil {
+		if err != nil && !apierrs.IsAlreadyExists(err) {
 			log.Info("Failed to create workbench-trusted-ca-bundle ConfigMap")
 			return nil
 		}
-		log.Info("Created workbench-trusted-ca-bundle ConfigMap")
+		if err == nil {
+			log.Info("Created workbench-trusted-ca-bundle ConfigMap")
+		}
 	}
 
 	cm := workbenchConfigMap
