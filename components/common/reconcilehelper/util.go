@@ -102,23 +102,44 @@ func VirtualService(ctx context.Context, r client.Client, virtualServiceName, na
 
 // Reference: https://github.com/pwittrock/kubebuilder-workshop/blob/master/pkg/util/util.go
 
+// MergeManagedKeys merges keys from src into dst, preserving any extra keys
+// already present in dst. Returns the (possibly initialized) dst map and true
+// if any key was added or changed.
+//
+// NOTE: this function is append-only — it never removes keys from dst that
+// are absent in src. This is intentional for the generic StatefulSet /
+// Deployment / Service reconcilers where all keys in src are controller-owned
+// and key removal across releases is not expected. For resources with an
+// explicit set of managed keys (HTTPRoute, ReferenceGrant, etc.) use a
+// dedicated reconcile helper that also handles stale-key cleanup.
+func MergeManagedKeys(src, dst map[string]string) (map[string]string, bool) {
+	if len(src) == 0 {
+		return dst, false
+	}
+	changed := false
+	if dst == nil {
+		dst = make(map[string]string, len(src))
+	}
+	for k, v := range src {
+		if dst[k] != v {
+			changed = true
+		}
+		dst[k] = v
+	}
+	return dst, changed
+}
+
 // CopyStatefulSetFields copies the owned fields from one StatefulSet to another
 // Returns true if the fields copied from don't match to.
 func CopyStatefulSetFields(from, to *appsv1.StatefulSet) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Labels = from.Labels
+	var changed bool
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Annotations = from.Annotations
+	to.Labels, changed = MergeManagedKeys(from.Labels, to.Labels)
+	requireUpdate = requireUpdate || changed
+
+	to.Annotations, changed = MergeManagedKeys(from.Annotations, to.Annotations)
+	requireUpdate = requireUpdate || changed
 
 	if *from.Spec.Replicas != *to.Spec.Replicas {
 		*to.Spec.Replicas = *from.Spec.Replicas
@@ -135,19 +156,13 @@ func CopyStatefulSetFields(from, to *appsv1.StatefulSet) bool {
 
 func CopyDeploymentSetFields(from, to *appsv1.Deployment) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Labels = from.Labels
+	var changed bool
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Annotations = from.Annotations
+	to.Labels, changed = MergeManagedKeys(from.Labels, to.Labels)
+	requireUpdate = requireUpdate || changed
+
+	to.Annotations, changed = MergeManagedKeys(from.Annotations, to.Annotations)
+	requireUpdate = requireUpdate || changed
 
 	if from.Spec.Replicas != to.Spec.Replicas {
 		to.Spec.Replicas = from.Spec.Replicas
@@ -165,19 +180,13 @@ func CopyDeploymentSetFields(from, to *appsv1.Deployment) bool {
 // CopyServiceFields copies the owned fields from one Service to another
 func CopyServiceFields(from, to *corev1.Service) bool {
 	requireUpdate := false
-	for k, v := range to.Labels {
-		if from.Labels[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Labels = from.Labels
+	var changed bool
 
-	for k, v := range to.Annotations {
-		if from.Annotations[k] != v {
-			requireUpdate = true
-		}
-	}
-	to.Annotations = from.Annotations
+	to.Labels, changed = MergeManagedKeys(from.Labels, to.Labels)
+	requireUpdate = requireUpdate || changed
+
+	to.Annotations, changed = MergeManagedKeys(from.Annotations, to.Annotations)
+	requireUpdate = requireUpdate || changed
 
 	// Don't copy the entire Spec, because we can't overwrite the clusterIp field
 

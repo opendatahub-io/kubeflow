@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	reconcilehelper "github.com/kubeflow/kubeflow/components/common/reconcilehelper"
 	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -288,6 +289,119 @@ func TestCreateNotebookStatus(t *testing.T) {
 		})
 	}
 
+}
+
+func TestCopyStatefulSetFieldsPreservesExtraLabels(t *testing.T) {
+	one := int32(1)
+
+	tests := []struct {
+		name           string
+		fromLabels     map[string]string
+		toLabels       map[string]string
+		wantLabels     map[string]string
+		wantUpdate     bool
+	}{
+		{
+			name:       "adds managed labels, preserves extra",
+			fromLabels: map[string]string{"managed": "val1"},
+			toLabels:   map[string]string{"extra": "keep"},
+			wantLabels: map[string]string{"managed": "val1", "extra": "keep"},
+			wantUpdate: true,
+		},
+		{
+			name:       "no update when labels already match",
+			fromLabels: map[string]string{"managed": "val1"},
+			toLabels:   map[string]string{"managed": "val1", "extra": "keep"},
+			wantLabels: map[string]string{"managed": "val1", "extra": "keep"},
+			wantUpdate: false,
+		},
+		{
+			name:       "updates changed managed label value",
+			fromLabels: map[string]string{"managed": "new"},
+			toLabels:   map[string]string{"managed": "old", "extra": "keep"},
+			wantLabels: map[string]string{"managed": "new", "extra": "keep"},
+			wantUpdate: true,
+		},
+		{
+			name:       "from labels nil, to labels preserved",
+			fromLabels: nil,
+			toLabels:   map[string]string{"extra": "keep"},
+			wantLabels: map[string]string{"extra": "keep"},
+			wantUpdate: false,
+		},
+		{
+			name:       "to labels nil, initialised from from",
+			fromLabels: map[string]string{"managed": "val1"},
+			toLabels:   nil,
+			wantLabels: map[string]string{"managed": "val1"},
+			wantUpdate: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			from := &appsv1.StatefulSet{
+				ObjectMeta: v1.ObjectMeta{Labels: tt.fromLabels},
+				Spec:       appsv1.StatefulSetSpec{Replicas: &one, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{}}},
+			}
+			to := &appsv1.StatefulSet{
+				ObjectMeta: v1.ObjectMeta{Labels: tt.toLabels},
+				Spec:       appsv1.StatefulSetSpec{Replicas: &one, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{}}},
+			}
+			got := reconcilehelper.CopyStatefulSetFields(from, to)
+			if got != tt.wantUpdate {
+				t.Errorf("CopyStatefulSetFields() = %v, want %v", got, tt.wantUpdate)
+			}
+			if !reflect.DeepEqual(to.Labels, tt.wantLabels) {
+				t.Errorf("Labels = %v, want %v", to.Labels, tt.wantLabels)
+			}
+		})
+	}
+}
+
+func TestPodTemplateLabelMergePreservesExtraLabels(t *testing.T) {
+	tests := []struct {
+		name         string
+		desiredPodLabels  map[string]string
+		existingPodLabels map[string]string
+		wantPodLabels     map[string]string
+	}{
+		{
+			name:              "merges managed, preserves extra",
+			desiredPodLabels:  map[string]string{"notebook-name": "nb1", "statefulset": "nb1"},
+			existingPodLabels: map[string]string{"notebook-name": "nb1", "statefulset": "nb1", "kueue-queue": "default"},
+			wantPodLabels:     map[string]string{"notebook-name": "nb1", "statefulset": "nb1", "kueue-queue": "default"},
+		},
+		{
+			name:              "corrects drifted managed label",
+			desiredPodLabels:  map[string]string{"notebook-name": "nb1"},
+			existingPodLabels: map[string]string{"notebook-name": "wrong", "kueue-queue": "default"},
+			wantPodLabels:     map[string]string{"notebook-name": "nb1", "kueue-queue": "default"},
+		},
+		{
+			name:              "handles nil existing labels",
+			desiredPodLabels:  map[string]string{"notebook-name": "nb1"},
+			existingPodLabels: nil,
+			wantPodLabels:     map[string]string{"notebook-name": "nb1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := tt.existingPodLabels
+			for k, v := range tt.desiredPodLabels {
+				if existing == nil || existing[k] != v {
+					if existing == nil {
+						existing = map[string]string{}
+					}
+					existing[k] = v
+				}
+			}
+			if !reflect.DeepEqual(existing, tt.wantPodLabels) {
+				t.Errorf("PodTemplate.Labels = %v, want %v", existing, tt.wantPodLabels)
+			}
+		})
+	}
 }
 
 func createMockReconciler() *NotebookReconciler {
