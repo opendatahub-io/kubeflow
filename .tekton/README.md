@@ -9,7 +9,7 @@ The PR pipeline definitions (`*-pull-request.yaml`) were adapted from stable wit
 
 - Branch references were updated from `stable` to `main`.
 - PR-built images are configured to expire after `7d`.
-- Added an explicit `on-cel-expression` so builds run only when relevant files or directories change.
+- Added an explicit `on-cel-expression` so each PR image build runs only when that image's sources change. A successful PR image build then posts `/early-gate-build` (central pipeline default `enable-early-gate-testing: "true"`).
 - Added pipeline timeouts.
 - Configured running pipelines to cancel when a new change is pushed to the PR.
 - Additional pipeline parameters were added:
@@ -36,3 +36,7 @@ Key differences from the stable branch push pipelines:
 - `pipeline-type` is set to `"kubeflow-main-build"` instead of the default `"push"`. This deliberately prevents the `trigger-operator-build` task from running, which would otherwise kick off downstream operator, operator-bundle, and FBC fragment CI builds. Those downstream triggers are not needed on the `main` branch.
 - `enable-group-testing` is set to `"true"` to run e2e tests after a successful build.
 - Push-built images use the `:main` tag and do not expire.
+
+## Early-gate pipelines
+
+`early-gate-ci-build.yaml` and `early-gate-ci-test.yaml` are comment-triggered (`/early-gate-build`, `/early-gate-test`). After a relevant Konflux PR image build succeeds, `/early-gate-build` is posted automatically. `enable-early-gate-testing: "true"` on the build PipelineRun then posts `/early-gate-test` after a successful FBC build. Both runs cancel in progress when a newer comment retriggers them.
