@@ -130,10 +130,16 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 
 		It("Should remove the reconciliation lock without blocking the reconciler", func() {
-			By("By verifying the lock is removed promptly (non-blocking)")
+			// The webhook (InjectReconciliationLock) sets culler.STOP_ANNOTATION on
+			// every notebook CREATE. The preceding It block created the notebook,
+			// so the annotation was set by the webhook during admission.
+			By("By confirming the notebook was created (webhook sets the lock on CREATE)")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+			By("By verifying the reconciliation lock is removed promptly (non-blocking)")
 			nonBlockingTimeout := 5 * time.Second
 			Eventually(func() (map[string]string, error) {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
 				err := cli.Get(ctx, key, notebook)
 				if err != nil {
 					return nil, err
@@ -768,16 +774,21 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				},
 			}
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
+			serviceCACreated := false
 			err := cli.Create(ctx, serviceCACertBundle)
 			if err != nil && !apierrors.IsAlreadyExists(err) {
 				Expect(err).NotTo(HaveOccurred())
+			} else if err == nil {
+				serviceCACreated = true
 			}
 			defer func() {
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
 					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
 				}
-				if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
-					logger.Info("Error occurred during deletion of ConfigMap", "error", err)
+				if serviceCACreated {
+					if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
+						logger.Info("Error occurred during deletion of ConfigMap", "error", err)
+					}
 				}
 			}()
 
