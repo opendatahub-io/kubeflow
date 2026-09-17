@@ -4,6 +4,7 @@ metadata:
   annotations:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-event: "[issue_comment]"
     pipelinesascode.tekton.dev/on-comment: "^/early-gate-test$"

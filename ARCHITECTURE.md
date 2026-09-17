@@ -237,9 +237,14 @@ Pipelines-as-Code:
 | `odh-notebook-controller-pull-request.yaml` | Build `odh-notebook-controller` image on PRs |
 | `odh-kf-notebook-controller-pull-request.yaml` | Build `kubeflow-notebook-controller` image on PRs |
 | `kubeflow-group-test.yaml` | Group integration/e2e test (triggered via `/group-test` comment) |
+| `early-gate-ci-build.yaml` | Early-gate operator/bundle/FBC build (`/early-gate-build`) |
+| `early-gate-ci-test.yaml` | Early-gate smoke tests (`/early-gate-test`) |
 
-Build pipelines run automatically when files under `components/` or `.tekton/`
-change. PR-built images expire after 7 days. The group test pipeline references
+PR image builds run when that image's sources change (`odh-notebook-controller`
+plus `notebook-controller` for the ODH image; `notebook-controller` plus
+`common` for the Kubeflow image). A successful PR image build posts
+`/early-gate-build`; a successful FBC build then posts `/early-gate-test`.
+PR-built images expire after 7 days. The group test pipeline references
 a central test pipeline in `odh-konflux-central` and can run for up to 10 hours.
 
 ## Deployment
