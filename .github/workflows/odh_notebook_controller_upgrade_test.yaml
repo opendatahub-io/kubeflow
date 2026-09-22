@@ -1,0 +1,128 @@
+name: ODH Notebook Controller Upgrade Test
+on:
+  pull_request:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
+    paths:
+      - .github/workflows/odh_notebook_controller_upgrade_test.yaml
+      - components/notebook-controller/**
+      - components/odh-notebook-controller/**
+      - components/testing/upgrade/**
+  workflow_dispatch:
+    inputs:
+      baseline_kf_image:
+        description: Baseline notebook-controller image (default = target-branch tip)
+        required: false
+        default: quay.io/opendatahub/kubeflow-notebook-controller:main
+      baseline_odh_image:
+        description: Baseline odh-notebook-controller image (default = target-branch tip)
+        required: false
+        default: quay.io/opendatahub/odh-notebook-controller:main
+      strict_logs:
+        description: Fail if known error patterns are found in controller logs
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  TAG: upgrade-test
+  # Default baseline = images from the PR target branch tip (:main).
+  # Override via workflow_dispatch for release-pin / N-1 experiments.
+  BASELINE_KF_IMAGE: quay.io/opendatahub/kubeflow-notebook-controller:main
+  BASELINE_ODH_IMAGE: quay.io/opendatahub/odh-notebook-controller:main
+
+jobs:
+  upgrade-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Ensure compatible container runtime
+        run: |
+          # Podman 5.x generates OCI runtime specs that crun 1.14.1 (shipped with
+          # Ubuntu 24.04) cannot handle, causing "unknown version specified" errors.
+          # Switch to runc which supports the newer spec versions. This only affects
+          # how RUN steps execute during image build — the output image is identical.
+          mkdir -p ~/.config/containers
+          printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
+          podman version
+          runtime=$(podman info --format '{{.Host.OCIRuntime.Name}}')
+          echo "OCI runtime: $runtime ($(podman info --format '{{.Host.OCIRuntime.Version}}'))"
+          if [[ "$runtime" != "runc" ]]; then
+            echo "::error::Expected podman to use runc, got: $runtime"
+            exit 1
+          fi
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          check-latest: true
+          go-version-file: components/odh-notebook-controller/go.mod
+          cache-dependency-path: |
+            components/notebook-controller/go.sum
+            components/odh-notebook-controller/go.sum
+
+      - name: Build target Notebook Controller image
+        run: |
+          cd components/notebook-controller
+          make docker-build-no-test
+        env:
+          IMG: localhost/notebook-controller
+          TAG: ${{ env.TAG }}
+          CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/notebook-controller/build-cache
+
+      - name: Build target ODH Notebook Controller image
+        run: |
+          cd components/odh-notebook-controller
+          make docker-build-no-test
+        env:
+          IMG: localhost/odh-notebook-controller
+          TAG: ${{ env.TAG }}
+          CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/odh-notebook-controller/build-cache
+
+      - name: Install KinD
+        run: ./components/testing/gh-actions/install_kind.sh
+
+      - name: Install kustomize
+        run: ./components/testing/gh-actions/install_kustomize.sh
+
+      - name: Run upgrade test
+        run: |
+          baseline_kf="${{ github.event.inputs.baseline_kf_image }}"
+          baseline_odh="${{ github.event.inputs.baseline_odh_image }}"
+          if [[ -z "${baseline_kf}" ]]; then
+            baseline_kf="${{ env.BASELINE_KF_IMAGE }}"
+          fi
+          if [[ -z "${baseline_odh}" ]]; then
+            baseline_odh="${{ env.BASELINE_ODH_IMAGE }}"
+          fi
+          bash ./components/testing/upgrade/run-upgrade-test.sh \
+            --mode kind \
+            --baseline-kf-image "${baseline_kf}" \
+            --baseline-odh-image "${baseline_odh}" \
+            --target-kf-image "localhost/notebook-controller:${{ env.TAG }}" \
+            --target-odh-image "localhost/odh-notebook-controller:${{ env.TAG }}" \
+            --strict-logs "${{ github.event.inputs.strict_logs || 'false' }}"
+
+      - name: Upload upgrade test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: odh-notebook-controller-upgrade-artifacts
+          path: components/testing/upgrade/artifacts/
+          if-no-files-found: warn
