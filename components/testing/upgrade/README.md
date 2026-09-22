@@ -166,6 +166,9 @@ Artifacts are written to (gitignored):
 
 - `components/testing/upgrade/artifacts/<timestamp>/`
 
+Webhook TLS private keys are generated under `/tmp` (or `CERT_DIR` if set) and are
+**not** stored under the artifacts directory uploaded by CI.
+
 ## CI Workflow
 
 Workflow file:

@@ -8,7 +8,9 @@ RUNNING_NOTEBOOK_NAME="${RUNNING_NOTEBOOK_NAME:-upgrade-running}"
 STOPPED_NOTEBOOK_NAME="${STOPPED_NOTEBOOK_NAME:-upgrade-stopped}"
 NOTEBOOK_IMAGE="${NOTEBOOK_IMAGE:-quay.io/thoth-station/s2i-minimal-notebook:v0.3.0}"
 MODE="${MODE:-kind}"
-
+# Transient stop-annotation value written by odh-notebook-controller on create;
+# must not be treated as a stable "stopped" state (culling uses RFC3339 timestamps).
+RECONCILIATION_LOCK_ANNOTATION="${RECONCILIATION_LOCK_ANNOTATION:-odh-notebook-controller-lock}"
 require_seed_dependencies() {
   local deps=("kubectl")
   for dep in "${deps[@]}"; do
@@ -219,7 +221,7 @@ wait_for_notebook_statefulset_ready() {
 
     # odh-notebook-controller may temporarily set this lock while coordinating
     # reconciliation with notebook-controller. Do not mutate it in tests; wait.
-    if [[ "${stopped_annotation}" == "odh-notebook-controller-lock" ]]; then
+    if [[ "${stopped_annotation}" == "${RECONCILIATION_LOCK_ANNOTATION}" ]]; then
       sleep 5
       elapsed=$((elapsed + 5))
       continue
@@ -252,7 +254,9 @@ wait_for_notebook_statefulset_stopped() {
     spec_replicas="$(kubectl -n "${WORKLOAD_NAMESPACE}" get statefulset "${notebook_name}" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
     stopped_annotation="$(kubectl -n "${WORKLOAD_NAMESPACE}" get notebook "${notebook_name}" -o jsonpath='{.metadata.annotations.kubeflow-resource-stopped}' 2>/dev/null || true)"
 
-    if [[ "${spec_replicas}" == "0" && -n "${stopped_annotation}" ]]; then
+    if [[ "${spec_replicas}" == "0" \
+      && -n "${stopped_annotation}" \
+      && "${stopped_annotation}" != "${RECONCILIATION_LOCK_ANNOTATION}" ]]; then
       if ! kubectl -n "${WORKLOAD_NAMESPACE}" get pod "${notebook_name}-0" >/dev/null 2>&1; then
         return 0
       fi

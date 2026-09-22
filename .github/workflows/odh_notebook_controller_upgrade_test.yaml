@@ -102,22 +102,31 @@ jobs:
         run: ./components/testing/gh-actions/install_kustomize.sh
 
       - name: Run upgrade test
+        env:
+          # Bind workflow_dispatch inputs via env to avoid shell injection from
+          # expanding ${{ github.event.inputs.* }} directly into the script source.
+          INPUT_BASELINE_KF_IMAGE: ${{ github.event.inputs.baseline_kf_image }}
+          INPUT_BASELINE_ODH_IMAGE: ${{ github.event.inputs.baseline_odh_image }}
+          INPUT_STRICT_LOGS: ${{ github.event.inputs.strict_logs || 'false' }}
+          DEFAULT_BASELINE_KF_IMAGE: ${{ env.BASELINE_KF_IMAGE }}
+          DEFAULT_BASELINE_ODH_IMAGE: ${{ env.BASELINE_ODH_IMAGE }}
+          TARGET_TAG: ${{ env.TAG }}
         run: |
-          baseline_kf="${{ github.event.inputs.baseline_kf_image }}"
-          baseline_odh="${{ github.event.inputs.baseline_odh_image }}"
+          baseline_kf="${INPUT_BASELINE_KF_IMAGE}"
+          baseline_odh="${INPUT_BASELINE_ODH_IMAGE}"
           if [[ -z "${baseline_kf}" ]]; then
-            baseline_kf="${{ env.BASELINE_KF_IMAGE }}"
+            baseline_kf="${DEFAULT_BASELINE_KF_IMAGE}"
           fi
           if [[ -z "${baseline_odh}" ]]; then
-            baseline_odh="${{ env.BASELINE_ODH_IMAGE }}"
+            baseline_odh="${DEFAULT_BASELINE_ODH_IMAGE}"
           fi
           bash ./components/testing/upgrade/run-upgrade-test.sh \
             --mode kind \
             --baseline-kf-image "${baseline_kf}" \
             --baseline-odh-image "${baseline_odh}" \
-            --target-kf-image "localhost/notebook-controller:${{ env.TAG }}" \
-            --target-odh-image "localhost/odh-notebook-controller:${{ env.TAG }}" \
-            --strict-logs "${{ github.event.inputs.strict_logs || 'false' }}"
+            --target-kf-image "localhost/notebook-controller:${TARGET_TAG}" \
+            --target-odh-image "localhost/odh-notebook-controller:${TARGET_TAG}" \
+            --strict-logs "${INPUT_STRICT_LOGS}"
 
       - name: Upload upgrade test artifacts
         if: always()

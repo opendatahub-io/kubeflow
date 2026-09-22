@@ -8,19 +8,29 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-odh-upgrade}"
 # Default to single-node: multi-node kind+rootless Podman often fails at worker join.
 KIND_CONFIG="${KIND_CONFIG:-${SCRIPT_DIR}/kind-1-32-single.yaml}"
-CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
+# Empty until configure_kind_provider selects docker or podman (honor an explicit override).
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-}"
+
+_set_container_engine_if_unset() {
+  local engine="$1"
+  if [[ -z "${CONTAINER_ENGINE}" ]]; then
+    CONTAINER_ENGINE="${engine}"
+  fi
+}
 
 # KinD defaults to Docker. Local Fedora/RHEL setups (and this repo's CI image builds)
 # typically use Podman with no docker.sock — select the provider once for all kind calls.
 configure_kind_provider() {
   if [[ -n "${KIND_EXPERIMENTAL_PROVIDER:-}" ]]; then
     export KIND_EXPERIMENTAL_PROVIDER
-    echo "[kind] Using provider from KIND_EXPERIMENTAL_PROVIDER=${KIND_EXPERIMENTAL_PROVIDER}"
+    _set_container_engine_if_unset "${KIND_EXPERIMENTAL_PROVIDER}"
+    echo "[kind] Using provider from KIND_EXPERIMENTAL_PROVIDER=${KIND_EXPERIMENTAL_PROVIDER} (engine=${CONTAINER_ENGINE})"
     return 0
   fi
 
   if docker info >/dev/null 2>&1; then
-    echo "[kind] Using docker provider"
+    _set_container_engine_if_unset "docker"
+    echo "[kind] Using docker provider (engine=${CONTAINER_ENGINE})"
     return 0
   fi
 
@@ -46,10 +56,15 @@ EOF
   fi
 
   export KIND_EXPERIMENTAL_PROVIDER=podman
-  echo "[kind] Docker unavailable; using KIND_EXPERIMENTAL_PROVIDER=podman"
+  _set_container_engine_if_unset "podman"
+  echo "[kind] Docker unavailable; using KIND_EXPERIMENTAL_PROVIDER=podman (engine=${CONTAINER_ENGINE})"
 }
 
 require_kind_dependencies() {
+  if [[ -z "${CONTAINER_ENGINE}" ]]; then
+    echo "CONTAINER_ENGINE is unset; call configure_kind_provider first" >&2
+    exit 1
+  fi
   local deps=("kind" "kubectl" "kustomize" "openssl" "${CONTAINER_ENGINE}")
   for dep in "${deps[@]}"; do
     if ! command -v "${dep}" >/dev/null 2>&1; then
@@ -65,8 +80,8 @@ kind_cluster_exists() {
 }
 
 ensure_kind_cluster() {
-  require_kind_dependencies
   configure_kind_provider
+  require_kind_dependencies
 
   if kind_cluster_exists; then
     echo "[kind] Reusing existing cluster '${KIND_CLUSTER_NAME}'"

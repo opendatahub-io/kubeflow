@@ -64,10 +64,14 @@ assert_pod_not_restarted() {
 assert_stopped_notebook_stayed_stopped() {
   local stopped_before
   local stopped_after
+  # Match odh-notebook-controller AnnotationValueReconciliationLock; not a stable stop value.
+  local lock_annotation="${RECONCILIATION_LOCK_ANNOTATION:-odh-notebook-controller-lock}"
   stopped_before="$(cat "${ARTIFACTS_DIR}/before/stopped-annotation.txt" 2>/dev/null || true)"
   stopped_after="$(cat "${ARTIFACTS_DIR}/after/stopped-annotation.txt" 2>/dev/null || true)"
-  [[ -n "${stopped_before}" ]] || fail "stopped notebook annotation missing before upgrade"
-  [[ -n "${stopped_after}" ]] || fail "stopped notebook annotation missing after upgrade"
+  [[ -n "${stopped_before}" && "${stopped_before}" != "${lock_annotation}" ]] \
+    || fail "stopped notebook annotation is transient or missing before upgrade (got: ${stopped_before:-<empty>})"
+  [[ -n "${stopped_after}" && "${stopped_after}" != "${lock_annotation}" ]] \
+    || fail "stopped notebook annotation is transient or missing after upgrade (got: ${stopped_after:-<empty>})"
 
   if kubectl -n "${WORKLOAD_NAMESPACE}" get pod "${STOPPED_NOTEBOOK_NAME}-0" >/dev/null 2>&1; then
     fail "stopped notebook pod ${STOPPED_NOTEBOOK_NAME}-0 exists after upgrade"

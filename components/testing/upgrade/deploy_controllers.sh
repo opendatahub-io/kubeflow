@@ -58,6 +58,9 @@ create_webhook_cert_secrets() {
   kubectl -n "${namespace}" create secret tls odh-notebook-controller-metrics-tls \
     --cert="${cert_dir}/server-cert.pem" \
     --key="${cert_dir}/server-key.pem"
+
+  # Prefer restrictive perms on local private keys (often under /tmp, never uploaded).
+  chmod 600 "${cert_dir}/ca-key.pem" "${cert_dir}/server-key.pem" 2>/dev/null || true
 }
 
 patch_odh_webhook_cabundle() {

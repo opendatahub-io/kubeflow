@@ -23,7 +23,12 @@ TARGET_IMAGE_REGISTRY="${TARGET_IMAGE_REGISTRY:-}"
 TARGET_IMAGE_TAG="${TARGET_IMAGE_TAG:-upgrade-test}"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 STRICT_LOGS="${STRICT_LOGS:-false}"
-CERT_DIR="${CERT_DIR:-${ARTIFACTS_DIR}/certs}"
+# Keep TLS private keys out of uploaded artifacts (use a temp dir unless overridden).
+CERT_DIR_OWNED="false"
+if [[ -z "${CERT_DIR:-}" ]]; then
+  CERT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/upgrade-certs-XXXXXX")"
+  CERT_DIR_OWNED="true"
+fi
 CURRENT_STAGE="init"
 BUILT_TARGETS="false"
 
@@ -369,6 +374,15 @@ run_flow() {
   echo "[upgrade] Deploying target controllers"
   deploy_controllers_with_images "${resolved_mode}" "${TARGET_KF_IMAGE}" "${TARGET_ODH_IMAGE}" "${CERT_DIR}/target"
 
+  CURRENT_STAGE="wait-post-upgrade"
+  echo "[upgrade] Waiting for notebooks to settle after target rollout"
+  MODE="${resolved_mode}" WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE}" \
+    wait_for_notebook_statefulset_ready "${RUNNING_NOTEBOOK_NAME}" 240
+  MODE="${resolved_mode}" WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE}" \
+    wait_for_notebook_statefulset_ready "${AUTH_NOTEBOOK_NAME}" 240
+  MODE="${resolved_mode}" WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE}" \
+    wait_for_notebook_statefulset_stopped "${STOPPED_NOTEBOOK_NAME}" 240
+
   CURRENT_STAGE="snapshot-after"
   echo "[upgrade] Capturing post-upgrade snapshot"
   WORKLOAD_NAMESPACE="${WORKLOAD_NAMESPACE}" ARTIFACTS_DIR="${ARTIFACTS_DIR}" SNAPSHOT_NAME="after" \
@@ -385,8 +399,15 @@ run_flow() {
   fi
 }
 
+cleanup_owned_cert_dir() {
+  if [[ "${CERT_DIR_OWNED}" == "true" && -n "${CERT_DIR}" && -d "${CERT_DIR}" ]]; then
+    rm -rf "${CERT_DIR}"
+  fi
+}
+
 main() {
   trap 'on_error "${LINENO}" "${BASH_COMMAND}"' ERR
+  trap cleanup_owned_cert_dir EXIT
   local resolved_mode
   CURRENT_STAGE="detect-mode"
   resolved_mode="$(detect_mode)"
