@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
 )
 
@@ -88,7 +88,7 @@ func (r *CullingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	log := r.Log.WithValues("culler", req.NamespacedName)
 	log.Info("Reconciliation loop started")
 
-	instance := &v1beta1.Notebook{}
+	instance := &nbv1.Notebook{}
 	err := r.Get(context.TODO(), req.NamespacedName, instance)
 	if err != nil && apierrs.IsNotFound(err) {
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
@@ -446,7 +446,7 @@ func updateLastCullingCheckTimestampAnnotation(meta *metav1.ObjectMeta, log logr
 
 }
 
-func annotationsExist(instance *v1beta1.Notebook) bool {
+func annotationsExist(instance *nbv1.Notebook) bool {
 	meta := instance.ObjectMeta
 	if metav1.HasAnnotation(meta, LAST_ACTIVITY_ANNOTATION) &&
 		metav1.HasAnnotation(meta, LAST_ACTIVITY_CHECK_TIMESTAMP_ANNOTATION) {
@@ -577,7 +577,7 @@ func (r *CullingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	controller := ctrl.NewControllerManagedBy(mgr).
-		For(&v1beta1.Notebook{}).
+		For(&nbv1.Notebook{}).
 		Named("Culler")
 
 	err := controller.Complete(r)
