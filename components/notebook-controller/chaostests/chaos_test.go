@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/controllers"
 	controllermetrics "github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
 	"github.com/opendatahub-io/operator-chaos/pkg/sdk"
@@ -75,13 +75,13 @@ var _ = Describe("Notebook controller chaos resilience (isolated)", func() {
 
 		Expect(cli.Create(ctx, chaosNamespace)).To(Succeed())
 
-		notebook := &nbv1beta1.Notebook{
+		notebook := &nbv1.Notebook{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: name,
 			},
-			Spec: nbv1beta1.NotebookSpec{
-				Template: nbv1beta1.NotebookTemplateSpec{
+			Spec: nbv1.NotebookSpec{
+				Template: nbv1.NotebookTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{
 							Name:  name,
@@ -96,7 +96,7 @@ var _ = Describe("Notebook controller chaos resilience (isolated)", func() {
 
 	AfterEach(func() {
 		if chaosNamespace != nil {
-			notebook := &nbv1beta1.Notebook{}
+			notebook := &nbv1.Notebook{}
 			err := cli.Get(ctx, typeNamespaceName, notebook)
 			if err == nil {
 				notebook.Finalizers = nil
