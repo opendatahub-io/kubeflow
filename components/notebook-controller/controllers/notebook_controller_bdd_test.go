@@ -101,12 +101,6 @@ var _ = Describe("Notebook controller", func() {
 			Expect(k8sClient.Get(ctx, notebookLookupKey, sts)).To(Succeed())
 			sts.OwnerReferences[0].APIVersion = nbv1beta1.GroupVersion.String()
 			Expect(k8sClient.Update(ctx, sts)).To(Succeed())
-			Expect(k8sClient.Get(ctx, notebookLookupKey, createdNotebook)).To(Succeed())
-			if createdNotebook.Annotations == nil {
-				createdNotebook.Annotations = make(map[string]string)
-			}
-			createdNotebook.Annotations["owner-reference-test"] = "reconcile"
-			Expect(k8sClient.Update(ctx, createdNotebook)).To(Succeed())
 			Eventually(func() (string, error) {
 				if err := k8sClient.Get(ctx, notebookLookupKey, sts); err != nil {
 					return "", err
