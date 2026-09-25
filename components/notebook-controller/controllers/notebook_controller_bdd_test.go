@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
 )
 
@@ -88,9 +89,30 @@ var _ = Describe("Notebook controller", func() {
 
 				By("By checking that the StatefulSet has identical Labels as the Notebook")
 				Expect(sts.GetLabels()).To(Equal(notebook.GetLabels()))
+				Expect(sts.OwnerReferences).To(HaveLen(1))
+				Expect(sts.OwnerReferences[0].APIVersion).To(Equal(nbv1.GroupVersion.String()))
+				Expect(sts.OwnerReferences[0].UID).To(Equal(createdNotebook.UID))
 
 				return true, nil
 			}, timeout, interval).Should(BeTrue())
+
+			By("By repairing a legacy StatefulSet owner reference on reconciliation")
+			sts := &appsv1.StatefulSet{}
+			Expect(k8sClient.Get(ctx, notebookLookupKey, sts)).To(Succeed())
+			sts.OwnerReferences[0].APIVersion = nbv1beta1.GroupVersion.String()
+			Expect(k8sClient.Update(ctx, sts)).To(Succeed())
+			Expect(k8sClient.Get(ctx, notebookLookupKey, createdNotebook)).To(Succeed())
+			if createdNotebook.Annotations == nil {
+				createdNotebook.Annotations = make(map[string]string)
+			}
+			createdNotebook.Annotations["owner-reference-test"] = "reconcile"
+			Expect(k8sClient.Update(ctx, createdNotebook)).To(Succeed())
+			Eventually(func() (string, error) {
+				if err := k8sClient.Get(ctx, notebookLookupKey, sts); err != nil {
+					return "", err
+				}
+				return sts.OwnerReferences[0].APIVersion, nil
+			}, timeout, interval).Should(Equal(nbv1.GroupVersion.String()))
 		})
 	})
 })

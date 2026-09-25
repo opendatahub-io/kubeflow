@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-logr/logr"
 	reconcilehelper "github.com/kubeflow/kubeflow/components/common/reconcilehelper"
+	notebookv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
 	appsv1 "k8s.io/api/apps/v1"
@@ -153,6 +154,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := ctrl.SetControllerReference(instance, ss, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
+	ss.OwnerReferences[0].APIVersion = notebookv1.GroupVersion.String()
 	// Check if the StatefulSet already exists
 	foundStateful := &appsv1.StatefulSet{}
 	namespacedStatefulSets := &appsv1.StatefulSetList{}
@@ -194,12 +196,23 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Update the foundStateful object and write the result back if there are any changes
-	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful) {
-		log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
-		err = r.Update(ctx, foundStateful)
-		if err != nil {
-			log.Error(err, "unable to update Statefulset")
-			return ctrl.Result{}, err
+	if !justCreated {
+		ownerReferenceChanged := false
+		for index := range foundStateful.OwnerReferences {
+			ownerRef := &foundStateful.OwnerReferences[index]
+			if ownerRef.UID == instance.UID && ownerRef.APIVersion != notebookv1.GroupVersion.String() {
+				ownerRef.APIVersion = notebookv1.GroupVersion.String()
+				ownerReferenceChanged = true
+			}
+		}
+		fieldsChanged := reconcilehelper.CopyStatefulSetFields(ss, foundStateful)
+		if ownerReferenceChanged || fieldsChanged {
+			log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
+			err = r.Update(ctx, foundStateful)
+			if err != nil {
+				log.Error(err, "unable to update Statefulset")
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
