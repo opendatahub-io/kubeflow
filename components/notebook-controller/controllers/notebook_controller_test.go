@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -95,36 +95,36 @@ func TestCreateNotebookStatus(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		currentNb        nbv1beta1.Notebook
+		currentNb        nbv1.Notebook
 		pod              corev1.Pod
 		sts              appsv1.StatefulSet
-		expectedNbStatus nbv1beta1.NotebookStatus
+		expectedNbStatus nbv1.NotebookStatus
 	}{
 		{
 			name: "NotebookStatusInitialization",
-			currentNb: nbv1beta1.Notebook{
+			currentNb: nbv1.Notebook{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      "test",
 					Namespace: "kubeflow-user",
 				},
-				Status: nbv1beta1.NotebookStatus{},
+				Status: nbv1.NotebookStatus{},
 			},
 			pod: corev1.Pod{},
 			sts: appsv1.StatefulSet{},
-			expectedNbStatus: nbv1beta1.NotebookStatus{
-				Conditions:     []nbv1beta1.NotebookCondition{},
+			expectedNbStatus: nbv1.NotebookStatus{
+				Conditions:     []nbv1.NotebookCondition{},
 				ReadyReplicas:  int32(0),
 				ContainerState: corev1.ContainerState{},
 			},
 		},
 		{
 			name: "NotebookStatusReadyReplicas",
-			currentNb: nbv1beta1.Notebook{
+			currentNb: nbv1.Notebook{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      "test",
 					Namespace: "kubeflow-user",
 				},
-				Status: nbv1beta1.NotebookStatus{},
+				Status: nbv1.NotebookStatus{},
 			},
 			pod: corev1.Pod{},
 			sts: appsv1.StatefulSet{
@@ -136,20 +136,20 @@ func TestCreateNotebookStatus(t *testing.T) {
 					ReadyReplicas: int32(1),
 				},
 			},
-			expectedNbStatus: nbv1beta1.NotebookStatus{
-				Conditions:     []nbv1beta1.NotebookCondition{},
+			expectedNbStatus: nbv1.NotebookStatus{
+				Conditions:     []nbv1.NotebookCondition{},
 				ReadyReplicas:  int32(1),
 				ContainerState: corev1.ContainerState{},
 			},
 		},
 		{
 			name: "NotebookContainerState",
-			currentNb: nbv1beta1.Notebook{
+			currentNb: nbv1.Notebook{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      "test",
 					Namespace: "kubeflow-user",
 				},
-				Status: nbv1beta1.NotebookStatus{},
+				Status: nbv1.NotebookStatus{},
 			},
 			pod: corev1.Pod{
 				ObjectMeta: v1.ObjectMeta{
@@ -170,8 +170,8 @@ func TestCreateNotebookStatus(t *testing.T) {
 				},
 			},
 			sts: appsv1.StatefulSet{},
-			expectedNbStatus: nbv1beta1.NotebookStatus{
-				Conditions:    []nbv1beta1.NotebookCondition{},
+			expectedNbStatus: nbv1.NotebookStatus{
+				Conditions:    []nbv1.NotebookCondition{},
 				ReadyReplicas: int32(0),
 				ContainerState: corev1.ContainerState{
 					Running: &corev1.ContainerStateRunning{
@@ -212,8 +212,8 @@ func TestCreateNotebookStatus(t *testing.T) {
 					ReadyReplicas: int32(1),
 				},
 			},
-			expectedNbStatus: nbv1beta1.NotebookStatus{
-				Conditions: []nbv1beta1.NotebookCondition{
+			expectedNbStatus: nbv1.NotebookStatus{
+				Conditions: []nbv1.NotebookCondition{
 					{
 						Type:               "Running",
 						LastProbeTime:      v1.Date(2022, time.Month(8), 30, 1, 10, 30, 0, time.UTC),
@@ -257,8 +257,8 @@ func TestCreateNotebookStatus(t *testing.T) {
 				},
 				Status: appsv1.StatefulSetStatus{},
 			},
-			expectedNbStatus: nbv1beta1.NotebookStatus{
-				Conditions: []nbv1beta1.NotebookCondition{
+			expectedNbStatus: nbv1.NotebookStatus{
+				Conditions: []nbv1.NotebookCondition{
 					{
 						Type:               "PodScheduled",
 						LastProbeTime:      v1.Date(2022, time.Month(4), 21, 1, 10, 30, 0, time.UTC),
@@ -296,4 +296,105 @@ func createMockReconciler() *NotebookReconciler {
 		Log:    ctrl.Log,
 	}
 	return reconciler
+}
+
+func TestNotebookOwnerReferenceUsesStorageVersion(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := nbv1.AddToScheme(s); err != nil {
+		t.Fatalf("add notebook v1 to scheme: %v", err)
+	}
+
+	nb := &nbv1.Notebook{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-notebook",
+			Namespace: "demo",
+			UID:       "94751738-d4f8-4712-9192-e473a7c98d4b",
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "test-notebook",
+						Image: "busybox",
+					}},
+				},
+			},
+		},
+	}
+
+	ss := generateStatefulSet(nb, false)
+	if err := ctrl.SetControllerReference(nb, ss, s); err != nil {
+		t.Fatalf("set controller reference: %v", err)
+	}
+	if len(ss.OwnerReferences) != 1 {
+		t.Fatalf("expected 1 ownerReference, got %d", len(ss.OwnerReferences))
+	}
+	if got := ss.OwnerReferences[0].APIVersion; got != nbv1.GroupVersion.String() {
+		t.Fatalf("ownerReference.apiVersion = %q, want %q", got, nbv1.GroupVersion.String())
+	}
+
+	svc := generateService(nb)
+	if err := ctrl.SetControllerReference(nb, svc, s); err != nil {
+		t.Fatalf("set controller reference on service: %v", err)
+	}
+	if got := svc.OwnerReferences[0].APIVersion; got != nbv1.GroupVersion.String() {
+		t.Fatalf("service ownerReference.apiVersion = %q, want %q", got, nbv1.GroupVersion.String())
+	}
+}
+
+func TestIsControlledByNotebookIgnoresAPIVersion(t *testing.T) {
+	nb := &nbv1.Notebook{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "test-notebook",
+			UID:  "94751738-d4f8-4712-9192-e473a7c98d4b",
+		},
+	}
+	controller := true
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name: "test-notebook",
+			OwnerReferences: []v1.OwnerReference{{
+				APIVersion: "kubeflow.org/v1beta1",
+				Kind:       "Notebook",
+				Name:       "test-notebook",
+				UID:        nb.UID,
+				Controller: &controller,
+			}},
+		},
+	}
+	if !isControlledByNotebook(sts, nb) {
+		t.Fatal("expected stale v1beta1 ownerReference to still match the Notebook UID")
+	}
+}
+
+func TestCopyOwnerReferencesUpgradesAPIVersion(t *testing.T) {
+	controller := true
+	desired := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			OwnerReferences: []v1.OwnerReference{{
+				APIVersion: "kubeflow.org/v1",
+				Kind:       "Notebook",
+				Name:       "test-notebook",
+				UID:        "94751738-d4f8-4712-9192-e473a7c98d4b",
+				Controller: &controller,
+			}},
+		},
+	}
+	existing := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			OwnerReferences: []v1.OwnerReference{{
+				APIVersion: "kubeflow.org/v1beta1",
+				Kind:       "Notebook",
+				Name:       "test-notebook",
+				UID:        "94751738-d4f8-4712-9192-e473a7c98d4b",
+				Controller: &controller,
+			}},
+		},
+	}
+	if !copyOwnerReferences(desired, existing) {
+		t.Fatal("expected ownerReference copy to report a change")
+	}
+	if got := existing.OwnerReferences[0].APIVersion; got != "kubeflow.org/v1" {
+		t.Fatalf("ownerReference.apiVersion = %q, want kubeflow.org/v1", got)
+	}
 }
