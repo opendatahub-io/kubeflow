@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/utils/ingressassignment"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -159,8 +160,8 @@ func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyService(notebook *nb
 }
 
 // NewNotebookKubeRbacProxyHTTPRoute defines the desired HTTPRoute object for kube-rbac-proxy
-func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gatewayv1.HTTPRoute {
-	httpRoute := NewNotebookHTTPRoute(notebook, centralNamespace)
+func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, centralNamespace string, ingress ingressassignment.Ingress) *gatewayv1.HTTPRoute {
+	httpRoute := NewNotebookHTTPRoute(notebook, centralNamespace, ingress)
 
 	// Update the backend to point to the kube-rbac-proxy service instead of the main service
 	httpRoute.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(notebook.Name + KubeRbacProxyServiceSuffix)
@@ -172,8 +173,8 @@ func NewNotebookKubeRbacProxyHTTPRoute(notebook *nbv1.Notebook, centralNamespace
 // ReconcileKubeRbacProxyHTTPRoute will manage the creation, update and deletion of the kube-rbac-proxy HTTPRoute
 // when the notebook is reconciled.
 func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyHTTPRoute(
-	notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookKubeRbacProxyHTTPRoute)
+	notebook *nbv1.Notebook, ctx context.Context, config map[string]string) error {
+	return r.reconcileHTTPRoute(notebook, ctx, config, NewNotebookKubeRbacProxyHTTPRoute)
 }
 
 // NewNotebookKubeRbacProxyConfigMap defines the desired ConfigMap object for kube-rbac-proxy

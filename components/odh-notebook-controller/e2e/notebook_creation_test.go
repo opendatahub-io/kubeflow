@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 const (
@@ -117,7 +118,16 @@ func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
 }
 
 func (tc *testContext) testNotebookHTTPRouteCreation(nbMeta *metav1.ObjectMeta) error {
-	nbHTTPRoute, err := tc.getNotebookHTTPRoute(nbMeta)
+
+	var nbHTTPRoute *gatewayv1.HTTPRoute
+	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, true, func(context.Context) (bool, error) {
+		var err error
+		nbHTTPRoute, err = tc.getNotebookHTTPRoute(nbMeta)
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return err == nil, err
+	})
 	if err != nil {
 		return fmt.Errorf("error getting HTTPRoute for Notebook %v: %v", nbMeta.Name, err)
 	}

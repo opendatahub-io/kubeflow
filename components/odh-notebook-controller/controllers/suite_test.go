@@ -195,7 +195,10 @@ var _ = BeforeSuite(func() {
 
 	// Setup controller manager
 	webhookInstallOptions := &envTest.WebhookInstallOptions
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+	cacheOptions, clientOptions := ManagerCacheOptions()
+	mgrOptions := ctrl.Options{
+		Cache:          cacheOptions,
+		Client:         clientOptions,
 		Scheme:         scheme,
 		LeaderElection: false,
 		Metrics:        metricsserver.Options{BindAddress: "0"},
@@ -210,7 +213,8 @@ var _ = BeforeSuite(func() {
 		BaseContext: func() context.Context {
 			return ctx
 		},
-	})
+	}
+	mgr, err := ctrl.NewManager(cfg, mgrOptions)
 	Expect(err).NotTo(HaveOccurred())
 
 	// Setup notebook controller

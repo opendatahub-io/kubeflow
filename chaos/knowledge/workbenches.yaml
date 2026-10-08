@@ -32,6 +32,10 @@ components:
         kind: Secret
         name: odh-notebook-controller-webhook-cert
         namespace: opendatahub
+      - apiVersion: v1
+        kind: ConfigMap
+        name: odh-notebook-controller-config
+        namespace: opendatahub
     webhooks:
       - name: notebooks.opendatahub.io
         type: mutating

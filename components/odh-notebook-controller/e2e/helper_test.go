@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
@@ -58,18 +60,13 @@ func (tc *testContext) waitForControllerDeployment(name string, replicas int32) 
 func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gatewayv1.HTTPRoute, error) {
 	nbHTTPRouteList := gatewayv1.HTTPRouteList{}
 
-	opts := make([]client.ListOption, 0, 2)
-	opts = append(opts, client.InNamespace(nbMeta.Namespace))
-	opts = append(opts, client.MatchingLabels{"notebook-name": nbMeta.Name})
-	err := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-		routeErr := tc.customClient.List(ctx, &nbHTTPRouteList, opts...)
-		if routeErr != nil {
-			log.Printf("error retrieving Notebook HTTPRoute %v, retrying", routeErr)
-			return false, nil
-		} else {
-			return true, nil
-		}
-	})
+	err := tc.customClient.List(tc.ctx, &nbHTTPRouteList,
+		client.InNamespace(tc.testNamespace),
+		client.MatchingLabels{"notebook-name": nbMeta.Name, "notebook-namespace": nbMeta.Namespace},
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(nbHTTPRouteList.Items) == 0 {
 		// Return proper Kubernetes NotFound error
@@ -79,7 +76,75 @@ func (tc *testContext) getNotebookHTTPRoute(nbMeta *metav1.ObjectMeta) (*gateway
 		)
 	}
 
-	return &nbHTTPRouteList.Items[0], err
+	if len(nbHTTPRouteList.Items) != 1 {
+		return nil, fmt.Errorf("multiple HTTPRoutes found for Notebook %s/%s", nbMeta.Namespace, nbMeta.Name)
+	}
+	return &nbHTTPRouteList.Items[0], nil
+}
+
+const (
+	notebookControllerConfigMapName = "odh-notebook-controller-config"
+	namespaceIngressAnnotation      = "opendatahub.io/ingress-name"
+	controllerIngressesKey          = "ingresses"
+)
+
+// waitForNotebookHTTPRouteParents checks every test Notebook and propagates API errors.
+func (tc *testContext) waitForNotebookHTTPRouteParents(want map[string][]gatewayv1.ParentReference) error {
+	return wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, true, func(context.Context) (bool, error) {
+		for _, notebook := range tc.testNotebooks {
+			route, err := tc.getNotebookHTTPRoute(notebook.nbObjectMeta)
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if !reflect.DeepEqual(route.Spec.ParentRefs, want[notebook.nbObjectMeta.Name]) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
+// setNamespaceIngressAnnotation changes only the ingress annotation and retries conflicts.
+func (tc *testContext) setNamespaceIngressAnnotation(name string, present bool) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		current, err := tc.kubeClient.CoreV1().Namespaces().Get(tc.ctx, tc.testNamespace, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if current.Annotations == nil {
+			current.Annotations = map[string]string{}
+		}
+		if present {
+			current.Annotations[namespaceIngressAnnotation] = name
+		} else {
+			delete(current.Annotations, namespaceIngressAnnotation)
+		}
+		_, err = tc.kubeClient.CoreV1().Namespaces().Update(tc.ctx, current, metav1.UpdateOptions{})
+		return err
+	})
+}
+
+// setControllerIngresses changes only the projected ingress key and retries conflicts.
+func (tc *testContext) setControllerIngresses(value string, present bool) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		current, err := tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Get(tc.ctx, notebookControllerConfigMapName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if current.Data == nil {
+			current.Data = map[string]string{}
+		}
+		if present {
+			current.Data[controllerIngressesKey] = value
+		} else {
+			delete(current.Data, controllerIngressesKey)
+		}
+		_, err = tc.kubeClient.CoreV1().ConfigMaps(tc.testNamespace).Update(tc.ctx, current, metav1.UpdateOptions{})
+		return err
+	})
 }
 
 func (tc *testContext) getNotebookNetworkPolicy(nbMeta *metav1.ObjectMeta, name string) (*netv1.NetworkPolicy, error) {
