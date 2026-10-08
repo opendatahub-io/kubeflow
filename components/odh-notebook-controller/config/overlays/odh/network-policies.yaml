@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: odh-notebook-controller-allow-ingress
+  labels:
+    app.kubernetes.io/part-of: networkpolicy
+    app.opendatahub.io/networkpolicy: 'true'
+spec:
+  podSelector:
+    matchLabels:
+      app: odh-notebook-controller
+  policyTypes:
+  - Ingress
+  ingress:
+  - {}
