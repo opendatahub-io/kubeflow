@@ -17,11 +17,17 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/metadata/annotations"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/utils/ingressassignment"
+	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,7 +44,11 @@ const (
 	// DefaultGatewayName is the default Gateway name to use for HTTPRoutes prepared by the opendatahub-operator
 	DefaultGatewayName = "data-science-gateway"
 	// DefaultGatewayNamespace is the default Gateway namespace prepared by the opendatahub-operator
-	DefaultGatewayNamespace = "openshift-ingress"
+	DefaultGatewayNamespace     = "openshift-ingress"
+	NotebookControllerConfigMap = "odh-notebook-controller-config"
+	IngressesKey                = "ingresses"
+	IngressNameAnnotation       = annotations.IngressName
+	defaultIngressName          = "default"
 )
 
 // Environment variables for configuration:
@@ -48,7 +58,8 @@ const (
 // NewNotebookHTTPRoute defines the desired HTTPRoute object in the central namespace.
 // The HTTPRoute is created in the controller's namespace and references
 // the backend Service in the user's namespace using cross-namespace references.
-func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gatewayv1.HTTPRoute {
+// The resolved ingress supplies the parent Gateway without a listener section.
+func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string, ingress ingressassignment.Ingress) *gatewayv1.HTTPRoute {
 	// Create a unique name combining namespace and notebook name to avoid conflicts
 	// Format: nb-{user-namespace}-{notebook-name}
 	httpRouteName := "nb-" + notebook.Namespace + "-" + notebook.Name
@@ -76,17 +87,6 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 		}
 	}
 
-	// Get Gateway configuration from environment or use defaults
-	gatewayName := os.Getenv("NOTEBOOK_GATEWAY_NAME")
-	if gatewayName == "" {
-		gatewayName = DefaultGatewayName
-	}
-
-	gatewayNamespace := os.Getenv("NOTEBOOK_GATEWAY_NAMESPACE")
-	if gatewayNamespace == "" {
-		gatewayNamespace = DefaultGatewayNamespace
-	}
-
 	// Generate notebook path: /notebook/{namespace}/{notebook-name}
 	notebookPath := fmt.Sprintf("/notebook/%s/%s", notebook.Namespace, notebook.Name)
 
@@ -97,8 +97,8 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string) *gat
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{
 				ParentRefs: []gatewayv1.ParentReference{
 					{
-						Name:      gatewayv1.ObjectName(gatewayName),
-						Namespace: (*gatewayv1.Namespace)(&gatewayNamespace),
+						Name:      gatewayv1.ObjectName(ingress.GatewayName),
+						Namespace: new(gatewayv1.Namespace(ingress.GatewayNamespace)),
 					},
 				},
 			},
@@ -142,12 +142,21 @@ func CompareNotebookHTTPRoutes(r1 gatewayv1.HTTPRoute, r2 gatewayv1.HTTPRoute) b
 // by the newHTTPRoute function. HTTPRoutes are now created in the central namespace (controller's namespace)
 // instead of the user's namespace for security reasons.
 func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook,
-	ctx context.Context, newHTTPRoute func(*nbv1.Notebook, string) *gatewayv1.HTTPRoute) error {
+	ctx context.Context, config map[string]string, newHTTPRoute func(*nbv1.Notebook, string, ingressassignment.Ingress) *gatewayv1.HTTPRoute) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+	ingress, err := r.notebookIngress(ctx, notebook.Namespace, config)
+	if err != nil {
+		if errors.Is(err, ingressassignment.ErrUnknownIngress) {
+			r.EventRecorder.Eventf(notebook, corev1.EventTypeWarning, "IngressNotFound", "%v", err)
+			if deleteErr := r.DeleteHTTPRouteForNotebook(notebook, ctx); deleteErr != nil {
+				return errors.Join(err, deleteErr)
+			}
+		}
+		return err
+	}
 
-	// Generate the desired HTTPRoute in the central namespace
-	desiredHTTPRoute := newHTTPRoute(notebook, r.Namespace)
+	desiredHTTPRoute := newHTTPRoute(notebook, r.Namespace, ingress)
 
 	// Create the HTTPRoute if it does not already exist
 	foundHTTPRoute := &gatewayv1.HTTPRoute{}
@@ -163,7 +172,7 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 		},
 	}
 
-	err := r.List(ctx, httpRouteList, opts...)
+	err = r.List(ctx, httpRouteList, opts...)
 	if err != nil {
 		log.Error(err, "Unable to list the HTTPRoute")
 		return err
@@ -218,11 +227,42 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 	return nil
 }
 
+func defaultNotebookIngress() ingressassignment.Ingress {
+	// Get Gateway configuration from environment or use defaults
+	gatewayName := os.Getenv("NOTEBOOK_GATEWAY_NAME")
+	if gatewayName == "" {
+		gatewayName = DefaultGatewayName
+	}
+
+	gatewayNamespace := os.Getenv("NOTEBOOK_GATEWAY_NAMESPACE")
+	if gatewayNamespace == "" {
+		gatewayNamespace = DefaultGatewayNamespace
+	}
+
+	return ingressassignment.Ingress{
+		Name: defaultIngressName, GatewayName: gatewayName,
+		GatewayNamespace: gatewayNamespace, IsDefault: true,
+	}
+}
+
+func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, namespaceName string, config map[string]string) (ingressassignment.Ingress, error) {
+	var ingresses []ingressassignment.Ingress
+	if data, present := config[IngressesKey]; present {
+		if err := json.Unmarshal([]byte(data), &ingresses); err != nil {
+			return ingressassignment.Ingress{}, fmt.Errorf("parse notebook controller ingress config: %w", err)
+		}
+	}
+	if !slices.ContainsFunc(ingresses, func(ingress ingressassignment.Ingress) bool { return ingress.IsDefault }) {
+		ingresses = append(ingresses, defaultNotebookIngress())
+	}
+	return ingressassignment.Resolve(ctx, r.Client, namespaceName, ingresses)
+}
+
 // ReconcileHTTPRoute will manage the creation, update and deletion of the
 // HTTPRoute when the notebook is reconciled
 func (r *OpenshiftNotebookReconciler) ReconcileHTTPRoute(
-	notebook *nbv1.Notebook, ctx context.Context) error {
-	return r.reconcileHTTPRoute(notebook, ctx, NewNotebookHTTPRoute)
+	notebook *nbv1.Notebook, ctx context.Context, config map[string]string) error {
+	return r.reconcileHTTPRoute(notebook, ctx, config, NewNotebookHTTPRoute)
 }
 
 // DeleteHTTPRouteForNotebook deletes the HTTPRoute for a notebook from the central namespace.

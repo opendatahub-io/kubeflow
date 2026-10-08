@@ -112,6 +112,7 @@ func TestE2ENotebookController(t *testing.T) {
 	}
 	// Run create, update and delete tests for all the test notebooks
 	t.Run("create", creationTestSuite)
+	t.Run("ingress assignment", ingressAssignmentTest)
 	t.Run("update", updateTestSuite)
 	if !skipDeletion {
 		t.Run("delete", deletionTestSuite)
