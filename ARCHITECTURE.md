@@ -119,6 +119,37 @@ field that holds the standard Kubernetes `corev1.PodSpec` (see
 container definitions is therefore `spec.template.spec.containers[]`, as shown
 in the YAML example above.
 
+### Notebook ingress configuration
+
+The controller accepts an operator-projected `odh-notebook-controller-config`
+in the controller namespace.
+Its `ingresses` data key is a JSON list consumed by the shared ingress assignment
+resolver, including the default entry and explicit Gateway references:
+
+```yaml
+data:
+  ingresses: >-
+    [{"name":"primary","gatewayName":"data-science-gateway","gatewayNamespace":"openshift-ingress","isDefault":true},
+     {"name":"team","gatewayName":"team-gateway","gatewayNamespace":"team-ingress"}]
+```
+
+The Namespace annotation `opendatahub.io/ingress-name` selects an entry by name.
+An absent annotation selects the entry with `isDefault: true`. Gateway names and
+namespaces are forwarded as supplied, without adding a listener section.
+
+When no entry has `isDefault: true`, the controller adds the Gateway configured
+by `NOTEBOOK_GATEWAY_NAME` and `NOTEBOOK_GATEWAY_NAMESPACE`. Unset variables
+fall back to `data-science-gateway` and `openshift-ingress`, respectively.
+This also applies to a missing ConfigMap, a missing key, or an empty list.
+The fallback entry is named `default`; duplicate names or Gateway references
+remain invalid configuration rather than changing a supplied entry's role.
+
+Unknown annotations still remove stale routes. Invalid JSON or invalid entries
+return an error and retain the existing route.
+The controller reads the ConfigMap once before reconciling active Notebook
+resources, directly from the API; Namespace annotation and ConfigMap events
+requeue Notebooks. Deletion cleanup does not require the configuration.
+
 ## Request Flow
 
 ```text

@@ -45,9 +45,12 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
@@ -96,6 +99,20 @@ type OpenshiftNotebookReconciler struct {
 	GatewayURL    string
 }
 
+// notebookControllerConfig reads a fresh configuration snapshot for this reconciliation.
+// ConfigMap payloads are excluded from the cache, so this Get uses the API client.
+func (r *OpenshiftNotebookReconciler) notebookControllerConfig(ctx context.Context) (map[string]string, error) {
+	config := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: NotebookControllerConfigMap, Namespace: r.Namespace}, config)
+	if apierrs.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get notebook controller config: %w", err)
+	}
+	return config.Data, nil
+}
+
 // ClusterRole permissions
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
@@ -119,6 +136,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get
 // +kubebuilder:rbac:groups="gateway.networking.k8s.io",resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
@@ -378,6 +396,11 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	config, err := r.notebookControllerConfig(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Create Configmap with the ODH notebook certificate
 	// With the ODH 2.8 Operator, user can provide their own certificate
 	// from DSCI initializer, that provides the certs in a ConfigMap odh-trusted-ca-bundle
@@ -470,7 +493,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 
 		// Call the kube-rbac-proxy HTTPRoute reconciler
-		err = r.ReconcileKubeRbacProxyHTTPRoute(notebook, ctx)
+		err = r.ReconcileKubeRbacProxyHTTPRoute(notebook, ctx, config)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -488,7 +511,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 
 		// Call the regular HTTPRoute reconciler (see notebook_route.go file)
-		err = r.ReconcileHTTPRoute(notebook, ctx)
+		err = r.ReconcileHTTPRoute(notebook, ctx, config)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -811,12 +834,14 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 
-		// Watch for all the required ConfigMaps
-		// odh-trusted-ca-bundle, kube-root-ca.crt, workbench-trusted-ca-bundle
-		// and reconcile the workbench-trusted-ca-bundle ConfigMap,
+		// Watch CA bundle ConfigMaps to reconcile shared certificates, and the
+		// controller ConfigMap to reconcile every Notebook when ingress names change.
 		Watches(&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 				log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
+				if o.GetNamespace() == r.Namespace && o.GetName() == NotebookControllerConfigMap {
+					return r.notebookRequests(ctx, "")
+				}
 
 				// If the ConfigMap name matches on of our interested ConfigMaps
 				// trigger a reconcile event for first notebook in the namespace
@@ -873,10 +898,47 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 				return []reconcile.Request{}
 			}),
+		).
+		Watches(&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				return r.notebookRequests(ctx, o.GetName())
+			}),
+			ctrlbuilder.WithPredicates(ingressNamespacePredicate),
 		)
 	err := builder.Complete(r)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// The Notebook watch covers creation and startup; Namespace updates requeue existing Notebooks.
+var ingressNamespacePredicate = predicate.Funcs{
+	CreateFunc:  func(event.CreateEvent) bool { return false },
+	DeleteFunc:  func(event.DeleteEvent) bool { return false },
+	GenericFunc: func(event.GenericEvent) bool { return false },
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldName, oldSet := e.ObjectOld.GetAnnotations()[IngressNameAnnotation]
+		newName, newSet := e.ObjectNew.GetAnnotations()[IngressNameAnnotation]
+		return oldSet != newSet || oldName != newName
+	},
+}
+
+func (r *OpenshiftNotebookReconciler) notebookRequests(ctx context.Context, namespace string) []reconcile.Request {
+	var notebooks nbv1.NotebookList
+	var options []client.ListOption
+	if namespace != "" {
+		options = append(options, client.InNamespace(namespace))
+	}
+	if err := r.List(ctx, &notebooks, options...); err != nil {
+		r.Log.Error(err, "Unable to list Notebooks after ingress configuration changed", "namespace", namespace)
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(notebooks.Items))
+	for _, notebook := range notebooks.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{
+			Name: notebook.Name, Namespace: notebook.Namespace,
+		}})
+	}
+	return requests
 }

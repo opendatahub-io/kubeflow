@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/onsi/gomega/format"
 	"github.com/onsi/gomega/types"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/assert"
@@ -109,15 +110,15 @@ func (m *beMatchingK8sResource[T, PT]) Match(actual interface{}) (success bool, 
 func (m *beMatchingK8sResource[T, PT]) FailureMessage(actual interface{}) (message string) {
 	fullDiff := cmp.Diff(actual, m.expected)
 	minimalDiff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nto match\n\t%#v\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
-		actual, m.expected, fullDiff, minimalDiff)
+	return fmt.Sprintf("%s\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
+		format.Message(actual, "to match", m.expected), fullDiff, minimalDiff)
 }
 
 func (m *beMatchingK8sResource[T, PT]) NegatedFailureMessage(actual interface{}) (message string) {
 	fullDiff := cmp.Diff(actual, m.expected)
 	minimalDiff := m.computeMinimizedDiff(actual.(T))
-	return fmt.Sprintf("Expected\n\t%#v\nNOT TO MATCH\n\t%#v\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
-		actual, m.expected, fullDiff, minimalDiff)
+	return fmt.Sprintf("%s\nFull diff (-actual +expected):\n%s\nMinimized diff (-actual +expected):\n%s",
+		format.Message(actual, "NOT TO MATCH", m.expected), fullDiff, minimalDiff)
 }
 
 // diffReporter is the basis of a custom [cmp.Reporter] that records differences detected during comparison.
@@ -385,6 +386,10 @@ func Test_BeMatchingK8sResource_MismatchedStructs(t *testing.T) {
 
 	msg := matcher.FailureMessage(someRoute)
 	assert.NotContains(t, msg, MatcherPanickedMessage)
+	header, _, _ := strings.Cut(msg, "Full diff")
+	assert.Contains(t, header, someRoute.Name)
+	assert.Contains(t, header, someOtherRoute.Name)
+	assert.NotContains(t, matcher.NegatedFailureMessage(someRoute), MatcherPanickedMessage)
 }
 
 // Checks for a situation where comparator function panics
