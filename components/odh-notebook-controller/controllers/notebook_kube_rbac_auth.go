@@ -251,16 +251,12 @@ func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyConfigMap(notebook *
 			}
 		}
 
-		// Check if labels differ
+		// Check if controller-managed label(s) differ. Preserve any other labels.
 		if !needsUpdate {
-			if len(foundConfigMap.Labels) != len(desiredConfigMap.Labels) {
-				needsUpdate = true
-			} else {
-				for key, value := range desiredConfigMap.Labels {
-					if foundConfigMap.Labels[key] != value {
-						needsUpdate = true
-						break
-					}
+			for key, value := range desiredConfigMap.Labels {
+				if foundConfigMap.Labels == nil || foundConfigMap.Labels[key] != value {
+					needsUpdate = true
+					break
 				}
 			}
 		}
@@ -269,7 +265,13 @@ func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyConfigMap(notebook *
 			log.Info("Reconciling kube-rbac-proxy ConfigMap")
 			// Update the existing ConfigMap with desired values
 			foundConfigMap.Data = desiredConfigMap.Data
-			foundConfigMap.Labels = desiredConfigMap.Labels
+			if foundConfigMap.Labels == nil {
+				foundConfigMap.Labels = map[string]string{}
+			}
+			// Only reconcile controller-managed labels; preserve any others.
+			for key, value := range desiredConfigMap.Labels {
+				foundConfigMap.Labels[key] = value
+			}
 			err = r.Update(ctx, foundConfigMap)
 			if err != nil {
 				log.Error(err, "Unable to reconcile the kube-rbac-proxy ConfigMap")
