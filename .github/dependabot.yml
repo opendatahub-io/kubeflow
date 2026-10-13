@@ -7,6 +7,13 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(gha)"
+    # Copied from opendatahub-io/security-config by security-config-sync.
+    # Local version bumps are overwritten on the next sync, so update the
+    # template there instead of opening Dependabot PRs here.
+    # https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#exclude-paths
+    exclude-paths:
+      - ".github/workflows/tls-lint.yml"
+      - ".github/workflows/semgrep-tls.yml"
 
   # only open security update PRs (see linked docs for explanation of `open-pull-requests-limit: 0`)
   #  https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates#overriding-the-default-behavior-with-a-configuration-file
