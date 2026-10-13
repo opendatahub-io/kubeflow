@@ -4,6 +4,7 @@ resources:
 - ../../base
 - rbac
 - monitor.yaml
+- network-policies.yaml
 namespace: opendatahub
 replacements:
 - source:
