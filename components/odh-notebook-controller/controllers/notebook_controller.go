@@ -33,6 +33,7 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/utils/ingressassignment"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +45,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -100,7 +102,7 @@ type OpenshiftNotebookReconciler struct {
 }
 
 // notebookControllerConfig reads a fresh configuration snapshot for this reconciliation.
-// ConfigMap payloads are excluded from the cache, so this Get uses the API client.
+// ConfigMap reads bypass the cache, so this Get uses the API client.
 func (r *OpenshiftNotebookReconciler) notebookControllerConfig(ctx context.Context) (map[string]string, error) {
 	config := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: NotebookControllerConfigMap, Namespace: r.Namespace}, config)
@@ -834,71 +836,8 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 
-		// Watch CA bundle ConfigMaps to reconcile shared certificates, and the
-		// controller ConfigMap to reconcile every Notebook when ingress names change.
-		Watches(&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
-				log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
-				if o.GetNamespace() == r.Namespace && o.GetName() == NotebookControllerConfigMap {
-					return r.notebookRequests(ctx, "")
-				}
-
-				// If the ConfigMap name matches on of our interested ConfigMaps
-				// trigger a reconcile event for first notebook in the namespace
-				if o.GetName() == OdhConfigMapName || o.GetName() == SelfSignedConfigMapName || o.GetName() == ServiceCAConfigMapName {
-					// List all the notebooks in the namespace and trigger a reconcile event
-					var nbList nbv1.NotebookList
-					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
-						log.Error(err, "Unable to list Notebooks when attempting to handle Global CA Bundle event.")
-						return []reconcile.Request{}
-					}
-
-					// As there is only one configmap workbench-trusted-ca-bundle per namespace
-					// and is used by all the notebooks in the namespace, we can trigger
-					// reconcile event only for the first notebook in the list.
-					for _, nb := range nbList.Items {
-						return []reconcile.Request{
-							{
-								NamespacedName: types.NamespacedName{
-									Name:      nb.Name,
-									Namespace: o.GetNamespace(),
-								},
-							},
-						}
-					}
-				}
-
-				// If the ConfigMap is workbench-trusted-ca-bundle
-				// trigger a reconcile event for all the notebooks in the namespace
-				// containing the ConfigMap workbench-trusted-ca-bundle as a volume.
-				if o.GetName() == WorkbenchTrustedCABundleName {
-					// List all the notebooks in the namespace and trigger a reconcile event
-					var nbList nbv1.NotebookList
-					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
-						log.Error(err, "Unable to list Notebook's when attempting to handle Global CA Bundle event.")
-						return []reconcile.Request{}
-					}
-
-					// For all the notebooks that mounted the ConfigMap workbench-trusted-ca-bundle
-					// as a volume, trigger a reconcile event.
-					reconcileRequests := []reconcile.Request{}
-					for _, nb := range nbList.Items {
-						for _, volume := range nb.Spec.Template.Spec.Volumes {
-							if volume.ConfigMap != nil && volume.ConfigMap.Name == o.GetName() {
-								namespacedName := types.NamespacedName{
-									Name:      nb.Name,
-									Namespace: o.GetNamespace(),
-								}
-								reconcileRequests = append(reconcileRequests, reconcile.Request{NamespacedName: namespacedName})
-							}
-						}
-					}
-					return reconcileRequests
-				}
-
-				return []reconcile.Request{}
-			}),
-		).
+		// Watch ConfigMaps for CA bundles and controller ingress configuration.
+		Watches(&corev1.ConfigMap{}, r.configMapHandler()).
 		Watches(&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 				return r.notebookRequests(ctx, o.GetName())
@@ -922,6 +861,134 @@ var ingressNamespacePredicate = predicate.Funcs{
 		newName, newSet := e.ObjectNew.GetAnnotations()[IngressNameAnnotation]
 		return oldSet != newSet || oldName != newName
 	},
+}
+
+func (r *OpenshiftNotebookReconciler) caBundleRequests(ctx context.Context, o client.Object) []reconcile.Request {
+	log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
+	// If the ConfigMap name matches on of our interested ConfigMaps
+	// trigger a reconcile event for first notebook in the namespace
+	if o.GetName() == OdhConfigMapName || o.GetName() == SelfSignedConfigMapName || o.GetName() == ServiceCAConfigMapName {
+		// List all the notebooks in the namespace and trigger a reconcile event
+		var nbList nbv1.NotebookList
+		if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+			log.Error(err, "Unable to list Notebooks when attempting to handle Global CA Bundle event.")
+			return []reconcile.Request{}
+		}
+
+		// As there is only one configmap workbench-trusted-ca-bundle per namespace
+		// and is used by all the notebooks in the namespace, we can trigger
+		// reconcile event only for the first notebook in the list.
+		for _, nb := range nbList.Items {
+			return []reconcile.Request{
+				{
+					NamespacedName: types.NamespacedName{
+						Name:      nb.Name,
+						Namespace: o.GetNamespace(),
+					},
+				},
+			}
+		}
+	}
+
+	// If the ConfigMap is workbench-trusted-ca-bundle
+	// trigger a reconcile event for all the notebooks in the namespace
+	// containing the ConfigMap workbench-trusted-ca-bundle as a volume.
+	if o.GetName() == WorkbenchTrustedCABundleName {
+		// List all the notebooks in the namespace and trigger a reconcile event
+		var nbList nbv1.NotebookList
+		if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+			log.Error(err, "Unable to list Notebook's when attempting to handle Global CA Bundle event.")
+			return []reconcile.Request{}
+		}
+
+		// For all the notebooks that mounted the ConfigMap workbench-trusted-ca-bundle
+		// as a volume, trigger a reconcile event.
+		reconcileRequests := []reconcile.Request{}
+		for _, nb := range nbList.Items {
+			for _, volume := range nb.Spec.Template.Spec.Volumes {
+				if volume.ConfigMap != nil && volume.ConfigMap.Name == o.GetName() {
+					namespacedName := types.NamespacedName{
+						Name:      nb.Name,
+						Namespace: o.GetNamespace(),
+					}
+					reconcileRequests = append(reconcileRequests, reconcile.Request{NamespacedName: namespacedName})
+				}
+			}
+		}
+		return reconcileRequests
+	}
+
+	return []reconcile.Request{}
+}
+
+func (r *OpenshiftNotebookReconciler) configMapHandler() handler.EventHandler {
+	caBundles := handler.EnqueueRequestsFromMapFunc(r.caBundleRequests)
+	isIngressConfig := func(o client.Object) bool {
+		return o.GetNamespace() == r.Namespace && o.GetName() == NotebookControllerConfigMap
+	}
+	enqueueAll := func(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		for _, request := range r.notebookRequests(ctx, "") {
+			q.Add(request)
+		}
+	}
+	return handler.Funcs{
+		CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if !isIngressConfig(e.Object) {
+				caBundles.Create(ctx, e, q)
+				return
+			}
+			enqueueAll(ctx, q)
+		},
+		UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if !isIngressConfig(e.ObjectNew) {
+				caBundles.Update(ctx, e, q)
+				return
+			}
+			for _, request := range r.ingressConfigRequests(ctx, e.ObjectOld.(*corev1.ConfigMap), e.ObjectNew.(*corev1.ConfigMap)) {
+				q.Add(request)
+			}
+		},
+		DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if !isIngressConfig(e.Object) {
+				caBundles.Delete(ctx, e, q)
+				return
+			}
+			enqueueAll(ctx, q)
+		},
+	}
+}
+
+func (r *OpenshiftNotebookReconciler) ingressConfigRequests(ctx context.Context, old, updated *corev1.ConfigMap) []reconcile.Request {
+	oldData, oldSet := old.Data[IngressesKey]
+	newData, newSet := updated.Data[IngressesKey]
+	if oldSet == newSet && oldData == newData {
+		return nil
+	}
+
+	// ponytail: scan cached notebooks on config changes; index assignments if this becomes costly.
+	all := r.notebookRequests(ctx, "")
+	changedNamespaces := make(map[string]bool)
+	var requests []reconcile.Request
+	for _, request := range all {
+		changed, checked := changedNamespaces[request.Namespace]
+		if !checked {
+			before, oldErr := r.notebookIngress(ctx, request.Namespace, old.Data)
+			after, newErr := r.notebookIngress(ctx, request.Namespace, updated.Data)
+			oldUnknown := errors.Is(oldErr, ingressassignment.ErrUnknownIngress)
+			newUnknown := errors.Is(newErr, ingressassignment.ErrUnknownIngress)
+			if (oldErr != nil && !oldUnknown) || (newErr != nil && !newUnknown) {
+				r.Log.Error(errors.Join(oldErr, newErr), "Unable to compare ingress assignments; reconciling all Notebooks")
+				return all
+			}
+			changed = oldUnknown != newUnknown ||
+				(!oldUnknown && (before.GatewayName != after.GatewayName || before.GatewayNamespace != after.GatewayNamespace))
+			changedNamespaces[request.Namespace] = changed
+		}
+		if changed {
+			requests = append(requests, request)
+		}
+	}
+	return requests
 }
 
 func (r *OpenshiftNotebookReconciler) notebookRequests(ctx context.Context, namespace string) []reconcile.Request {

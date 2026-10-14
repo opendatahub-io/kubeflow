@@ -21,7 +21,39 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const keepThisStr = "keep-this"
+const (
+	keepThisStr         = "keep-this"
+	cacheTestPayload    = "large payload"
+	cacheTestValue      = "test"
+	cacheTestAnnotation = "custom-annotation"
+)
+
+func TestStripConfigMapDataPreservesControllerConfig(t *testing.T) {
+	data := map[string]string{IngressesKey: "[]", "unrelated": cacheTestPayload}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:          NotebookControllerConfigMap,
+			ManagedFields: []metav1.ManagedFieldsEntry{{Manager: cacheTestValue}},
+			Annotations:   map[string]string{corev1.LastAppliedConfigAnnotation: cacheTestPayload, "custom": keepThisStr},
+		},
+		Data:       data,
+		BinaryData: map[string][]byte{"unrelated": []byte(cacheTestPayload)},
+	}
+	if _, err := stripConfigMapData(cm); err != nil {
+		t.Fatal(err)
+	}
+	if len(cm.Data) != 2 || cm.Data[IngressesKey] != "[]" || cm.Data["unrelated"] != cacheTestPayload ||
+		len(cm.BinaryData) != 1 || string(cm.BinaryData["unrelated"]) != cacheTestPayload {
+		t.Fatalf("expected full controller configuration, got Data=%v BinaryData=%v", cm.Data, cm.BinaryData)
+	}
+	if len(data) != 2 || data[IngressesKey] != "[]" {
+		t.Fatalf("transform mutated the shared data map: %v", data)
+	}
+	if _, present := cm.Annotations[corev1.LastAppliedConfigAnnotation]; present ||
+		cm.ManagedFields != nil || cm.Annotations["custom"] != keepThisStr {
+		t.Fatalf("controller ConfigMap metadata was not cleaned correctly: %+v", cm.ObjectMeta)
+	}
+}
 
 func TestStripConfigMapData(t *testing.T) {
 	tests := []struct {
@@ -73,13 +105,13 @@ func TestStripConfigMapData(t *testing.T) {
 					Name:      "annotated-cm",
 					Namespace: "default",
 					Annotations: map[string]string{
-						"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"ConfigMap"}`,
-						"custom-annotation": keepThisStr,
+						corev1.LastAppliedConfigAnnotation: `{"apiVersion":"v1","kind":"ConfigMap"}`,
+						cacheTestAnnotation:                keepThisStr,
 					},
 				},
 				Data: map[string]string{"key": "value"},
 			},
-			wantAnnotations: map[string]string{"custom-annotation": keepThisStr},
+			wantAnnotations: map[string]string{cacheTestAnnotation: keepThisStr},
 		},
 	}
 
@@ -182,13 +214,13 @@ func TestStripSecretData(t *testing.T) {
 					Name:      "annotated-secret",
 					Namespace: "default",
 					Annotations: map[string]string{
-						"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Secret"}`,
-						"custom-annotation": keepThisStr,
+						corev1.LastAppliedConfigAnnotation: `{"apiVersion":"v1","kind":"Secret"}`,
+						cacheTestAnnotation:                keepThisStr,
 					},
 				},
 				Data: map[string][]byte{"key": []byte("value")},
 			},
-			wantAnnotations: map[string]string{"custom-annotation": keepThisStr},
+			wantAnnotations: map[string]string{cacheTestAnnotation: keepThisStr},
 		},
 	}
 
@@ -245,9 +277,9 @@ func TestStripConfigMapData_PreservesLabelsAndAnnotations(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "labeled-cm",
 			Namespace: "default",
-			Labels:    map[string]string{"app": "test"},
+			Labels:    map[string]string{"app": cacheTestValue},
 			Annotations: map[string]string{
-				"custom-annotation": keepThisStr,
+				cacheTestAnnotation: keepThisStr,
 			},
 		},
 		Data: map[string]string{"large-key": "large-value"},
@@ -262,10 +294,10 @@ func TestStripConfigMapData_PreservesLabelsAndAnnotations(t *testing.T) {
 	if stripped.Data != nil {
 		t.Errorf("Data should be nil")
 	}
-	if stripped.Labels["app"] != "test" {
+	if stripped.Labels["app"] != cacheTestValue {
 		t.Errorf("Labels should be preserved")
 	}
-	if stripped.Annotations["custom-annotation"] != keepThisStr {
+	if stripped.Annotations[cacheTestAnnotation] != keepThisStr {
 		t.Errorf("Custom annotations should be preserved")
 	}
 }
@@ -275,9 +307,9 @@ func TestStripSecretData_PreservesLabelsAndAnnotations(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "labeled-secret",
 			Namespace: "default",
-			Labels:    map[string]string{"app": "test"},
+			Labels:    map[string]string{"app": cacheTestValue},
 			Annotations: map[string]string{
-				"custom-annotation": keepThisStr,
+				cacheTestAnnotation: keepThisStr,
 			},
 		},
 		Data: map[string][]byte{"key": []byte("value")},
@@ -292,10 +324,10 @@ func TestStripSecretData_PreservesLabelsAndAnnotations(t *testing.T) {
 	if stripped.Data != nil {
 		t.Errorf("Data should be nil")
 	}
-	if stripped.Labels["app"] != "test" {
+	if stripped.Labels["app"] != cacheTestValue {
 		t.Errorf("Labels should be preserved")
 	}
-	if stripped.Annotations["custom-annotation"] != keepThisStr {
+	if stripped.Annotations[cacheTestAnnotation] != keepThisStr {
 		t.Errorf("Custom annotations should be preserved")
 	}
 }
@@ -306,8 +338,8 @@ func TestStripConfigMapData_RemovesLastAppliedConfiguration(t *testing.T) {
 			Name:      "applied-cm",
 			Namespace: "default",
 			Annotations: map[string]string{
-				"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","data":{"key":"large-payload"},"kind":"ConfigMap"}`,
-				"custom-annotation": keepThisStr,
+				corev1.LastAppliedConfigAnnotation: `{"apiVersion":"v1","data":{"key":"large-payload"},"kind":"ConfigMap"}`,
+				cacheTestAnnotation:                keepThisStr,
 			},
 		},
 		Data: map[string]string{"key": "value"},
@@ -319,10 +351,10 @@ func TestStripConfigMapData_RemovesLastAppliedConfiguration(t *testing.T) {
 	}
 
 	stripped := result.(*corev1.ConfigMap)
-	if _, exists := stripped.Annotations["kubectl.kubernetes.io/last-applied-configuration"]; exists {
+	if _, exists := stripped.Annotations[corev1.LastAppliedConfigAnnotation]; exists {
 		t.Errorf("last-applied-configuration annotation should be removed")
 	}
-	if stripped.Annotations["custom-annotation"] != keepThisStr {
+	if stripped.Annotations[cacheTestAnnotation] != keepThisStr {
 		t.Errorf("other annotations should be preserved")
 	}
 }
@@ -333,8 +365,8 @@ func TestStripSecretData_RemovesLastAppliedConfiguration(t *testing.T) {
 			Name:      "applied-secret",
 			Namespace: "default",
 			Annotations: map[string]string{
-				"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","data":{"password":"someSecretValue"},"kind":"Secret"}`,
-				"custom-annotation": keepThisStr,
+				corev1.LastAppliedConfigAnnotation: `{"apiVersion":"v1","data":{"password":"someSecretValue"},"kind":"Secret"}`,
+				cacheTestAnnotation:                keepThisStr,
 			},
 		},
 		Data: map[string][]byte{"password": []byte("supersecret")},
@@ -346,10 +378,10 @@ func TestStripSecretData_RemovesLastAppliedConfiguration(t *testing.T) {
 	}
 
 	stripped := result.(*corev1.Secret)
-	if _, exists := stripped.Annotations["kubectl.kubernetes.io/last-applied-configuration"]; exists {
+	if _, exists := stripped.Annotations[corev1.LastAppliedConfigAnnotation]; exists {
 		t.Errorf("last-applied-configuration annotation should be removed")
 	}
-	if stripped.Annotations["custom-annotation"] != keepThisStr {
+	if stripped.Annotations[cacheTestAnnotation] != keepThisStr {
 		t.Errorf("other annotations should be preserved")
 	}
 }

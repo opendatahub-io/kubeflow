@@ -21,7 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ManagerCacheOptions keeps metadata for watches and reads ConfigMap and Secret data directly.
+// ManagerCacheOptions keeps metadata and controller configuration for watches,
+// and reads ConfigMap and Secret data directly.
 func ManagerCacheOptions() (cache.Options, client.Options) {
 	return cache.Options{
 			DefaultTransform: cache.TransformStripManagedFields(),
@@ -36,14 +37,16 @@ func ManagerCacheOptions() (cache.Options, client.Options) {
 		}
 }
 
-// stripConfigMapData removes data payloads and managed fields from cached ConfigMaps.
-// ConfigMap data is read via direct API calls (DisableFor) when needed.
+// stripConfigMapData retains the controller ConfigMap payload for watch comparisons.
+// Other ConfigMap data is read via direct API calls (DisableFor) when needed.
 // Note: SetManagedFields is called here because DefaultTransform does not apply
 // to types that have a per-type Transform override in ByObject.
 func stripConfigMapData(i interface{}) (interface{}, error) {
 	if cm, ok := i.(*corev1.ConfigMap); ok {
-		cm.Data = nil
-		cm.BinaryData = nil
+		if cm.GetName() != NotebookControllerConfigMap {
+			cm.Data = nil
+			cm.BinaryData = nil
+		}
 		if cm.Annotations != nil {
 			delete(cm.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 		}

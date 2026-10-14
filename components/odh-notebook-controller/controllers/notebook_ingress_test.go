@@ -17,6 +17,8 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,13 +34,206 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-const alphaIngressName = "alpha"
+const (
+	alphaIngressName           = "alpha"
+	betaIngressName            = "beta"
+	alphaNotebookOne           = "alpha/one"
+	alphaNotebookTwo           = "alpha/two"
+	defaultNotebookOne         = "default/one"
+	explicitDefaultNotebookOne = "explicit-default/one"
+	invalidIngressJSON         = "invalid JSON"
+	createEventKind            = "create"
+	deleteEventKind            = "delete"
+	genericEventKind           = "generic"
+	centralTestNamespace       = "central"
+	unrelatedConfigKey         = "unrelated"
+	userNotebookOne            = "user/one"
+	caTestNamespace            = "user"
+)
+
+func TestIngressConfigHandler(t *testing.T) {
+	const configured = `[
+		{"name":"primary","gatewayName":"default-gateway","gatewayNamespace":"ingress","isDefault":true},
+		{"name":"alpha","gatewayName":"alpha-gateway","gatewayNamespace":"ingress"},
+		{"name":"beta","gatewayName":"beta-gateway","gatewayNamespace":"ingress"}
+	]`
+	const reordered = `[
+		{"name":"beta","gatewayName":"beta-gateway","gatewayNamespace":"ingress"},
+		{"name":"alpha","gatewayName":"alpha-gateway","gatewayNamespace":"ingress"},
+		{"name":"primary","gatewayName":"default-gateway","gatewayNamespace":"ingress","isDefault":true}
+	]`
+	withoutAlpha := strings.ReplaceAll(configured, `{"name":"alpha","gatewayName":"alpha-gateway","gatewayNamespace":"ingress"},`, "")
+	all := []string{alphaNotebookOne, alphaNotebookTwo, "beta/one", defaultNotebookOne, explicitDefaultNotebookOne}
+	cases := []struct {
+		name, before, after, kind string
+		missingNamespace          string
+		nilUpdatedData            bool
+		want                      []string
+	}{
+		{name: "named Gateway change", before: configured, after: strings.ReplaceAll(configured, "alpha-gateway", "new-alpha"), want: []string{alphaNotebookOne, alphaNotebookTwo}},
+		{name: "Gateway namespace change", before: configured, after: strings.ReplaceAll(configured, `"alpha-gateway","gatewayNamespace":"ingress"`, `"alpha-gateway","gatewayNamespace":"other"`), want: []string{alphaNotebookOne, alphaNotebookTwo}},
+		{name: "default Gateway change", before: configured, after: strings.ReplaceAll(configured, "default-gateway", "new-default"), want: []string{defaultNotebookOne, explicitDefaultNotebookOne}},
+		{name: "default designation change", before: configured, after: strings.ReplaceAll(strings.ReplaceAll(configured, `,"isDefault":true`, ""), `"beta-gateway","gatewayNamespace":"ingress"`, `"beta-gateway","gatewayNamespace":"ingress","isDefault":true`), want: []string{defaultNotebookOne}},
+		{name: "configured default removed uses static fallback", before: configured, after: strings.ReplaceAll(configured, `,"isDefault":true`, ""), want: []string{defaultNotebookOne}},
+		{name: "unchanged ingress configuration", before: configured, after: configured},
+		{name: "reordered ingresses", before: configured, after: reordered},
+		{name: "unused hostname change", before: configured, after: strings.ReplaceAll(configured, `"name":"alpha"`, `"name":"alpha","hostname":"new.example.com"`)},
+		{name: "unused ingress added", before: configured, after: strings.ReplaceAll(configured, "\n\t]", `,{"name":"unused","gatewayName":"unused","gatewayNamespace":"ingress"}]`)},
+		{name: "ingress removed", before: configured, after: withoutAlpha, want: []string{alphaNotebookOne, alphaNotebookTwo}},
+		{name: "missing assignment restored", before: withoutAlpha, after: configured, want: []string{alphaNotebookOne, alphaNotebookTwo}},
+		{name: "missing assignment unchanged while beta changes", before: withoutAlpha, after: strings.ReplaceAll(withoutAlpha, "beta-gateway", "new-beta"), want: []string{"beta/one"}},
+		{name: "missing assignment to invalid configuration", before: withoutAlpha, after: strings.ReplaceAll(configured, "beta-gateway", ""), want: all},
+		{name: "invalid configuration to missing assignment", before: strings.ReplaceAll(configured, "beta-gateway", ""), after: withoutAlpha, want: all},
+		{name: "Namespace lookup failure", before: configured, after: withoutAlpha, missingNamespace: alphaIngressName, want: all},
+		{name: "malformed configuration", before: configured, after: invalidIngressJSON, want: all},
+		{name: "invalid configuration", before: configured, after: strings.ReplaceAll(configured, "alpha-gateway", ""), want: all},
+		{name: "configuration repaired", before: invalidIngressJSON, after: configured, want: all},
+		{name: "absent ingress key uses static default", after: `[{"name":"primary","gatewayName":"new-default","gatewayNamespace":"ingress","isDefault":true},{"name":"alpha","gatewayName":"alpha-gateway","gatewayNamespace":"ingress"},{"name":"beta","gatewayName":"beta-gateway","gatewayNamespace":"ingress"}]`, want: all},
+		{name: "configured to nil data", before: configured, nilUpdatedData: true, want: all},
+		{name: "nil data unchanged", nilUpdatedData: true},
+		{name: createEventKind, after: configured, kind: createEventKind, want: all},
+		{name: "create with nil data", kind: createEventKind, nilUpdatedData: true, want: all},
+		{name: deleteEventKind, before: configured, kind: deleteEventKind, want: all},
+		{name: "delete with nil data", kind: deleteEventKind, want: all},
+		{name: genericEventKind, after: configured, kind: genericEventKind},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+			require.NoError(t, nbv1.AddToScheme(scheme))
+			objects := []client.Object{}
+			for namespace, annotations := range map[string]map[string]string{
+				alphaIngressName: {IngressNameAnnotation: alphaIngressName}, betaIngressName: {IngressNameAnnotation: betaIngressName},
+				defaultIngressName: nil, "explicit-default": {IngressNameAnnotation: "primary"},
+			} {
+				if namespace != tc.missingNamespace {
+					objects = append(objects, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Annotations: annotations}})
+				}
+			}
+			for _, key := range all {
+				namespace, name, _ := strings.Cut(key, "/")
+				objects = append(objects, &nbv1.Notebook{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
+			}
+			r := &OpenshiftNotebookReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build(), Log: logr.Discard(), Namespace: centralTestNamespace}
+			config := func(ingresses string) *corev1.ConfigMap {
+				cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: NotebookControllerConfigMap, Namespace: centralTestNamespace}}
+				if ingresses != "" {
+					cm.Data = map[string]string{IngressesKey: ingresses}
+				}
+				return cm
+			}
+			old, updated := config(tc.before), config(tc.after)
+			// Metadata and unrelated data never change which Notebook routes need updating.
+			updated.Annotations = map[string]string{unrelatedConfigKey: "changed"}
+			if updated.Data == nil {
+				updated.Data = map[string]string{}
+			}
+			updated.Data[unrelatedConfigKey] = "changed"
+			if tc.nilUpdatedData {
+				updated.Data = nil
+			}
+			q := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
+			defer q.ShutDown()
+			h := r.configMapHandler()
+			switch tc.kind {
+			case createEventKind:
+				h.Create(context.Background(), event.CreateEvent{Object: updated}, q)
+			case deleteEventKind:
+				h.Delete(context.Background(), event.DeleteEvent{Object: old}, q)
+			case genericEventKind:
+				h.Generic(context.Background(), event.GenericEvent{Object: updated}, q)
+			default:
+				h.Update(context.Background(), event.UpdateEvent{ObjectOld: old, ObjectNew: updated}, q)
+			}
+			var got []string
+			for q.Len() > 0 {
+				request, _ := q.Get()
+				got = append(got, request.Namespace+"/"+request.Name)
+				q.Done(request)
+			}
+			require.ElementsMatch(t, tc.want, got)
+		})
+	}
+}
+
+func TestConfigMapHandlerCABundles(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, nbv1.AddToScheme(scheme))
+	objects := make([]client.Object, 0, 4)
+	for _, key := range []string{userNotebookOne, "user/two", "user/unmounted", "other/one"} {
+		namespace, name, _ := strings.Cut(key, "/")
+		notebook := &nbv1.Notebook{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+		if name != "unmounted" {
+			notebook.Spec.Template.Spec.Volumes = []corev1.Volume{{
+				Name: "ca", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: WorkbenchTrustedCABundleName},
+				}},
+			}}
+		}
+		objects = append(objects, notebook)
+	}
+	r := &OpenshiftNotebookReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build(),
+		Log:    logr.Discard(), Namespace: centralTestNamespace,
+	}
+	cases := []struct {
+		name, namespace string
+		want            []string
+	}{
+		{name: OdhConfigMapName, namespace: caTestNamespace, want: []string{userNotebookOne}},
+		{name: SelfSignedConfigMapName, namespace: caTestNamespace, want: []string{userNotebookOne}},
+		{name: ServiceCAConfigMapName, namespace: caTestNamespace, want: []string{userNotebookOne}},
+		{name: WorkbenchTrustedCABundleName, namespace: caTestNamespace, want: []string{userNotebookOne, "user/two"}},
+		{name: OdhConfigMapName, namespace: "empty"},
+		{name: WorkbenchTrustedCABundleName, namespace: "empty"},
+		{name: unrelatedConfigKey, namespace: caTestNamespace},
+		{name: NotebookControllerConfigMap, namespace: caTestNamespace},
+	}
+	for _, tc := range cases {
+		for _, kind := range []string{createEventKind, "update", deleteEventKind, genericEventKind} {
+			t.Run(tc.namespace+"/"+tc.name+"/"+kind, func(t *testing.T) {
+				old := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: tc.name, Namespace: tc.namespace}}
+				updated := old.DeepCopy()
+				updated.Data = map[string]string{IngressesKey: invalidIngressJSON}
+				q := workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
+				defer q.ShutDown()
+				h := r.configMapHandler()
+				switch kind {
+				case createEventKind:
+					h.Create(context.Background(), event.CreateEvent{Object: updated}, q)
+				case "update":
+					h.Update(context.Background(), event.UpdateEvent{ObjectOld: old, ObjectNew: updated}, q)
+				case deleteEventKind:
+					h.Delete(context.Background(), event.DeleteEvent{Object: old}, q)
+				case genericEventKind:
+					h.Generic(context.Background(), event.GenericEvent{Object: updated}, q)
+				}
+				var got []string
+				for q.Len() > 0 {
+					request, _ := q.Get()
+					got = append(got, request.Namespace+"/"+request.Name)
+					q.Done(request)
+				}
+				if kind == genericEventKind {
+					require.Empty(t, got)
+				} else {
+					require.ElementsMatch(t, tc.want, got)
+				}
+			})
+		}
+	}
+}
 
 func TestIngressNamespacePredicate(t *testing.T) {
 	old := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"other": "one"}}}
@@ -108,7 +303,7 @@ var _ = Describe("Ingress assignment watch", func() {
 
 		By("Updating only the Namespace ingress annotation")
 		Expect(cli.Get(ctx, types.NamespacedName{Name: namespaceName}, ns)).To(Succeed())
-		ns.Annotations[IngressNameAnnotation] = "beta"
+		ns.Annotations[IngressNameAnnotation] = betaIngressName
 		Expect(cli.Update(ctx, ns)).To(Succeed())
 		Eventually(gateway, 30*time.Second, 250*time.Millisecond).Should(Equal(types.NamespacedName{Name: "gateway-beta", Namespace: gatewayNamespace}))
 
@@ -170,16 +365,22 @@ func TestNotebookIngressAssignment(t *testing.T) {
 	alpha := ingressassignment.Ingress{GatewayName: "alpha-gateway", GatewayNamespace: "additional-ingress"}
 
 	cases := []struct {
-		name       string
-		data       map[string]string
-		annotation *string
-		want       ingressassignment.Ingress
-		wantError  bool
-		unknown    bool
+		name             string
+		data             map[string]string
+		annotation       *string
+		want             ingressassignment.Ingress
+		wantError        bool
+		unknown          bool
+		configMapPresent bool
+		cleanupFailure   string
 	}{
 		{name: "missing ConfigMap preserves legacy default", want: legacyDefault},
-		{name: "explicit default without configuration", annotation: new("default"), want: legacyDefault},
-		{name: "unrelated configuration preserves legacy default", data: map[string]string{"otherSetting": "unrelated"}, want: legacyDefault},
+		{name: "explicit default without configuration", annotation: new(defaultIngressName), want: legacyDefault},
+		{name: "nil ConfigMap data preserves legacy default", configMapPresent: true, want: legacyDefault},
+		{name: "explicit default with nil data", configMapPresent: true, annotation: new(defaultIngressName), want: legacyDefault},
+		{name: "empty ConfigMap data preserves legacy default", data: map[string]string{}, want: legacyDefault},
+		{name: "explicit default with empty data", data: map[string]string{}, annotation: new(defaultIngressName), want: legacyDefault},
+		{name: "unrelated configuration preserves legacy default", data: map[string]string{"otherSetting": unrelatedConfigKey}, want: legacyDefault},
 		{name: "absent annotation selects operator default", data: map[string]string{IngressesKey: configuredIngresses}, want: operatorDefault},
 		{name: "explicit annotation selects operator default", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new("primary"), want: operatorDefault},
 		{name: "additional ingress forwards Gateway name and namespace", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new(alphaIngressName), want: alpha},
@@ -187,13 +388,18 @@ func TestNotebookIngressAssignment(t *testing.T) {
 		{name: "additional-only list still resolves explicit assignment", data: map[string]string{IngressesKey: additionalOnly}, annotation: new(alphaIngressName), want: alpha},
 		{name: "unmarked default name conflicts with legacy fallback", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"operator-default","gatewayNamespace":"operator-ingress"}]`}, wantError: true},
 		{name: "default name does not override a flagged ingress", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, want: operatorDefault},
-		{name: "unmarked default name remains an explicit assignment", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, annotation: new("default"), want: alpha},
+		{name: "unmarked default name remains an explicit assignment", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, annotation: new(defaultIngressName), want: alpha},
 		{name: "empty list preserves legacy default", data: map[string]string{IngressesKey: `[]`}, want: legacyDefault},
-		{name: "invalid JSON retains existing route", data: map[string]string{IngressesKey: "invalid JSON"}, wantError: true},
+		{name: "invalid JSON retains existing route", data: map[string]string{IngressesKey: invalidIngressJSON}, wantError: true},
 		{name: "invalid Gateway retains existing route", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"","gatewayNamespace":"operator-ingress","isDefault":true}]`}, wantError: true},
 		{name: "multiple defaults retain existing route", data: map[string]string{IngressesKey: `[{"name":"one","gatewayName":"one","gatewayNamespace":"ingress","isDefault":true},{"name":"two","gatewayName":"two","gatewayNamespace":"ingress","isDefault":true}]`}, wantError: true},
-		{name: "unknown annotation removes stale route", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new("removed"), wantError: true, unknown: true},
-		{name: "default fallback does not accept unknown annotation", data: map[string]string{IngressesKey: `[]`}, annotation: new("removed"), wantError: true, unknown: true},
+		{name: "unknown annotation removes stale route", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new("removed"), unknown: true},
+		{name: "default fallback does not accept unknown annotation", data: map[string]string{IngressesKey: `[]`}, annotation: new("removed"), unknown: true},
+		{name: "missing ConfigMap with unknown assignment removes stale route", annotation: new("removed"), unknown: true},
+		{name: "nil ConfigMap data with unknown assignment removes stale route", configMapPresent: true, annotation: new("removed"), unknown: true},
+		{name: "empty ConfigMap data with unknown assignment removes stale route", data: map[string]string{}, annotation: new("removed"), unknown: true},
+		{name: "cleanup List failure returns error", annotation: new("removed"), unknown: true, wantError: true, cleanupFailure: "list"},
+		{name: "cleanup Delete failure returns error", annotation: new("removed"), unknown: true, wantError: true, cleanupFailure: deleteEventKind},
 	}
 	for _, auth := range []bool{false, true} {
 		name := "regular"
@@ -214,18 +420,33 @@ func TestNotebookIngressAssignment(t *testing.T) {
 						ns.Annotations = map[string]string{IngressNameAnnotation: *tc.annotation}
 					}
 					notebook := &nbv1.Notebook{ObjectMeta: metav1.ObjectMeta{Name: "book", Namespace: ns.Name}}
-					original := NewNotebookHTTPRoute(notebook, "central", legacyDefault)
+					original := NewNotebookHTTPRoute(notebook, centralTestNamespace, legacyDefault)
 					if auth {
-						original = NewNotebookKubeRbacProxyHTTPRoute(notebook, "central", legacyDefault)
+						original = NewNotebookKubeRbacProxyHTTPRoute(notebook, centralTestNamespace, legacyDefault)
 					}
-					cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, notebook, original).Build()
-					if tc.data != nil {
+					cleanupErr := errors.New("cleanup " + tc.cleanupFailure + " failed")
+					cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, notebook, original).
+						WithInterceptorFuncs(interceptor.Funcs{
+							List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+								if _, ok := list.(*gatewayv1.HTTPRouteList); ok && tc.cleanupFailure == "list" {
+									return cleanupErr
+								}
+								return c.List(ctx, list, opts...)
+							},
+							Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+								if _, ok := obj.(*gatewayv1.HTTPRoute); ok && tc.cleanupFailure == deleteEventKind {
+									return cleanupErr
+								}
+								return c.Delete(ctx, obj, opts...)
+							},
+						}).Build()
+					if tc.data != nil || tc.configMapPresent {
 						require.NoError(t, cli.Create(ctx, &corev1.ConfigMap{
-							ObjectMeta: metav1.ObjectMeta{Name: NotebookControllerConfigMap, Namespace: "central"}, Data: tc.data,
+							ObjectMeta: metav1.ObjectMeta{Name: NotebookControllerConfigMap, Namespace: centralTestNamespace}, Data: tc.data,
 						}))
 					}
 					recorder := record.NewFakeRecorder(1)
-					r := &OpenshiftNotebookReconciler{Client: cli, Namespace: "central", Log: logr.Discard(), EventRecorder: recorder}
+					r := &OpenshiftNotebookReconciler{Client: cli, Namespace: centralTestNamespace, Log: logr.Discard(), EventRecorder: recorder}
 					reconcile := r.ReconcileHTTPRoute
 					if auth {
 						reconcile = r.ReconcileKubeRbacProxyHTTPRoute
@@ -245,10 +466,19 @@ func TestNotebookIngressAssignment(t *testing.T) {
 					var route gatewayv1.HTTPRoute
 					getErr := cli.Get(ctx, client.ObjectKeyFromObject(original), &route)
 					if tc.unknown {
-						require.ErrorIs(t, err, ingressassignment.ErrUnknownIngress)
+						_, assignmentErr := r.notebookIngress(ctx, ns.Name, config)
+						require.ErrorIs(t, assignmentErr, ingressassignment.ErrUnknownIngress)
 						require.Len(t, recorder.Events, 1)
-						require.Equal(t, "Warning IngressNotFound "+err.Error(), <-recorder.Events)
+						require.Equal(t, "Warning IngressNotFound "+assignmentErr.Error(), <-recorder.Events)
+						if tc.cleanupFailure != "" {
+							require.ErrorContains(t, err, cleanupErr.Error())
+							require.NoError(t, getErr)
+							require.Equal(t, original.Spec, route.Spec)
+							return
+						}
 						require.True(t, apierrors.IsNotFound(getErr), "stale route lookup: %v", getErr)
+						require.NoError(t, reconcile(notebook, ctx, config), "repeated cleanup should succeed")
+						require.True(t, apierrors.IsNotFound(cli.Get(ctx, client.ObjectKeyFromObject(original), &route)))
 						return
 					}
 					require.NotErrorIs(t, err, ingressassignment.ErrUnknownIngress)

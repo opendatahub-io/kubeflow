@@ -98,7 +98,7 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string, ingr
 				ParentRefs: []gatewayv1.ParentReference{
 					{
 						Name:      gatewayv1.ObjectName(ingress.GatewayName),
-						Namespace: new(gatewayv1.Namespace(ingress.GatewayNamespace)),
+						Namespace: ptr.To(gatewayv1.Namespace(ingress.GatewayNamespace)),
 					},
 				},
 			},
@@ -152,6 +152,7 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 			if deleteErr := r.DeleteHTTPRouteForNotebook(notebook, ctx); deleteErr != nil {
 				return errors.Join(err, deleteErr)
 			}
+			return nil
 		}
 		return err
 	}
@@ -247,6 +248,11 @@ func defaultNotebookIngress() ingressassignment.Ingress {
 
 func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, namespaceName string, config map[string]string) (ingressassignment.Ingress, error) {
 	var ingresses []ingressassignment.Ingress
+	if config == nil {
+		// No configuration data (ConfigMap missing or empty) - use legacy default only.
+		ingresses = append(ingresses, defaultNotebookIngress())
+		return ingressassignment.Resolve(ctx, r.Client, namespaceName, ingresses)
+	}
 	if data, present := config[IngressesKey]; present {
 		if err := json.Unmarshal([]byte(data), &ingresses); err != nil {
 			return ingressassignment.Ingress{}, fmt.Errorf("parse notebook controller ingress config: %w", err)
