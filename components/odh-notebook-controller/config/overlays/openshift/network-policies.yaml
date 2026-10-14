@@ -11,4 +11,17 @@ spec:
   policyTypes:
   - Ingress
   ingress:
-  - {}
+  # Webhook server (TCP 8443): reached by the kube-apiserver (via the
+  # Konnectivity proxy on ROKS). Port-scoped so API-server webhook calls
+  # are no longer blocked by the default-deny ingress policy.
+  - ports:
+    - protocol: TCP
+      port: 8443
+  # Metrics (TCP 8080).
+  - ports:
+    - protocol: TCP
+      port: 8080
+  # Health/readiness probes (TCP 8081).
+  - ports:
+    - protocol: TCP
+      port: 8081
