@@ -42,6 +42,9 @@ const (
 
 type KubeRbacProxyConfig struct {
 	ProxyImage string
+	// TLS holds the resolved TLS profile configuration for the proxy sidecar.
+	// When non-nil, its Args() are appended to the sidecar container command.
+	TLS *ProxyTLSConfig
 }
 
 // ReconcileNotebookServiceAccount will manage the service account reconciliation

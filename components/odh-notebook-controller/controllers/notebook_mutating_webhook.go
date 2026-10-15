@@ -202,23 +202,31 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 	}
 
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
+	proxyArgs := []string{
+		"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
+		"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
+		"--logtostderr=true",
+		"--v=0",
+		"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
+		"--config-file=" + KubeRbacProxyConfigFilePath,
+		"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
+		"--tls-private-key-file=" + KubeRbacProxyTLSKeyFilePath,
+		"--auth-header-fields-enabled=true",
+		"--auth-header-user-field-name=X-Auth-Request-User",
+		"--auth-header-groups-field-name=X-Auth-Request-Groups",
+	}
+
+	// Append consumer-side TLS profile args (--tls-min-version, --tls-cipher-suites,
+	// --tls-curve-preferences) resolved from the APIServer profile and adherence policy.
+	if kubeRbacProxyConfig.TLS != nil {
+		proxyArgs = append(proxyArgs, kubeRbacProxyConfig.TLS.Args()...)
+	}
+
 	proxyContainer := corev1.Container{
 		Name:            ContainerNameKubeRbacProxy,
 		Image:           kubeRbacProxyConfig.ProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
-		Args: []string{
-			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
-			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
-			"--logtostderr=true",
-			"--v=0",
-			"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
-			"--config-file=" + KubeRbacProxyConfigFilePath,
-			"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
-			"--tls-private-key-file=" + KubeRbacProxyTLSKeyFilePath,
-			"--auth-header-fields-enabled=true",
-			"--auth-header-user-field-name=X-Auth-Request-User",
-			"--auth-header-groups-field-name=X-Auth-Request-Groups",
-		},
+		Args:            proxyArgs,
 		Ports: []corev1.ContainerPort{{
 			Name:          KubeRbacProxyServicePortName,
 			ContainerPort: NotebookKubeRbacProxyPort,

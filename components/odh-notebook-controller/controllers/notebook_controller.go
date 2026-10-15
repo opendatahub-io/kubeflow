@@ -76,6 +76,12 @@ const (
 	HTTPRouteFinalizerName      = "notebook.opendatahub.io/httproute-cleanup"
 	ReferenceGrantFinalizerName = "notebook.opendatahub.io/referencegrant-cleanup"
 	KubeRbacProxyFinalizerName  = "notebook.opendatahub.io/kube-rbac-proxy-cleanup"
+
+	// AnnotationTLSProfileFingerprint is a hash of the effective proxy TLS
+	// configuration. The reconciler compares this with the current expected
+	// value to detect when existing notebook sidecar args are stale after
+	// a TLS profile or adherence policy change.
+	AnnotationTLSProfileFingerprint = "notebooks.opendatahub.io/tls-profile-fingerprint"
 )
 
 const (
@@ -99,6 +105,9 @@ type OpenshiftNotebookReconciler struct {
 	// MLflow configuration (read once at startup from env vars)
 	MLflowEnabled bool
 	GatewayURL    string
+	// ProxyTLSConfig holds the resolved consumer-side TLS configuration for
+	// kube-rbac-proxy sidecars. Nil when resolution failed (invalid strict profile).
+	ProxyTLSConfig *ProxyTLSConfig
 }
 
 // notebookControllerConfig reads a fresh configuration snapshot for this reconciliation.
@@ -516,6 +525,30 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		err = r.ReconcileHTTPRoute(notebook, ctx, config)
 		if err != nil {
 			return ctrl.Result{}, err
+		}
+	}
+
+	// Check if the proxy TLS configuration has changed since this notebook was
+	// last reconciled. If the fingerprint differs, patch the annotation to trigger
+	// a webhook re-admission that will inject the updated sidecar args.
+	// Running notebooks will see an update-pending annotation until restarted.
+	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) && r.ProxyTLSConfig != nil {
+		expected := r.ProxyTLSConfig.Fingerprint()
+		current := notebook.Annotations[AnnotationTLSProfileFingerprint]
+		updatePending := notebook.Annotations["notebooks.opendatahub.io/update-pending"]
+		if current != expected && updatePending == "" {
+			log.Info("Proxy TLS profile fingerprint changed, triggering sidecar update",
+				"current", current, "expected", expected)
+			patch := client.MergeFrom(notebook.DeepCopy())
+			if notebook.Annotations == nil {
+				notebook.Annotations = make(map[string]string)
+			}
+			notebook.Annotations[AnnotationTLSProfileFingerprint] = expected
+			if err := r.Patch(ctx, notebook, patch); err != nil {
+				log.Error(err, "Unable to patch TLS profile fingerprint annotation")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
 		}
 	}
 

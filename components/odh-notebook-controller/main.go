@@ -207,6 +207,28 @@ func main() {
 		tlsAdherenceFetched = true // always register watcher; it self-heals when the API recovers (OCP ref: cluster-machine-approver)
 	}
 
+	// Resolve consumer-side TLS configuration for kube-rbac-proxy sidecars.
+	// This is separate from the controller's own TLS (webhook/metrics) because
+	// the adherence policy may produce different effective configurations.
+	var proxyTLSConfig *controllers.ProxyTLSConfig
+	{
+		proxyHasProfile := hasOpenShiftConfigAPI && err == nil
+		if tlsAdherenceFetched || !hasOpenShiftConfigAPI {
+			resolved, resolveErr := controllers.ResolveProxyTLSConfig(profile, tlsAdherence, proxyHasProfile)
+			if resolveErr != nil {
+				setupLog.Error(resolveErr, "Invalid strict TLS profile for proxy sidecars; "+
+					"existing workloads will keep their current TLS configuration until the profile is corrected")
+			} else {
+				proxyTLSConfig = resolved
+				setupLog.Info("Resolved consumer-side TLS profile for proxy sidecars",
+					"minVersion", resolved.MinVersion,
+					"cipherSuites", len(resolved.CipherSuites),
+					"curvePreferences", len(resolved.CurvePreferences),
+					"fingerprint", resolved.Fingerprint())
+			}
+		}
+	}
+
 	// Setup controller manager
 	metricsOpts := metricsserver.Options{
 		BindAddress:    metricsAddr,
@@ -256,14 +278,15 @@ func main() {
 	setupLog.Info("MLflow configuration", "mlflowEnabled", mlflowEnabled)
 
 	if err = (&controllers.OpenshiftNotebookReconciler{
-		Client:        mgr.GetClient(),
-		Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
-		Namespace:     namespace,
-		Scheme:        mgr.GetScheme(),
-		Config:        mgr.GetConfig(),
-		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
-		MLflowEnabled: mlflowEnabled,
-		GatewayURL:    gatewayURL,
+		Client:         mgr.GetClient(),
+		Log:            ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
+		Namespace:      namespace,
+		Scheme:         mgr.GetScheme(),
+		Config:         mgr.GetConfig(),
+		EventRecorder:  mgr.GetEventRecorderFor("odh-notebook-controller"),
+		MLflowEnabled:  mlflowEnabled,
+		GatewayURL:     gatewayURL,
+		ProxyTLSConfig: proxyTLSConfig,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "odh-notebook-controller")
 		os.Exit(1)
@@ -279,6 +302,7 @@ func main() {
 			Namespace: namespace,
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
 				ProxyImage: kubeRbacProxyImage,
+				TLS:        proxyTLSConfig,
 			},
 			Decoder:       admission.NewDecoder(mgr.GetScheme()),
 			MLflowEnabled: mlflowEnabled,
