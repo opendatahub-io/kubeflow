@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: notebook-controller-allow-ingress
+  labels:
+    app.opendatahub.io/networkpolicy: 'true'
+spec:
+  podSelector:
+    matchLabels:
+      app: notebook-controller
+  policyTypes:
+  - Ingress
+  ingress:
+  # Metrics (TCP 8443): controller-runtime secure metrics on the manager
+  # container (--metrics-addr :8443, --metrics-cert-path).
+  - ports:
+    - protocol: TCP
+      port: 8443
+  # Health probes (TCP 8081): /healthz and /readyz. No `from` peer,
+  # because kubelet probe sources are not a stable NetworkPolicy selector.
+  - ports:
+    - protocol: TCP
+      port: 8081
