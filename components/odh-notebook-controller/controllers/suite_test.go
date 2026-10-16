@@ -236,6 +236,7 @@ var _ = BeforeSuite(func() {
 		Handler: &NotebookWebhook{
 			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
 			KubeRbacProxyConfig: KubeRbacProxyConfig{

@@ -57,6 +57,7 @@ import (
 type NotebookWebhook struct {
 	Log                 logr.Logger
 	Client              client.Client
+	APIReader           client.Reader
 	Config              *rest.Config
 	Decoder             admission.Decoder
 	KubeRbacProxyConfig KubeRbacProxyConfig
@@ -467,6 +468,23 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+
+	probeTimeout, configured, err := readWorkbenchProbeTimeout(ctx, w.APIReader, log, w.Namespace)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	if configured {
+		err = applyProbeTimeout(notebook, notebook.Name, probeTimeout)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
+			err = applyProbeTimeout(notebook, ContainerNameKubeRbacProxy, probeTimeout)
+			if err != nil {
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
 		}
 	}
 
