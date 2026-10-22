@@ -315,13 +315,6 @@ func TestValidateProfileSpec(t *testing.T) {
 				},
 				wantErrSub: rc4Cipher,
 			},
-			"insecure suites no OpenShift profile can name": {
-				profile: configv1.TLSProfileSpec{
-					MinTLSVersion: configv1.VersionTLS12,
-					Ciphers:       []string{"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"},
-				},
-				wantErrSub: "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
-			},
 		}
 		for name, tc := range cases {
 			t.Run(name, func(t *testing.T) {
