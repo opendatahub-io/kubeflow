@@ -92,14 +92,8 @@ var runtimeCipherIDs = func() map[uint16]bool {
 	for _, cs := range tls.CipherSuites() {
 		ids[cs.ID] = true
 	}
-	profileNames := make(map[string]bool)
-	for _, spec := range configv1.TLSProfiles {
-		for _, name := range libgocrypto.OpenSSLToIANACipherSuites(spec.Ciphers) {
-			profileNames[name] = true
-		}
-	}
 	for _, cs := range tls.InsecureCipherSuites() {
-		if profileNames[cs.Name] {
+		if !strings.Contains(cs.Name, "RC4") {
 			ids[cs.ID] = true
 		}
 	}
