@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: notebook-controller-allow-ingress
+  name: notebook-controller-allow-ports
   labels:
     app.opendatahub.io/networkpolicy: 'true'
 spec:
@@ -10,14 +10,36 @@ spec:
       app: notebook-controller
   policyTypes:
   - Ingress
+  - Egress
   ingress:
+  # Permit metrics scraping only from the platform monitoring namespaces.
   # Metrics (TCP 8443): controller-runtime secure metrics on the manager
   # container (--metrics-addr :8443, --metrics-cert-path).
   - ports:
     - protocol: TCP
       port: 8443
-  # Health probes (TCP 8081): /healthz and /readyz. No `from` peer,
-  # because kubelet probe sources are not a stable NetworkPolicy selector.
+    from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-monitoring
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-user-workload-monitoring
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: redhat-ods-monitoring
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: opendatahub-monitoring
+  # Kubelet health probes may originate from the node network rather than a pod.
+  # Health probes (TCP 8081): /healthz and /readyz. Port-scoped, no peer
+  # restriction. Kubelet probes originate from the node host network and
+  # cannot be constrained by NetworkPolicy peer selectors.
   - ports:
     - protocol: TCP
       port: 8081
+  # Allow-all egress: the controller reaches the kube-apiserver (dynamic
+  # endpoint), DNS, and user-namespace resources that cannot be reliably
+  # represented by stable NetworkPolicy peers.
+  egress:
+  - {}
