@@ -35,12 +35,14 @@ import (
 )
 
 const (
-	apiserversResource = "apiservers"
-	configAPIGroup     = "config.openshift.io"
-	notACipher         = "not-a-cipher"
-	tls13Cipher        = "TLS_AES_128_GCM_SHA256"
-	tls12Cipher        = "ECDHE-RSA-AES128-GCM-SHA256"
-	rc4Cipher          = "TLS_RSA_WITH_RC4_128_SHA"
+	apiserversResource  = "apiservers"
+	configAPIGroup      = "config.openshift.io"
+	notACipher          = "not-a-cipher"
+	tls13Cipher         = "TLS_AES_128_GCM_SHA256"
+	tls12Cipher         = "ECDHE-RSA-AES128-GCM-SHA256"
+	rc4Cipher           = "TLS_RSA_WITH_RC4_128_SHA"
+	desEDECipher        = "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"
+	desEDECipherOpenSSL = "ECDHE-RSA-DES-CBC3-SHA"
 )
 
 // applyTLSOpts applies TLS option callbacks to a fresh tls.Config the same way
@@ -315,13 +317,6 @@ func TestValidateProfileSpec(t *testing.T) {
 				},
 				wantErrSub: rc4Cipher,
 			},
-			"insecure suites no OpenShift profile can name": {
-				profile: configv1.TLSProfileSpec{
-					MinTLSVersion: configv1.VersionTLS12,
-					Ciphers:       []string{"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"},
-				},
-				wantErrSub: "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
-			},
 		}
 		for name, tc := range cases {
 			t.Run(name, func(t *testing.T) {
@@ -346,6 +341,53 @@ func TestValidateProfileSpec(t *testing.T) {
 		want := []string{tls12Cipher}
 		if !slices.Equal(validated.Ciphers, want) {
 			t.Errorf("Ciphers = %v, want %v", validated.Ciphers, want)
+		}
+	})
+
+	t.Run("3DES ECDHE suite is runtime-supported and accepted alone", func(t *testing.T) {
+		profile := configv1.TLSProfileSpec{
+			MinTLSVersion: configv1.VersionTLS12,
+			Ciphers:       []string{desEDECipher},
+		}
+		validated, err := validateProfileSpec(profile, configv1.TLSAdherencePolicyNoOpinion, true)
+		if err != nil {
+			t.Fatalf("Unexpected validation error: %v", err)
+		}
+		if !slices.Equal(validated.Ciphers, []string{desEDECipher}) {
+			t.Errorf("Ciphers = %v, want [%s]", validated.Ciphers, desEDECipher)
+		}
+	})
+
+	t.Run("3DES ECDHE OpenSSL alias is accepted the same way", func(t *testing.T) {
+		profile := configv1.TLSProfileSpec{
+			MinTLSVersion: configv1.VersionTLS12,
+			Ciphers:       []string{desEDECipherOpenSSL},
+		}
+		validated, err := validateProfileSpec(profile, configv1.TLSAdherencePolicyNoOpinion, true)
+		if err != nil {
+			t.Fatalf("Unexpected validation error: %v", err)
+		}
+		if len(validated.Ciphers) != 1 {
+			t.Fatalf("Ciphers = %v, want exactly one resolved suite", validated.Ciphers)
+		}
+	})
+
+	t.Run("mixed list keeps 3DES ECDHE and still drops RC4", func(t *testing.T) {
+		profile := configv1.TLSProfileSpec{
+			MinTLSVersion: configv1.VersionTLS12,
+			Ciphers:       []string{desEDECipher, rc4Cipher},
+		}
+		validated, err := validateProfileSpec(profile, configv1.TLSAdherencePolicyNoOpinion, true)
+		if err != nil {
+			t.Fatalf("Unexpected validation error: %v", err)
+		}
+		if !slices.Contains(validated.Ciphers, desEDECipher) {
+			t.Errorf("Ciphers = %v, want to keep %s", validated.Ciphers, desEDECipher)
+		}
+		for _, cipher := range validated.Ciphers {
+			if cipher == rc4Cipher {
+				t.Errorf("Ciphers = %v, want %s dropped (RFC 7465)", validated.Ciphers, rc4Cipher)
+			}
 		}
 	})
 
@@ -407,6 +449,20 @@ func TestValidatedProfileAppliedToTLSConfig(t *testing.T) {
 		}
 		if !slices.Equal(cfg.NextProtos, nextProtos) {
 			t.Errorf("NextProtos = %v, want %v", cfg.NextProtos, nextProtos)
+		}
+	})
+
+	t.Run("custom profile with only the 3DES ECDHE suite applies it to the config", func(t *testing.T) {
+		cfg := apply(t, configv1.TLSProfileSpec{
+			MinTLSVersion: configv1.VersionTLS12,
+			Ciphers:       []string{desEDECipher},
+		})
+		if cfg.MinVersion != tls.VersionTLS12 {
+			t.Errorf("MinVersion = %#x, want %#x", cfg.MinVersion, tls.VersionTLS12)
+		}
+		wantSuites := []uint16{tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA}
+		if !slices.Equal(cfg.CipherSuites, wantSuites) {
+			t.Errorf("CipherSuites = %#x, want %#x", cfg.CipherSuites, wantSuites)
 		}
 	})
 

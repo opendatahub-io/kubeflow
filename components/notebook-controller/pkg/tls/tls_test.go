@@ -335,10 +335,10 @@ func TestResolveCustomCiphers(t *testing.T) {
 		}
 	})
 
-	t.Run("insecure suites no OpenShift profile can name are rejected", func(t *testing.T) {
-		// The ECDHE RSA 3DES suite is implemented by this runtime but appears
-		// in no OpenShift profile (Old carries only the RSA key-exchange 3DES
-		// variant), so the profile cipher vocabulary rejects it.
+	t.Run("runtime-supported insecure suites are accepted", func(t *testing.T) {
+		// The ECDHE RSA 3DES suite is implemented by this runtime, so a
+		// Custom profile may name it: every suite this runtime negotiates is
+		// admitted except RC4 (RFC 7465).
 		spec := profileSpec(customProfile([]interface{}{
 			"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
 			ianaECDHERSAAES128,
@@ -346,9 +346,55 @@ func TestResolveCustomCiphers(t *testing.T) {
 
 		_, cfg, err := resolve(t, newFakeClient(apiServer(spec)))
 		if err != nil {
-			t.Fatalf("expected the mixed list to resolve with the 3DES entry dropped, got error: %v", err)
+			t.Fatalf("expected the mixed list to resolve, got error: %v", err)
 		}
-		want := []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
+		want := []uint16{tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
+		if !slices.Equal(cfg.CipherSuites, want) {
+			t.Errorf("expected %v, got %v", want, cfg.CipherSuites)
+		}
+	})
+
+	t.Run("3DES-only profile applies the suite to the config", func(t *testing.T) {
+		spec := profileSpec(customProfile([]interface{}{
+			"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+		}, "VersionTLS12"))
+
+		_, cfg, err := resolve(t, newFakeClient(apiServer(spec)))
+		if err != nil {
+			t.Fatalf("expected the 3DES-only list to resolve, got error: %v", err)
+		}
+		want := []uint16{tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA}
+		if cfg.MinVersion != tls.VersionTLS12 || !slices.Equal(cfg.CipherSuites, want) {
+			t.Errorf("expected MinVersion TLS 1.2 and %v, got MinVersion=%d CipherSuites=%v", want, cfg.MinVersion, cfg.CipherSuites)
+		}
+	})
+
+	t.Run("3DES OpenSSL alias is accepted the same way", func(t *testing.T) {
+		spec := profileSpec(customProfile([]interface{}{
+			"ECDHE-RSA-DES-CBC3-SHA",
+		}, "VersionTLS12"))
+
+		_, cfg, err := resolve(t, newFakeClient(apiServer(spec)))
+		if err != nil {
+			t.Fatalf("expected the OpenSSL alias to resolve, got error: %v", err)
+		}
+		want := []uint16{tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA}
+		if !slices.Equal(cfg.CipherSuites, want) {
+			t.Errorf("expected %v, got %v", want, cfg.CipherSuites)
+		}
+	})
+
+	t.Run("mixed list keeps 3DES and still drops RC4", func(t *testing.T) {
+		spec := profileSpec(customProfile([]interface{}{
+			"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+			"TLS_RSA_WITH_RC4_128_SHA",
+		}, "VersionTLS12"))
+
+		_, cfg, err := resolve(t, newFakeClient(apiServer(spec)))
+		if err != nil {
+			t.Fatalf("expected the mixed list to resolve with the RC4 entry dropped, got error: %v", err)
+		}
+		want := []uint16{tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA}
 		if !slices.Equal(cfg.CipherSuites, want) {
 			t.Errorf("expected %v, got %v", want, cfg.CipherSuites)
 		}

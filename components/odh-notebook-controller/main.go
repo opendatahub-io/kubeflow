@@ -84,22 +84,17 @@ var intermediateCiphers = []uint16{
 var nextProtos = []string{"h2", "http/1.1"}
 
 // runtimeCipherIDs is the set of cipher suite IDs this Go runtime can
-// negotiate that an OpenShift TLS profile can name. RC4 suites are
-// implemented by this runtime but appear in no profile (RFC 7465 prohibits
-// RC4), so they are never included.
+// negotiate, excluding RC4, which RFC 7465 prohibits outright. Custom
+// profiles may name any suite in this set; built-in profile handling is
+// unaffected because Old, Intermediate, and Modern only name secure suites
+// plus the Old profile's legacy list.
 var runtimeCipherIDs = func() map[uint16]bool {
 	ids := make(map[uint16]bool)
 	for _, cs := range tls.CipherSuites() {
 		ids[cs.ID] = true
 	}
-	profileNames := make(map[string]bool)
-	for _, spec := range configv1.TLSProfiles {
-		for _, name := range libgocrypto.OpenSSLToIANACipherSuites(spec.Ciphers) {
-			profileNames[name] = true
-		}
-	}
 	for _, cs := range tls.InsecureCipherSuites() {
-		if profileNames[cs.Name] {
+		if !strings.Contains(cs.Name, "RC4") {
 			ids[cs.ID] = true
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -59,10 +60,11 @@ var openSSLToGoCipher = map[string]uint16{
 	"ECDHE-RSA-AES256-SHA":      tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,      // tls-lint:ignore
 	"AES128-GCM-SHA256":         tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 	"AES256-GCM-SHA384":         tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-	"AES128-SHA256":             tls.TLS_RSA_WITH_AES_128_CBC_SHA256, // tls-lint:ignore
-	"AES128-SHA":                tls.TLS_RSA_WITH_AES_128_CBC_SHA,    // tls-lint:ignore
-	"AES256-SHA":                tls.TLS_RSA_WITH_AES_256_CBC_SHA,    // tls-lint:ignore
-	"DES-CBC3-SHA":              tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,   // tls-lint:ignore
+	"AES128-SHA256":             tls.TLS_RSA_WITH_AES_128_CBC_SHA256,     // tls-lint:ignore
+	"AES128-SHA":                tls.TLS_RSA_WITH_AES_128_CBC_SHA,        // tls-lint:ignore
+	"AES256-SHA":                tls.TLS_RSA_WITH_AES_256_CBC_SHA,        // tls-lint:ignore
+	"DES-CBC3-SHA":              tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,       // tls-lint:ignore
+	"ECDHE-RSA-DES-CBC3-SHA":    tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, // tls-lint:ignore
 }
 
 // oldProfileCiphers is the cipher list of the OpenShift "Old" TLS profile,
@@ -122,33 +124,20 @@ const apiserverName = "cluster"
 // nextProtos enables HTTP/2 with HTTP/1.1 fallback on the TLS servers.
 var nextProtos = []string{"h2", "http/1.1"}
 
-// profileCipherIDs is the set of Go TLS IDs the OpenShift TLS profiles can
-// name. The Old profile carries every profile suite this runtime assigns to
-// the insecure table, so resolving its cipher list covers the vocabulary:
-// RC4 suites appear in no profile and RFC 7465 prohibits them, so they are
-// never admitted.
-var profileCipherIDs = func() map[uint16]bool {
-	ids := make(map[uint16]bool)
-	for _, name := range oldProfileCiphers {
-		if id, ok := openSSLToGoCipher[name]; ok {
-			ids[id] = true
-		}
-	}
-	return ids
-}()
-
 // runtimeCipherIDs is the set of cipher suite IDs this Go runtime can
-// negotiate. The union of tls.CipherSuites and tls.InsecureCipherSuites is
-// required: the Old profile's 3DES and RSA key exchange suites only appear
-// in the insecure table. Insecure suites are admitted only when an
-// OpenShift profile can name them.
+// negotiate, excluding RC4, which RFC 7465 prohibits outright. The union of
+// tls.CipherSuites and tls.InsecureCipherSuites is required: the Old
+// profile's 3DES and RSA key exchange suites only appear in the insecure
+// table. Custom profiles may name any suite in this set; built-in profile
+// handling is unaffected because Old, Intermediate, and Modern only name
+// secure suites plus the Old profile's legacy list.
 var runtimeCipherIDs = func() map[uint16]bool {
 	ids := make(map[uint16]bool)
 	for _, cs := range tls.CipherSuites() {
 		ids[cs.ID] = true
 	}
 	for _, cs := range tls.InsecureCipherSuites() {
-		if profileCipherIDs[cs.ID] {
+		if !strings.Contains(cs.Name, "RC4") {
 			ids[cs.ID] = true
 		}
 	}
@@ -168,7 +157,7 @@ var cipherIDByName = func() map[string]uint16 {
 		m[cs.Name] = cs.ID
 	}
 	for _, cs := range tls.InsecureCipherSuites() {
-		if profileCipherIDs[cs.ID] {
+		if runtimeCipherIDs[cs.ID] {
 			m[cs.Name] = cs.ID
 		}
 	}
