@@ -298,6 +298,12 @@ func createMockReconciler() *NotebookReconciler {
 	return reconciler
 }
 
+const (
+	testNotebookUID  = testNotebookUID
+	testNotebookKind = "Notebook"
+	testBusyboxImage = "busybox"
+)
+
 func TestNotebookOwnerReferenceUsesStorageVersion(t *testing.T) {
 	s := runtime.NewScheme()
 	if err := nbv1.AddToScheme(s); err != nil {
@@ -308,14 +314,14 @@ func TestNotebookOwnerReferenceUsesStorageVersion(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "test-notebook",
 			Namespace: "demo",
-			UID:       "94751738-d4f8-4712-9192-e473a7c98d4b",
+			UID:       testNotebookUID,
 		},
 		Spec: nbv1.NotebookSpec{
 			Template: nbv1.NotebookTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:  "test-notebook",
-						Image: "busybox",
+						Image: testBusyboxImage,
 					}},
 				},
 			},
@@ -346,7 +352,7 @@ func TestIsControlledByNotebookIgnoresAPIVersion(t *testing.T) {
 	nb := &nbv1.Notebook{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "test-notebook",
-			UID:  "94751738-d4f8-4712-9192-e473a7c98d4b",
+			UID:  testNotebookUID,
 		},
 	}
 	controller := true
@@ -355,7 +361,7 @@ func TestIsControlledByNotebookIgnoresAPIVersion(t *testing.T) {
 			Name: "test-notebook",
 			OwnerReferences: []v1.OwnerReference{{
 				APIVersion: "kubeflow.org/v1beta1",
-				Kind:       "Notebook",
+				Kind:       testNotebookKind,
 				Name:       "test-notebook",
 				UID:        nb.UID,
 				Controller: &controller,
@@ -373,9 +379,9 @@ func TestCopyOwnerReferencesUpgradesAPIVersion(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			OwnerReferences: []v1.OwnerReference{{
 				APIVersion: "kubeflow.org/v1",
-				Kind:       "Notebook",
+				Kind:       testNotebookKind,
 				Name:       "test-notebook",
-				UID:        "94751738-d4f8-4712-9192-e473a7c98d4b",
+				UID:        testNotebookUID,
 				Controller: &controller,
 			}},
 		},
@@ -384,9 +390,9 @@ func TestCopyOwnerReferencesUpgradesAPIVersion(t *testing.T) {
 		ObjectMeta: v1.ObjectMeta{
 			OwnerReferences: []v1.OwnerReference{{
 				APIVersion: "kubeflow.org/v1beta1",
-				Kind:       "Notebook",
+				Kind:       testNotebookKind,
 				Name:       "test-notebook",
-				UID:        "94751738-d4f8-4712-9192-e473a7c98d4b",
+				UID:        testNotebookUID,
 				Controller: &controller,
 			}},
 		},
