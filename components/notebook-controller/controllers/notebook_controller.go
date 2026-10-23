@@ -26,7 +26,7 @@ import (
 
 	"github.com/go-logr/logr"
 	reconcilehelper "github.com/kubeflow/kubeflow/components/common/reconcilehelper"
-	"github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/metrics"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +75,25 @@ func ignoreNotFound(err error) error {
 	return err
 }
 
+// isControlledByNotebook reports whether obj is controlled by notebook.
+// Matching is by UID so a stale ownerReference.apiVersion (v1beta1 vs v1)
+// does not prevent the controller from adopting existing children.
+func isControlledByNotebook(obj metav1.Object, notebook metav1.Object) bool {
+	ref := metav1.GetControllerOf(obj)
+	return ref != nil && ref.UID == notebook.GetUID()
+}
+
+// copyOwnerReferences copies ownerReferences from desired to live, returning
+// true when they differ. This upgrades stale kubeflow.org/v1beta1 owner refs
+// to kubeflow.org/v1 without requiring a child-object recreate.
+func copyOwnerReferences(from, to metav1.Object) bool {
+	if reflect.DeepEqual(from.GetOwnerReferences(), to.GetOwnerReferences()) {
+		return false
+	}
+	to.SetOwnerReferences(from.GetOwnerReferences())
+	return true
+}
+
 // NotebookReconciler reconciles a Notebook object
 type NotebookReconciler struct {
 	client.Client
@@ -102,7 +121,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Info("Found event for Notebook. Re-emitting...")
 
 		// Find the Notebook that corresponds to the triggered event
-		involvedNotebook := &v1beta1.Notebook{}
+		involvedNotebook := &nbv1.Notebook{}
 		nbName, err := nbNameFromInvolvedObject(r.Client, &event.InvolvedObject)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -125,7 +144,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, getEventErr
 	}
 	// If not found, continue. Is not an event.
-	instance := &v1beta1.Notebook{}
+	instance := &nbv1.Notebook{}
 	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		log.Error(err, "unable to fetch Notebook")
 		return ctrl.Result{}, ignoreNotFound(err)
@@ -162,9 +181,9 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	for _, sts := range namespacedStatefulSets.Items {
-		if metav1.IsControlledBy(&sts, instance) {
-			foundStateful = &sts
+	for i := range namespacedStatefulSets.Items {
+		if isControlledByNotebook(&namespacedStatefulSets.Items[i], instance) {
+			foundStateful = &namespacedStatefulSets.Items[i]
 			break
 		}
 	}
@@ -194,7 +213,8 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Update the foundStateful object and write the result back if there are any changes
-	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful) {
+	if !justCreated && (reconcilehelper.CopyStatefulSetFields(ss, foundStateful) ||
+		copyOwnerReferences(ss, foundStateful)) {
 		log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
 		err = r.Update(ctx, foundStateful)
 		if err != nil {
@@ -225,7 +245,8 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 	// Update the foundService object and write the result back if there are any changes
-	if !justCreated && reconcilehelper.CopyServiceFields(service, foundService) {
+	if !justCreated && (reconcilehelper.CopyServiceFields(service, foundService) ||
+		copyOwnerReferences(service, foundService)) {
 		log.Info("Updating Service\n", "namespace", service.Namespace, "name", service.Name)
 		err = r.Update(ctx, foundService)
 		if err != nil {
@@ -296,7 +317,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	return ctrl.Result{}, nil
 }
 
-func updateNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
+func updateNotebookStatus(r *NotebookReconciler, nb *nbv1.Notebook,
 	sts *appsv1.StatefulSet, pod *corev1.Pod, req ctrl.Request) error {
 
 	log := r.Log.WithValues("notebook", req.NamespacedName)
@@ -312,15 +333,15 @@ func updateNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
 	return r.Status().Update(ctx, nb)
 }
 
-func createNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
-	sts *appsv1.StatefulSet, pod *corev1.Pod, req ctrl.Request) (v1beta1.NotebookStatus, error) {
+func createNotebookStatus(r *NotebookReconciler, nb *nbv1.Notebook,
+	sts *appsv1.StatefulSet, pod *corev1.Pod, req ctrl.Request) (nbv1.NotebookStatus, error) {
 
 	log := r.Log.WithValues("notebook", req.NamespacedName)
 
 	// Initialize Notebook CR Status
 	log.Info("Initializing Notebook CR Status")
-	status := v1beta1.NotebookStatus{
-		Conditions:     make([]v1beta1.NotebookCondition, 0),
+	status := nbv1.NotebookStatus{
+		Conditions:     make([]nbv1.NotebookCondition, 0),
 		ReadyReplicas:  sts.Status.ReadyReplicas,
 		ContainerState: corev1.ContainerState{},
 	}
@@ -361,7 +382,7 @@ func createNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
 	}
 
 	// Mirroring pod condition
-	notebookConditions := []v1beta1.NotebookCondition{}
+	notebookConditions := []nbv1.NotebookCondition{}
 	log.Info("Calculating Notebook's Conditions")
 	for i := range pod.Status.Conditions {
 		condition := PodCondToNotebookCond(pod.Status.Conditions[i])
@@ -373,9 +394,9 @@ func createNotebookStatus(r *NotebookReconciler, nb *v1beta1.Notebook,
 	return status, nil
 }
 
-func PodCondToNotebookCond(podc corev1.PodCondition) v1beta1.NotebookCondition {
+func PodCondToNotebookCond(podc corev1.PodCondition) nbv1.NotebookCondition {
 
-	condition := v1beta1.NotebookCondition{}
+	condition := nbv1.NotebookCondition{}
 
 	if len(podc.Type) > 0 {
 		condition.Type = string(podc.Type)
@@ -414,7 +435,7 @@ func PodCondToNotebookCond(podc corev1.PodCondition) v1beta1.NotebookCondition {
 	return condition
 }
 
-func setPrefixEnvVar(instance *v1beta1.Notebook, container *corev1.Container) {
+func setPrefixEnvVar(instance *nbv1.Notebook, container *corev1.Container) {
 	prefix := "/notebook/" + instance.Namespace + "/" + instance.Name
 
 	for _, envVar := range container.Env {
@@ -430,7 +451,7 @@ func setPrefixEnvVar(instance *v1beta1.Notebook, container *corev1.Container) {
 	})
 }
 
-func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv1.StatefulSet {
+func generateStatefulSet(instance *nbv1.Notebook, isGenerateName bool) *appsv1.StatefulSet {
 	replicas := int32(1)
 	if metav1.HasAnnotation(instance.ObjectMeta, "kubeflow-resource-stopped") {
 		replicas = 0
@@ -522,7 +543,7 @@ func generateStatefulSet(instance *v1beta1.Notebook, isGenerateName bool) *appsv
 	return ss
 }
 
-func generateService(instance *v1beta1.Notebook) *corev1.Service {
+func generateService(instance *nbv1.Notebook) *corev1.Service {
 	// Define the desired Service object
 	port := DefaultContainerPort
 	containerPorts := instance.Spec.Template.Spec.Containers[0].Ports
@@ -555,7 +576,7 @@ func virtualServiceName(kfName string, namespace string) string {
 	return fmt.Sprintf("notebook-%s-%s", namespace, kfName)
 }
 
-func generateVirtualService(instance *v1beta1.Notebook) (*unstructured.Unstructured, error) {
+func generateVirtualService(instance *nbv1.Notebook) (*unstructured.Unstructured, error) {
 	name := instance.Name
 	namespace := instance.Namespace
 	clusterDomain := "cluster.local"
@@ -657,7 +678,7 @@ func generateVirtualService(instance *v1beta1.Notebook) (*unstructured.Unstructu
 
 }
 
-func (r *NotebookReconciler) reconcileVirtualService(instance *v1beta1.Notebook) error {
+func (r *NotebookReconciler) reconcileVirtualService(instance *nbv1.Notebook) error {
 	log := r.Log.WithValues("notebook", instance.Namespace)
 	virtualService, err := generateVirtualService(instance)
 	if err != nil {
@@ -686,7 +707,8 @@ func (r *NotebookReconciler) reconcileVirtualService(instance *v1beta1.Notebook)
 		return err
 	}
 
-	if !justCreated && reconcilehelper.CopyVirtualService(virtualService, foundVirtual) {
+	if !justCreated && (reconcilehelper.CopyVirtualService(virtualService, foundVirtual) ||
+		copyOwnerReferences(virtualService, foundVirtual)) {
 		log.Info("Updating virtual service", "namespace", instance.Namespace, "name",
 			virtualServiceName(instance.Name, instance.Namespace))
 		err = r.Update(context.TODO(), foundVirtual)
@@ -729,7 +751,7 @@ func nbNameFromInvolvedObject(c client.Client, object *corev1.ObjectReference) (
 }
 
 func nbNameExists(client client.Client, nbName string, namespace string) bool {
-	if err := client.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: nbName}, &v1beta1.Notebook{}); err != nil {
+	if err := client.Get(context.Background(), types.NamespacedName{Namespace: namespace, Name: nbName}, &nbv1.Notebook{}); err != nil {
 		// If error != NotFound, trigger the reconcile call anyway to avoid loosing a potential relevant event
 		return !apierrs.IsNotFound(err)
 	}
@@ -798,7 +820,7 @@ func (r *NotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&v1beta1.Notebook{}).
+		For(&nbv1.Notebook{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Watches(
