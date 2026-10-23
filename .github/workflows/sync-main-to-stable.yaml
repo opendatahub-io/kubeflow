@@ -90,7 +90,10 @@ jobs:
       id: diff_check
       run: |
         MERGE_BRANCH="${{ needs.check.outputs.merge_branch }}"
-        git fetch origin
+        # Fetch the specific sync branch by name — git fetch origin without args
+        # uses the checkout refspec which may not include newly created branches.
+        git fetch origin "${{ env.TARGET_BRANCH }}" "$MERGE_BRANCH" 2>/dev/null || \
+          git fetch origin "${{ env.TARGET_BRANCH }}" 2>/dev/null || true
         # sync-branches skips the push when the merged result is identical to the
         # target (e.g. all incoming changes were to protected files).
         if ! git rev-parse --verify "origin/${MERGE_BRANCH}" >/dev/null 2>&1; then
