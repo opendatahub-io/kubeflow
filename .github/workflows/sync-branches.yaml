@@ -11,6 +11,11 @@ on:
         description: "To:"
         required: true
         type: string
+      base:
+        description: "Base branch to create target from (omit to use existing target branch):"
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       source:
@@ -21,6 +26,11 @@ on:
         description: "To:"
         required: true
         type: string
+      base:
+        description: "Base branch to create target from (omit to use existing target branch):"
+        required: false
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -49,13 +59,32 @@ jobs:
       run: |
         set -e
 
-        # Fetch and checkout target branch
-        git fetch origin ${{ env.TARGET_BRANCH }}:${{ env.TARGET_BRANCH }}
-        git checkout ${{ env.TARGET_BRANCH }}
+        # Checkout or create the target branch.
+        # When 'base' is provided the target is a new branch created from base
+        # (e.g. a daily sync/merge branch that does not exist yet on origin).
+        if [[ -n "${{ inputs.base }}" ]]; then
+          git fetch origin "${{ inputs.base }}:${{ inputs.base }}"
+          git checkout -b "${{ env.TARGET_BRANCH }}" "${{ inputs.base }}"
+        else
+          git fetch origin "${{ env.TARGET_BRANCH }}:${{ env.TARGET_BRANCH }}"
+          git checkout "${{ env.TARGET_BRANCH }}"
+        fi
+
+        # Save the target commit before merging so all protected-path restores
+        # reference it explicitly.  A fast-forward merge moves HEAD to the source
+        # tip, making bare 'HEAD' or 'HEAD:<path>' point at source, not target.
+        TARGET_COMMIT=$(git rev-parse HEAD)
 
         # Fetch and merge source branch
-        git fetch origin ${{ env.SOURCE_BRANCH }}:${{ env.SOURCE_BRANCH }}
-        git merge --no-commit origin/${{ env.SOURCE_BRANCH }} || true
+        git fetch origin "${{ env.SOURCE_BRANCH }}:${{ env.SOURCE_BRANCH }}"
+        merge_status=0
+        git merge --no-commit "origin/${{ env.SOURCE_BRANCH }}" || merge_status=$?
+        # A non-zero exit is acceptable only when Git entered a conflict state
+        # (MERGE_HEAD present).  Any other failure (e.g. unrelated histories) is fatal.
+        if [[ "$merge_status" -ne 0 ]] && ! git rev-parse --verify MERGE_HEAD >/dev/null 2>&1; then
+          echo "Merge failed without entering a conflict state (exit $merge_status)."
+          exit "$merge_status"
+        fi
 
         #########################################################################
         # Always keep target branch state for .tekton
@@ -67,19 +96,25 @@ jobs:
         # - This guard exists only in this workflow; manual merges can still
         #   propagate .tekton unless handled similarly.
 
-        # Reset .tekton completely to target (HEAD) state
+        # Reset .tekton completely
         git rm -r -f --cached --ignore-unmatch -- ':/.tekton'
         rm -rf -- "$(git rev-parse --show-toplevel)/.tekton"
 
-        # Re-checkout .tekton only if it exists on target
-        if git rev-parse --verify HEAD:.tekton >/dev/null 2>&1; then
+        # Re-checkout .tekton only if it exists on target (use TARGET_COMMIT, not
+        # HEAD, so a fast-forward that moved HEAD to source does not restore source's
+        # .tekton instead of target's).
+        if git rev-parse --verify "${TARGET_COMMIT}:.tekton" >/dev/null 2>&1; then
           echo "Keeping target branch version of .tekton."
-          git checkout HEAD -- ':/.tekton'
+          git checkout "$TARGET_COMMIT" -- ':/.tekton'
           git add -A -- ':/.tekton'
         fi
         #########################################################################
 
-        # Known files to resolve the conflicts
+        # Known version-pinned files: always restore to target branch state
+        # regardless of whether Git reports a conflict.  This handles clean merges,
+        # explicit conflicts, and source-side deletions uniformly — unlike the old
+        # approach which only triggered on unmerged index entries and used --ours
+        # (which fails on non-conflicting paths).
         FILES=(
           "components/notebook-controller/config/overlays/openshift/params.env"
           "components/odh-notebook-controller/config/overlays/odh/params.env"
@@ -87,12 +122,13 @@ jobs:
           "components/odh-notebook-controller/makefile-vars.mk"
         )
 
-        # Resolve conflicts for known files
         for FILE in "${FILES[@]}"; do
-          if [[ -f "$FILE" && "$(git status --porcelain=v1 2>/dev/null | grep -c "$FILE")" -gt 0 ]]; then
-            echo "Resolving conflict for $FILE by keeping target branch version."
-            git checkout --ours "$FILE"
+          if git cat-file -e "${TARGET_COMMIT}:${FILE}" 2>/dev/null; then
+            echo "Keeping target branch version of $FILE."
+            git checkout "$TARGET_COMMIT" -- "$FILE"
             git add "$FILE"
+          else
+            git rm -f --ignore-unmatch -- "$FILE"
           fi
         done
 
@@ -104,13 +140,21 @@ jobs:
           exit 1
         fi
 
-        # Commit changes if any
+        # Commit staged changes if any.
+        MERGED_COMMIT=$(git rev-parse HEAD)
         if [[ -n "$(git status --porcelain)" ]]; then
           git commit -m "Merge ${{ env.SOURCE_BRANCH }} into ${{ env.TARGET_BRANCH }} with known resolved conflicts"
-        else
-          echo "No changes to commit. Skipping push."
+          MERGED_COMMIT=$(git rev-parse HEAD)
+        fi
+
+        # Skip push when the merged result is identical to the starting target commit.
+        # This can happen when every incoming change affected only protected files.
+        if [[ "$MERGED_COMMIT" = "$TARGET_COMMIT" ]]; then
+          echo "Merged result is identical to target. Nothing to push."
           exit 0
         fi
 
-        # Push changes directly to target branch
-        git push origin ${{ env.TARGET_BRANCH }}
+        # Fetch the remote branch first so --force-with-lease can verify its tip on
+        # re-runs (e.g. a same-day sync branch that already exists on origin).
+        git fetch origin "${{ env.TARGET_BRANCH }}" 2>/dev/null || true
+        git push --force-with-lease origin "${{ env.TARGET_BRANCH }}"
