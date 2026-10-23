@@ -426,6 +426,7 @@ func main() {
 		Handler: &controllers.NotebookWebhook{
 			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 			Config:    mgr.GetConfig(),
 			Namespace: namespace,
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
