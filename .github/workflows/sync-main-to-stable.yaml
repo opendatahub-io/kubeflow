@@ -40,7 +40,7 @@ jobs:
 
     - name: Set merge branch name
       id: name
-      run: echo "merge_branch=sync/main-to-stable-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      run: echo "merge_branch=sync/main-to-stable" >> "$GITHUB_OUTPUT"
 
   # ── 2. Create the merge branch and apply changes (shared logic) ───────────────
   # Delegates to sync-branches so the merge/conflict-resolution logic lives in
@@ -133,5 +133,5 @@ jobs:
         gh pr create \
           --base "$TARGET_BRANCH" \
           --head "$MERGE_BRANCH" \
-          --title "chore: sync main → stable ($(date +%Y-%m-%d))" \
+          --title "chore: sync main → stable" \
           --body "$PR_BODY"
