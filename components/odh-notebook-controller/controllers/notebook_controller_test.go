@@ -1975,7 +1975,7 @@ func checkCertConfigMapWithError(ctx context.Context, namespace string, configMa
 			break
 		}
 
-		if block.Type == "CERTIFICATE" {
+		if block.Type == pemCertificateBlockType {
 			// Attempt to parse the certificate
 			if _, err := x509.ParseCertificate(block.Bytes); err != nil {
 				return fmt.Errorf("failed to parse certificate %d: %v", certificatesFound+1, err)
