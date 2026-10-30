@@ -44,6 +44,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 ## Install additional packages
 RUN microdnf install -y shadow-utils &&\
+    microdnf update -y ca-certificates &&\
     microdnf clean all
 
 ## Create a non-root user with UID 1001
