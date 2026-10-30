@@ -86,6 +86,7 @@ const (
 	OdhCABundleCertKey           = "odh-ca-bundle.crt"
 	WorkbenchTrustedCABundleName = "workbench-trusted-ca-bundle"
 	trueString                   = "true"
+	pemCertificateBlockType      = "CERTIFICATE"
 )
 
 // OpenshiftNotebookReconciler holds the controller configuration.
@@ -96,6 +97,10 @@ type OpenshiftNotebookReconciler struct {
 	Log           logr.Logger
 	Config        *rest.Config
 	EventRecorder record.EventRecorder
+	// APIReader reads cluster objects without the informer cache. Sidecar TLS
+	// flags are resolved from APIServer on each reconcile. The proxy does not
+	// watch that resource.
+	APIReader client.Reader
 	// MLflow configuration (read once at startup from env vars)
 	MLflowEnabled bool
 	GatewayURL    string
@@ -499,6 +504,15 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// Write the resolved TLS flags onto the Notebook pod template. The
+		// notebook controller copies that template onto the StatefulSet, which
+		// rolls the proxy when the profile or adherence changes.
+		err = r.reconcileKubeRbacProxyTLS(ctx, notebook)
+		if err != nil {
+			log.Error(err, "Unable to apply kube-rbac-proxy TLS settings")
+			return ctrl.Result{}, err
+		}
 	} else {
 		// Ensure any existing kube-rbac-proxy HTTPRoute is cleaned up before creating regular HTTPRoute
 		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, false)
@@ -600,7 +614,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 
 			// Attempt to decode PEM encoded certificate
 			block, _ := pem.Decode([]byte(certData))
-			if block != nil && block.Type == "CERTIFICATE" {
+			if block != nil && block.Type == pemCertificateBlockType {
 				// Attempt to parse the certificate
 				_, err := x509.ParseCertificate(block.Bytes)
 				if err != nil {

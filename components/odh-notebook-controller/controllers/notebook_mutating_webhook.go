@@ -202,24 +202,36 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 		},
 	}
 
+	tlsArgs := kubeRbacProxyConfig.TLSArgs
+	if tlsArgs == nil {
+		resolved, err := intermediateKubeRbacProxyTLS()
+		if err != nil {
+			return fmt.Errorf("resolving kube-rbac-proxy TLS settings: %w", err)
+		}
+		tlsArgs = resolved.Args
+	}
+	args := make([]string, 0, 11+len(tlsArgs))
+	args = append(args,
+		"--secure-listen-address=0.0.0.0:"+strconv.Itoa(NotebookKubeRbacProxyPort),
+		"--upstream=http://127.0.0.1:"+strconv.Itoa(NotebookPort)+"/",
+		"--logtostderr=true",
+		"--v=0",
+		"--proxy-endpoints-port="+strconv.Itoa(NotebookKubeRbacProxyHealthPort),
+		"--config-file="+KubeRbacProxyConfigFilePath,
+		"--tls-cert-file="+KubeRbacProxyTLSCertFilePath,
+		"--tls-private-key-file="+KubeRbacProxyTLSKeyFilePath,
+		"--auth-header-fields-enabled=true",
+		"--auth-header-user-field-name=X-Auth-Request-User",
+		"--auth-header-groups-field-name=X-Auth-Request-Groups",
+	)
+	args = append(args, tlsArgs...)
+
 	// https://pkg.go.dev/k8s.io/api/core/v1#Container
 	proxyContainer := corev1.Container{
 		Name:            ContainerNameKubeRbacProxy,
 		Image:           kubeRbacProxyConfig.ProxyImage,
 		ImagePullPolicy: corev1.PullAlways,
-		Args: []string{
-			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
-			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
-			"--logtostderr=true",
-			"--v=0",
-			"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
-			"--config-file=" + KubeRbacProxyConfigFilePath,
-			"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
-			"--tls-private-key-file=" + KubeRbacProxyTLSKeyFilePath,
-			"--auth-header-fields-enabled=true",
-			"--auth-header-user-field-name=X-Auth-Request-User",
-			"--auth-header-groups-field-name=X-Auth-Request-Groups",
-		},
+		Args:            args,
 		Ports: []corev1.ContainerPort{{
 			Name:          KubeRbacProxyServicePortName,
 			ContainerPort: NotebookKubeRbacProxyPort,
@@ -357,6 +369,16 @@ func (w *NotebookWebhook) ClusterWideProxyIsEnabled() bool {
 
 }
 
+// injectKubeRbacProxy resolves the cluster TLS profile before it builds the
+// sidecar. A resolution error is returned with the notebook left unchanged.
+func (w *NotebookWebhook) injectKubeRbacProxy(ctx context.Context, notebook *nbv1.Notebook) error {
+	cfg, err := kubeRbacProxyAdmissionConfig(ctx, w.APIReader, w.KubeRbacProxyConfig)
+	if err != nil {
+		return err
+	}
+	return InjectKubeRbacProxy(notebook, cfg)
+}
+
 // Handle transforms the Notebook objects.
 func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) admission.Response {
 
@@ -462,10 +484,11 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
-	// Inject the kube-rbac-proxy if the annotation is present
+	// Inject the kube-rbac-proxy if the annotation is present.
+	// Resolve the cluster TLS profile first so an unrepresentable strict
+	// profile rejects the admission without changing the stored notebook.
 	if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
-		// Inject kube-rbac-proxy
-		err = InjectKubeRbacProxy(notebook, w.KubeRbacProxyConfig)
+		err = w.injectKubeRbacProxy(ctx, notebook)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}

@@ -408,6 +408,7 @@ func main() {
 		Scheme:        mgr.GetScheme(),
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		APIReader:     mgr.GetAPIReader(),
 		MLflowEnabled: mlflowEnabled,
 		GatewayURL:    gatewayURL,
 	}).SetupWithManager(mgr); err != nil {
