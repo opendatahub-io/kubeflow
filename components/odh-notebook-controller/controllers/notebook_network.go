@@ -33,7 +33,11 @@ import (
 )
 
 const (
-	NotebookPort                             = 8888
+	// NotebookPort is the container port nginx listens on.
+	NotebookPort = 8888
+	// NotebookServicePort is the Service port created by the notebook controller.
+	// Gateway API backendRefs must use this Service port, not NotebookPort.
+	NotebookServicePort                      = 80
 	NotebookKubeRbacProxyPort                = 8443
 	NotebookKubeRbacProxyHealthPort          = 8444
 	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
@@ -41,12 +45,21 @@ const (
 
 // ReconcileAllNetworkPolicies will manage the network policies reconciliation
 // required by the notebook.
-func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1.Notebook, ctx context.Context) error {
+func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1.Notebook, ctx context.Context, config map[string]string) error {
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
+	// The data-science gateway runs outside the controller namespace. Ingress
+	// from that namespace has to be allowed or the HTTPRoute has nowhere to send traffic.
+	gatewayNamespace := DefaultGatewayNamespace
+	if ingress, err := r.notebookIngress(ctx, notebook.Namespace, config); err != nil {
+		log.Error(err, "Unable to resolve notebook ingress for network policy; allowing the default gateway namespace")
+	} else if ingress.GatewayNamespace != "" {
+		gatewayNamespace = ingress.GatewayNamespace
+	}
+
 	// Generate the desired Network Policies
-	desiredNotebookNetworkPolicy := NewNotebookNetworkPolicy(notebook, log, r.Namespace)
+	desiredNotebookNetworkPolicy := NewNotebookNetworkPolicy(notebook, log, r.Namespace, gatewayNamespace)
 
 	// Create Network Policies if they do not already exist
 	err := r.reconcileNetworkPolicy(desiredNotebookNetworkPolicy, ctx, notebook)
@@ -129,14 +142,27 @@ func CompareNotebookNetworkPolicies(np1 netv1.NetworkPolicy, np2 netv1.NetworkPo
 }
 
 // NewNotebookNetworkPolicy defines the desired network policy for Notebook port
-func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespace string) *netv1.NetworkPolicy {
+func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, controllerNamespace, gatewayNamespace string) *netv1.NetworkPolicy {
 	npProtocol := corev1.ProtocolTCP
-	namespaceSel := metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			"kubernetes.io/metadata.name": namespace,
+	peers := []netv1.NetworkPolicyPeer{
+		{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"kubernetes.io/metadata.name": controllerNamespace,
+				},
+			},
 		},
 	}
-	// Create a Kubernetes NetworkPolicy resource that allows traffic from notebook controller to the Notebook container
+	if gatewayNamespace != "" && gatewayNamespace != controllerNamespace {
+		peers = append(peers, netv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"kubernetes.io/metadata.name": gatewayNamespace,
+				},
+			},
+		})
+	}
+	// Allow the controller namespace and the gateway namespace to reach the notebook container port.
 	// Note: This policy needs to update if there is change in the notebook Port.
 	return &netv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -159,11 +185,7 @@ func NewNotebookNetworkPolicy(notebook *nbv1.Notebook, log logr.Logger, namespac
 							},
 						},
 					},
-					From: []netv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &namespaceSel,
-						},
-					},
+					From: peers,
 				},
 			},
 			PolicyTypes: []netv1.PolicyType{

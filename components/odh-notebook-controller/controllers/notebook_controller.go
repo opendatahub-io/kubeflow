@@ -425,7 +425,7 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Call the Network Policies reconciler
-	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
+	err = r.ReconcileAllNetworkPolicies(notebook, ctx, config)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

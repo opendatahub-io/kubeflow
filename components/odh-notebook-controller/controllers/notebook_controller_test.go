@@ -104,7 +104,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      ptr.To(gatewayv1.Kind("Service")),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: ptr.To(gatewayv1.Namespace(Namespace)), // Cross-namespace reference
-										Port:      ptr.To(gatewayv1.PortNumber(8888)),
+										Port:      ptr.To(gatewayv1.PortNumber(NotebookServicePort)),
 									},
 									Weight: ptr.To(int32(1)),
 								},
@@ -606,7 +606,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 										Kind:      ptr.To(gatewayv1.Kind("Service")),
 										Name:      gatewayv1.ObjectName(Name),
 										Namespace: ptr.To(gatewayv1.Namespace(Namespace)),
-										Port:      ptr.To(gatewayv1.PortNumber(8888)),
+										Port:      ptr.To(gatewayv1.PortNumber(NotebookServicePort)),
 									},
 									Weight: ptr.To(int32(1)),
 								},
@@ -864,6 +864,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 								NamespaceSelector: &metav1.LabelSelector{
 									MatchLabels: map[string]string{
 										"kubernetes.io/metadata.name": testPodNamespace,
+									},
+								},
+							},
+							{
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{
+										"kubernetes.io/metadata.name": DefaultGatewayNamespace,
 									},
 								},
 							},
@@ -1413,11 +1420,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the regular service (port 8888)
+			// Verify it points to the regular service (Service port 80)
 			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name))
-			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(NotebookServicePort)))
 
 			By("Updating the notebook to add kube-rbac-proxy sidecar container")
 			key := types.NamespacedName{Name: Name, Namespace: Namespace}
@@ -1438,7 +1445,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				if len(unauthenticatedRoute.Spec.Rules) > 0 && len(unauthenticatedRoute.Spec.Rules[0].BackendRefs) > 0 {
 					backendName := string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)
 					backendPort := unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port
-					if backendName == Name && backendPort != nil && *backendPort == 8888 {
+					if backendName == Name && backendPort != nil && *backendPort == NotebookServicePort {
 						return fmt.Errorf("unauthenticated HTTPRoute still exists")
 					}
 				}
@@ -1509,11 +1516,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, httpRouteKey, unauthenticatedRoute)
 			}, duration, interval).Should(Succeed())
 
-			// Verify it points to the regular service (port 8888)
+			// Verify it points to the regular service (Service port 80)
 			Expect(len(unauthenticatedRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(unauthenticatedRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(Name + "-rbac-to-regular"))
-			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(8888)))
+			Expect(*unauthenticatedRoute.Spec.Rules[0].BackendRefs[0].Port).To(Equal(gatewayv1.PortNumber(NotebookServicePort)))
 
 			By("Cleaning up the test notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -1563,7 +1570,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(len(httpRoute.Spec.Rules)).To(BeNumerically(">", 0))
 			Expect(len(httpRoute.Spec.Rules[0].BackendRefs)).To(BeNumerically(">", 0))
 			Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Name)).To(Equal(Name))
-			Expect(*httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port).To(Equal(gatewayv1.PortNumber(8888)))
+			Expect(*httpRoute.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference.Port).To(Equal(gatewayv1.PortNumber(NotebookServicePort)))
 		})
 	})
 
