@@ -974,8 +974,12 @@ func (r *OpenshiftNotebookReconciler) ingressConfigRequests(ctx context.Context,
 		if !checked {
 			before, oldErr := r.notebookIngress(ctx, request.Namespace, old.Data)
 			after, newErr := r.notebookIngress(ctx, request.Namespace, updated.Data)
-			oldUnknown := errors.Is(oldErr, ingressassignment.ErrUnknownIngress)
-			newUnknown := errors.Is(newErr, ingressassignment.ErrUnknownIngress)
+			// Unknown and invalid assignments are both unresolvable: what
+			// matters for change detection is the transition between
+			// resolvable and unresolvable, and between gateways when both
+			// resolve.
+			oldUnknown := errors.Is(oldErr, ingressassignment.ErrUnknownIngress) || errors.Is(oldErr, ingressassignment.ErrInvalidIngresses)
+			newUnknown := errors.Is(newErr, ingressassignment.ErrUnknownIngress) || errors.Is(newErr, ingressassignment.ErrInvalidIngresses)
 			if (oldErr != nil && !oldUnknown) || (newErr != nil && !newUnknown) {
 				r.Log.Error(errors.Join(oldErr, newErr), "Unable to compare ingress assignments; reconciling all Notebooks")
 				return all
