@@ -479,8 +479,12 @@ func TestNotebookIngressAssignment(t *testing.T) {
 						require.True(t, errors.Is(assignmentErr, ingressassignment.ErrUnknownIngress) ||
 							errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses),
 							"assignment error must be unresolvable, got %v", assignmentErr)
+						reason := "IngressNotFound"
+						if errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses) {
+							reason = "IngressConfigInvalid"
+						}
 						require.Len(t, recorder.Events, 1)
-						require.Equal(t, "Warning IngressNotFound "+assignmentErr.Error(), <-recorder.Events)
+						require.Equal(t, "Warning "+reason+" "+assignmentErr.Error(), <-recorder.Events)
 						if tc.cleanupFailure != "" {
 							require.ErrorContains(t, err, cleanupErr.Error())
 							require.NoError(t, getErr)
