@@ -118,7 +118,7 @@ func NewNotebookHTTPRoute(notebook *nbv1.Notebook, centralNamespace string, ingr
 								BackendObjectReference: gatewayv1.BackendObjectReference{
 									Name:      gatewayv1.ObjectName(notebook.Name),
 									Namespace: (*gatewayv1.Namespace)(&notebook.Namespace), // Cross-namespace reference
-									Port:      ptr.To(gatewayv1.PortNumber(8888)),
+									Port:      ptr.To(gatewayv1.PortNumber(NotebookServicePort)),
 								},
 							},
 						},
@@ -375,7 +375,7 @@ func (r *OpenshiftNotebookReconciler) EnsureConflictingHTTPRouteAbsent(
 			backendPort := httpRoute.Spec.Rules[0].BackendRefs[0].Port
 
 			isKubeRbacProxyRoute := (backendName == notebook.Name+KubeRbacProxyServiceSuffix) || (backendPort != nil && *backendPort == 8443)
-			isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == 8888)
+			isRegularRoute := (backendName == notebook.Name) || (backendPort != nil && *backendPort == NotebookServicePort)
 
 			// Delete conflicting routes:
 			// - If switching TO auth mode, delete regular routes
