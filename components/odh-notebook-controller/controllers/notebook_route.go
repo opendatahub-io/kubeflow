@@ -257,14 +257,18 @@ func unresolvable(err error) bool {
 		errors.Is(err, ingressassignment.ErrInvalidIngresses)
 }
 
-// ingressEventReason distinguishes the fail-closed causes: an unknown
-// assignment points at the namespace annotation, an invalid one at the
-// ingress configuration itself.
+// Fail-closed event reasons: an unknown assignment points at the namespace
+// annotation, an invalid one at the ingress configuration itself.
+const (
+	eventReasonIngressNotFound      = "IngressNotFound"
+	eventReasonIngressConfigInvalid = "IngressConfigInvalid"
+)
+
 func ingressEventReason(err error) string {
 	if errors.Is(err, ingressassignment.ErrInvalidIngresses) {
-		return "IngressConfigInvalid"
+		return eventReasonIngressConfigInvalid
 	}
-	return "IngressNotFound"
+	return eventReasonIngressNotFound
 }
 
 func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, namespaceName string, config map[string]string) (ingressassignment.Ingress, error) {

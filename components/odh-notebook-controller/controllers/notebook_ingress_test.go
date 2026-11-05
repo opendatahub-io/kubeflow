@@ -326,7 +326,7 @@ var _ = Describe("Ingress assignment watch", func() {
 			events := &corev1.EventList{}
 			err := cli.List(ctx, events, client.InNamespace(namespaceName), client.MatchingFields{
 				"involvedObject.uid": string(notebook.UID),
-				"reason":             "IngressNotFound",
+				"reason":             eventReasonIngressNotFound,
 			})
 			return events.Items, err
 		}, 30*time.Second, 250*time.Millisecond).Should(ContainElement(And(
@@ -479,9 +479,9 @@ func TestNotebookIngressAssignment(t *testing.T) {
 						require.True(t, errors.Is(assignmentErr, ingressassignment.ErrUnknownIngress) ||
 							errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses),
 							"assignment error must be unresolvable, got %v", assignmentErr)
-						reason := "IngressNotFound"
+						reason := eventReasonIngressNotFound
 						if errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses) {
-							reason = "IngressConfigInvalid"
+							reason = eventReasonIngressConfigInvalid
 						}
 						require.Len(t, recorder.Events, 1)
 						require.Equal(t, "Warning "+reason+" "+assignmentErr.Error(), <-recorder.Events)
