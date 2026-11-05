@@ -33,7 +33,6 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
-	"github.com/opendatahub-io/odh-platform-utilities/framework/utils/ingressassignment"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -974,8 +973,12 @@ func (r *OpenshiftNotebookReconciler) ingressConfigRequests(ctx context.Context,
 		if !checked {
 			before, oldErr := r.notebookIngress(ctx, request.Namespace, old.Data)
 			after, newErr := r.notebookIngress(ctx, request.Namespace, updated.Data)
-			oldUnknown := errors.Is(oldErr, ingressassignment.ErrUnknownIngress)
-			newUnknown := errors.Is(newErr, ingressassignment.ErrUnknownIngress)
+			// Unknown and invalid assignments are both unresolvable: what
+			// matters for change detection is the transition between
+			// resolvable and unresolvable, and between gateways when both
+			// resolve.
+			oldUnknown := unresolvable(oldErr)
+			newUnknown := unresolvable(newErr)
 			if (oldErr != nil && !oldUnknown) || (newErr != nil && !newUnknown) {
 				r.Log.Error(errors.Join(oldErr, newErr), "Unable to compare ingress assignments; reconciling all Notebooks")
 				return all
