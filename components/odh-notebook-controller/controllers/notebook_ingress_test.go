@@ -397,6 +397,7 @@ func TestNotebookIngressAssignment(t *testing.T) {
 		{name: "default name does not override a flagged ingress", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, want: operatorDefault},
 		{name: "unmarked default name remains an explicit assignment", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, annotation: new(defaultIngressName), want: alpha},
 		{name: "empty list preserves legacy default", data: map[string]string{IngressesKey: `[]`}, want: legacyDefault},
+		{name: "blank ingress key behaves as absent", data: map[string]string{IngressesKey: ""}, want: legacyDefault},
 		{name: "invalid JSON removes existing route", data: map[string]string{IngressesKey: invalidIngressJSON}, unknown: true},
 		{name: "invalid Gateway removes existing route", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"","gatewayNamespace":"operator-ingress","isDefault":true}]`}, unknown: true},
 		{name: "multiple defaults remove existing route", data: map[string]string{IngressesKey: `[{"name":"one","gatewayName":"one","gatewayNamespace":"ingress","isDefault":true},{"name":"two","gatewayName":"two","gatewayNamespace":"ingress","isDefault":true}]`}, unknown: true},

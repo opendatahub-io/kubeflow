@@ -149,7 +149,8 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 	if err != nil {
 		// Unknown and invalid assignments both fail closed: warning event,
 		// route removed, never a fallback to the default Gateway.
-		if errors.Is(err, ingressassignment.ErrUnknownIngress) || errors.Is(err, ingressassignment.ErrInvalidIngresses) {
+		if unresolvable(err) {
+			log.Error(err, "Ingress configuration is unusable; deleting HTTPRoute")
 			r.EventRecorder.Eventf(notebook, corev1.EventTypeWarning, "IngressNotFound", "%v", err)
 			if deleteErr := r.DeleteHTTPRouteForNotebook(notebook, ctx); deleteErr != nil {
 				return errors.Join(err, deleteErr)
@@ -248,6 +249,14 @@ func defaultNotebookIngress() ingressassignment.Ingress {
 	}
 }
 
+// unresolvable reports whether an assignment error means the route must be
+// removed: an unknown or invalid assignment both fail closed, with a warning
+// event and no fallback to the default Gateway.
+func unresolvable(err error) bool {
+	return errors.Is(err, ingressassignment.ErrUnknownIngress) ||
+		errors.Is(err, ingressassignment.ErrInvalidIngresses)
+}
+
 func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, namespaceName string, config map[string]string) (ingressassignment.Ingress, error) {
 	var ingresses []ingressassignment.Ingress
 	if config == nil {
@@ -255,11 +264,14 @@ func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, names
 		ingresses = append(ingresses, defaultNotebookIngress())
 		return ingressassignment.Resolve(ctx, r.Client, namespaceName, ingresses)
 	}
-	if data, present := config[IngressesKey]; present {
+	// A blanked key is closer to absent than corrupt: it falls back to the
+	// legacy default instead of deleting every route over missing data.
+	if data, present := config[IngressesKey]; present && data != "" {
 		if err := json.Unmarshal([]byte(data), &ingresses); err != nil {
 			// Malformed data fails closed: an unresolvable assignment, not a
-			// reconcile error loop that keeps a stale route serving.
-			return ingressassignment.Ingress{}, fmt.Errorf("%w: parse notebook controller ingress config: %v",
+			// reconcile error loop that keeps a stale route serving. The
+			// cause is wrapped so the syntax error survives into the event.
+			return ingressassignment.Ingress{}, fmt.Errorf("%w: parse notebook controller ingress config: %w",
 				ingressassignment.ErrInvalidIngresses, err)
 		}
 	}
