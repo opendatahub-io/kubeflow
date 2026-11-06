@@ -147,8 +147,11 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 	ingress, err := r.notebookIngress(ctx, notebook.Namespace, config)
 	if err != nil {
-		if errors.Is(err, ingressassignment.ErrUnknownIngress) {
-			r.EventRecorder.Eventf(notebook, corev1.EventTypeWarning, "IngressNotFound", "%v", err)
+		// Unknown and invalid assignments both fail closed: warning event,
+		// route removed, never a fallback to the default Gateway.
+		if unresolvable(err) {
+			log.Error(err, "Ingress configuration is unusable; deleting HTTPRoute")
+			r.EventRecorder.Eventf(notebook, corev1.EventTypeWarning, ingressEventReason(err), "%v", err)
 			if deleteErr := r.DeleteHTTPRouteForNotebook(notebook, ctx); deleteErr != nil {
 				return errors.Join(err, deleteErr)
 			}
@@ -246,6 +249,28 @@ func defaultNotebookIngress() ingressassignment.Ingress {
 	}
 }
 
+// unresolvable reports whether an assignment error means the route must be
+// removed: an unknown or invalid assignment both fail closed, with a warning
+// event and no fallback to the default Gateway.
+func unresolvable(err error) bool {
+	return errors.Is(err, ingressassignment.ErrUnknownIngress) ||
+		errors.Is(err, ingressassignment.ErrInvalidIngresses)
+}
+
+// Fail-closed event reasons: an unknown assignment points at the namespace
+// annotation, an invalid one at the ingress configuration itself.
+const (
+	eventReasonIngressNotFound      = "IngressNotFound"
+	eventReasonIngressConfigInvalid = "IngressConfigInvalid"
+)
+
+func ingressEventReason(err error) string {
+	if errors.Is(err, ingressassignment.ErrInvalidIngresses) {
+		return eventReasonIngressConfigInvalid
+	}
+	return eventReasonIngressNotFound
+}
+
 func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, namespaceName string, config map[string]string) (ingressassignment.Ingress, error) {
 	var ingresses []ingressassignment.Ingress
 	if config == nil {
@@ -253,9 +278,15 @@ func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, names
 		ingresses = append(ingresses, defaultNotebookIngress())
 		return ingressassignment.Resolve(ctx, r.Client, namespaceName, ingresses)
 	}
-	if data, present := config[IngressesKey]; present {
+	// A blanked key is closer to absent than corrupt: it falls back to the
+	// legacy default instead of deleting every route over missing data.
+	if data, present := config[IngressesKey]; present && data != "" {
 		if err := json.Unmarshal([]byte(data), &ingresses); err != nil {
-			return ingressassignment.Ingress{}, fmt.Errorf("parse notebook controller ingress config: %w", err)
+			// Malformed data fails closed: an unresolvable assignment, not a
+			// reconcile error loop that keeps a stale route serving. The
+			// cause is wrapped so the syntax error survives into the event.
+			return ingressassignment.Ingress{}, fmt.Errorf("%w: parse notebook controller ingress config: %w",
+				ingressassignment.ErrInvalidIngresses, err)
 		}
 	}
 	if !slices.ContainsFunc(ingresses, func(ingress ingressassignment.Ingress) bool { return ingress.IsDefault }) {

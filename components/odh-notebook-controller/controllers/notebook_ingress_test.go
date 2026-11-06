@@ -73,6 +73,9 @@ func TestIngressConfigHandler(t *testing.T) {
 	]`
 	withoutAlpha := strings.ReplaceAll(configured, `{"name":"alpha","gatewayName":"alpha-gateway","gatewayNamespace":"ingress"},`, "")
 	all := []string{alphaNotebookOne, alphaNotebookTwo, "beta/one", defaultNotebookOne, explicitDefaultNotebookOne}
+	// Notebooks whose assignment resolves in the configured list: everything
+	// except the alpha pair, whose annotation only exists in the full list.
+	resolvable := []string{"beta/one", defaultNotebookOne, explicitDefaultNotebookOne}
 	cases := []struct {
 		name, before, after, kind string
 		missingNamespace          string
@@ -91,8 +94,12 @@ func TestIngressConfigHandler(t *testing.T) {
 		{name: "ingress removed", before: configured, after: withoutAlpha, want: []string{alphaNotebookOne, alphaNotebookTwo}},
 		{name: "missing assignment restored", before: withoutAlpha, after: configured, want: []string{alphaNotebookOne, alphaNotebookTwo}},
 		{name: "missing assignment unchanged while beta changes", before: withoutAlpha, after: strings.ReplaceAll(withoutAlpha, "beta-gateway", "new-beta"), want: []string{"beta/one"}},
-		{name: "missing assignment to invalid configuration", before: withoutAlpha, after: strings.ReplaceAll(configured, "beta-gateway", ""), want: all},
-		{name: "invalid configuration to missing assignment", before: strings.ReplaceAll(configured, "beta-gateway", ""), after: withoutAlpha, want: all},
+		// Notebooks already unresolvable before the transition (the alpha
+		// assignments are unknown in withoutAlpha) stay unknown when the
+		// configuration turns invalid: only the resolvable-to-unresolvable
+		// transition enqueues.
+		{name: "missing assignment to invalid configuration", before: withoutAlpha, after: strings.ReplaceAll(configured, "beta-gateway", ""), want: resolvable},
+		{name: "invalid configuration to missing assignment", before: strings.ReplaceAll(configured, "beta-gateway", ""), after: withoutAlpha, want: resolvable},
 		{name: "Namespace lookup failure", before: configured, after: withoutAlpha, missingNamespace: alphaIngressName, want: all},
 		{name: "malformed configuration", before: configured, after: invalidIngressJSON, want: all},
 		{name: "invalid configuration", before: configured, after: strings.ReplaceAll(configured, "alpha-gateway", ""), want: all},
@@ -319,7 +326,7 @@ var _ = Describe("Ingress assignment watch", func() {
 			events := &corev1.EventList{}
 			err := cli.List(ctx, events, client.InNamespace(namespaceName), client.MatchingFields{
 				"involvedObject.uid": string(notebook.UID),
-				"reason":             "IngressNotFound",
+				"reason":             eventReasonIngressNotFound,
 			})
 			return events.Items, err
 		}, 30*time.Second, 250*time.Millisecond).Should(ContainElement(And(
@@ -386,13 +393,15 @@ func TestNotebookIngressAssignment(t *testing.T) {
 		{name: "additional ingress forwards Gateway name and namespace", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new(alphaIngressName), want: alpha},
 		{name: "additional-only list preserves legacy default", data: map[string]string{IngressesKey: additionalOnly}, want: legacyDefault},
 		{name: "additional-only list still resolves explicit assignment", data: map[string]string{IngressesKey: additionalOnly}, annotation: new(alphaIngressName), want: alpha},
-		{name: "unmarked default name conflicts with legacy fallback", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"operator-default","gatewayNamespace":"operator-ingress"}]`}, wantError: true},
+		{name: "unmarked default name conflicts with legacy fallback removes existing route", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"operator-default","gatewayNamespace":"operator-ingress"}]`}, unknown: true},
 		{name: "default name does not override a flagged ingress", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, want: operatorDefault},
 		{name: "unmarked default name remains an explicit assignment", data: map[string]string{IngressesKey: `[{"name":"primary","gatewayName":"operator-default","gatewayNamespace":"operator-ingress","isDefault":true},{"name":"default","gatewayName":"alpha-gateway","gatewayNamespace":"additional-ingress"}]`}, annotation: new(defaultIngressName), want: alpha},
 		{name: "empty list preserves legacy default", data: map[string]string{IngressesKey: `[]`}, want: legacyDefault},
-		{name: "invalid JSON retains existing route", data: map[string]string{IngressesKey: invalidIngressJSON}, wantError: true},
-		{name: "invalid Gateway retains existing route", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"","gatewayNamespace":"operator-ingress","isDefault":true}]`}, wantError: true},
-		{name: "multiple defaults retain existing route", data: map[string]string{IngressesKey: `[{"name":"one","gatewayName":"one","gatewayNamespace":"ingress","isDefault":true},{"name":"two","gatewayName":"two","gatewayNamespace":"ingress","isDefault":true}]`}, wantError: true},
+		{name: "blank ingress key behaves as absent", data: map[string]string{IngressesKey: ""}, want: legacyDefault},
+		{name: "invalid JSON removes existing route", data: map[string]string{IngressesKey: invalidIngressJSON}, unknown: true},
+		{name: "invalid Gateway removes existing route", data: map[string]string{IngressesKey: `[{"name":"default","gatewayName":"","gatewayNamespace":"operator-ingress","isDefault":true}]`}, unknown: true},
+		{name: "multiple defaults remove existing route", data: map[string]string{IngressesKey: `[{"name":"one","gatewayName":"one","gatewayNamespace":"ingress","isDefault":true},{"name":"two","gatewayName":"two","gatewayNamespace":"ingress","isDefault":true}]`}, unknown: true},
+		{name: "valid ingress list resolves the assignment", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new(alphaIngressName), want: alpha},
 		{name: "unknown annotation removes stale route", data: map[string]string{IngressesKey: configuredIngresses}, annotation: new("removed"), unknown: true},
 		{name: "default fallback does not accept unknown annotation", data: map[string]string{IngressesKey: `[]`}, annotation: new("removed"), unknown: true},
 		{name: "missing ConfigMap with unknown assignment removes stale route", annotation: new("removed"), unknown: true},
@@ -467,9 +476,15 @@ func TestNotebookIngressAssignment(t *testing.T) {
 					getErr := cli.Get(ctx, client.ObjectKeyFromObject(original), &route)
 					if tc.unknown {
 						_, assignmentErr := r.notebookIngress(ctx, ns.Name, config)
-						require.ErrorIs(t, assignmentErr, ingressassignment.ErrUnknownIngress)
+						require.True(t, errors.Is(assignmentErr, ingressassignment.ErrUnknownIngress) ||
+							errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses),
+							"assignment error must be unresolvable, got %v", assignmentErr)
+						reason := eventReasonIngressNotFound
+						if errors.Is(assignmentErr, ingressassignment.ErrInvalidIngresses) {
+							reason = eventReasonIngressConfigInvalid
+						}
 						require.Len(t, recorder.Events, 1)
-						require.Equal(t, "Warning IngressNotFound "+assignmentErr.Error(), <-recorder.Events)
+						require.Equal(t, "Warning "+reason+" "+assignmentErr.Error(), <-recorder.Events)
 						if tc.cleanupFailure != "" {
 							require.ErrorContains(t, err, cleanupErr.Error())
 							require.NoError(t, getErr)
@@ -482,7 +497,8 @@ func TestNotebookIngressAssignment(t *testing.T) {
 						return
 					}
 					require.NotErrorIs(t, err, ingressassignment.ErrUnknownIngress)
-					require.Empty(t, recorder.Events, "only unknown assignments should emit IngressNotFound")
+					require.NotErrorIs(t, err, ingressassignment.ErrInvalidIngresses)
+					require.Empty(t, recorder.Events, "only unresolvable assignments should emit IngressNotFound")
 					require.NoError(t, getErr)
 					want := original.DeepCopy()
 					if !tc.wantError {

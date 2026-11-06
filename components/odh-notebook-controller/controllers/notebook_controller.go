@@ -33,7 +33,6 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
-	"github.com/opendatahub-io/odh-platform-utilities/framework/utils/ingressassignment"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -60,6 +59,8 @@ import (
 
 const (
 	AnnotationInjectAuth               = "notebooks.opendatahub.io/inject-auth"
+	AnnotationNotebookRestart          = "notebooks.opendatahub.io/notebook-restart"
+	AnnotationUpdatePending            = "notebooks.opendatahub.io/update-pending"
 	AnnotationValueReconciliationLock  = "odh-notebook-controller-lock"
 	AnnotationAuthSidecarCPURequest    = "notebooks.opendatahub.io/auth-sidecar-cpu-request"
 	AnnotationAuthSidecarMemoryRequest = "notebooks.opendatahub.io/auth-sidecar-memory-request"
@@ -86,6 +87,7 @@ const (
 	OdhCABundleCertKey           = "odh-ca-bundle.crt"
 	WorkbenchTrustedCABundleName = "workbench-trusted-ca-bundle"
 	trueString                   = "true"
+	pemCertificateBlockType      = "CERTIFICATE"
 )
 
 // OpenshiftNotebookReconciler holds the controller configuration.
@@ -96,6 +98,10 @@ type OpenshiftNotebookReconciler struct {
 	Log           logr.Logger
 	Config        *rest.Config
 	EventRecorder record.EventRecorder
+	// APIReader reads cluster objects without the informer cache. Sidecar TLS
+	// flags are resolved from APIServer on each reconcile. The proxy does not
+	// watch that resource.
+	APIReader client.Reader
 	// MLflow configuration (read once at startup from env vars)
 	MLflowEnabled bool
 	GatewayURL    string
@@ -499,6 +505,15 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// Write the resolved TLS flags onto the Notebook pod template when the
+		// workbench is stopped or restarting. A running workbench keeps its
+		// current pod and records the pending change for a manual restart.
+		err = r.reconcileKubeRbacProxyTLS(ctx, notebook)
+		if err != nil {
+			log.Error(err, "Unable to apply kube-rbac-proxy TLS settings")
+			return ctrl.Result{}, err
+		}
 	} else {
 		// Ensure any existing kube-rbac-proxy HTTPRoute is cleaned up before creating regular HTTPRoute
 		err = r.EnsureConflictingHTTPRouteAbsent(notebook, ctx, false)
@@ -600,7 +615,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 
 			// Attempt to decode PEM encoded certificate
 			block, _ := pem.Decode([]byte(certData))
-			if block != nil && block.Type == "CERTIFICATE" {
+			if block != nil && block.Type == pemCertificateBlockType {
 				// Attempt to parse the certificate
 				_, err := x509.ParseCertificate(block.Bytes)
 				if err != nil {
@@ -974,8 +989,12 @@ func (r *OpenshiftNotebookReconciler) ingressConfigRequests(ctx context.Context,
 		if !checked {
 			before, oldErr := r.notebookIngress(ctx, request.Namespace, old.Data)
 			after, newErr := r.notebookIngress(ctx, request.Namespace, updated.Data)
-			oldUnknown := errors.Is(oldErr, ingressassignment.ErrUnknownIngress)
-			newUnknown := errors.Is(newErr, ingressassignment.ErrUnknownIngress)
+			// Unknown and invalid assignments are both unresolvable: what
+			// matters for change detection is the transition between
+			// resolvable and unresolvable, and between gateways when both
+			// resolve.
+			oldUnknown := unresolvable(oldErr)
+			newUnknown := unresolvable(newErr)
 			if (oldErr != nil && !oldUnknown) || (newErr != nil && !newUnknown) {
 				r.Log.Error(errors.Join(oldErr, newErr), "Unable to compare ingress assignments; reconciling all Notebooks")
 				return all
