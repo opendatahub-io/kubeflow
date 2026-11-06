@@ -1,3 +1,8 @@
+# Inactive. kustomization.yaml does not apply this patch. It still references
+# quay.io/brancz/kube-rbac-proxy:v0.4.0 and is not the notebook kube-rbac-proxy
+# sidecar injected by odh-notebook-controller. Do not add OpenShift TLS profile
+# flags here, and do not enable the patch to configure that sidecar.
+#
 # This patch inject a sidecar container which is a HTTP proxy for the controller manager,
 # it performs RBAC authorization against the Kubernetes API using SubjectAccessReviews.
 apiVersion: apps/v1

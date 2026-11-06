@@ -42,6 +42,10 @@ const (
 
 type KubeRbacProxyConfig struct {
 	ProxyImage string
+	// TLSArgs are kube-rbac-proxy TLS flags resolved from the cluster
+	// security profile. Nil selects the hardened Intermediate defaults.
+	// An empty non-nil slice leaves TLS flags unset.
+	TLSArgs []string
 }
 
 // ReconcileNotebookServiceAccount will manage the service account reconciliation
