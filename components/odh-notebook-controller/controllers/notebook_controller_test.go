@@ -883,7 +883,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               notebook.Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -913,8 +913,39 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			},
 		}
 
+		expectedEgressNetworkPolicy := &netv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      notebook.Name + NotebookEgressNetworkPolicySuffix,
+				Namespace: notebook.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion:         "kubeflow.org/v1",
+						Kind:               notebookKind,
+						Name:               notebook.Name,
+						UID:                notebook.UID,
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
+					},
+				},
+			},
+			Spec: netv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"notebook-name": notebook.Name,
+					},
+				},
+				PolicyTypes: []netv1.PolicyType{
+					netv1.PolicyTypeEgress,
+				},
+				Egress: []netv1.NetworkPolicyEgressRule{
+					{},
+				},
+			},
+		}
+
 		notebookNetworkPolicy := &netv1.NetworkPolicy{}
 		notebookOAuthNetworkPolicy := &netv1.NetworkPolicy{}
+		notebookEgressNetworkPolicy := &netv1.NetworkPolicy{}
 
 		It("Should create network policies to restrict undesired traffic", func() {
 			By("By creating a new Notebook")
@@ -933,6 +964,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				return cli.Get(ctx, key, notebookOAuthNetworkPolicy)
 			}, duration, interval).Should(Succeed())
 			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
+
+			By("By checking that the controller has created the required egress Network policy")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + NotebookEgressNetworkPolicySuffix, Namespace: Namespace}
+				return cli.Get(ctx, key, notebookEgressNetworkPolicy)
+			}, duration, interval).Should(Succeed())
+			Expect(*notebookEgressNetworkPolicy).To(BeMatchingK8sResource(*expectedEgressNetworkPolicy, CompareNotebookNetworkPolicies))
 		})
 
 		It("Should reconcile the Network policies when modified", func() {
@@ -964,10 +1002,22 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(*notebookOAuthNetworkPolicy).To(BeMatchingK8sResource(*expectedNotebookKubeRbacNetworkPolicy, CompareNotebookNetworkPolicies))
 		})
 
+		It("Should recreate the egress Network Policy when deleted", func() {
+			By("By deleting the notebook egress Network Policy")
+			Expect(cli.Delete(ctx, notebookEgressNetworkPolicy)).Should(Succeed())
+
+			By("By checking that the controller has recreated the egress Network policy")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name + NotebookEgressNetworkPolicySuffix, Namespace: Namespace}
+				return cli.Get(ctx, key, notebookEgressNetworkPolicy)
+			}, duration, interval).Should(Succeed())
+			Expect(*notebookEgressNetworkPolicy).To(BeMatchingK8sResource(*expectedEgressNetworkPolicy, CompareNotebookNetworkPolicies))
+		})
+
 		It("Should delete the Network Policies", func() {
 			expectedOwnerReference := metav1.OwnerReference{
 				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
+				Kind:               notebookKind,
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
 				Controller:         ptr.To(true),
@@ -979,6 +1029,9 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that the Notebook owns the Notebook OAuth Network Policy object")
 			Expect(notebookOAuthNetworkPolicy.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
+
+			By("By checking that the Notebook owns the Notebook egress Network Policy object")
+			Expect(notebookEgressNetworkPolicy.GetObjectMeta().GetOwnerReferences()).To(ContainElement(expectedOwnerReference))
 
 			By("By deleting the recently created Notebook")
 			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
@@ -1013,7 +1066,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -1095,7 +1148,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -1358,7 +1411,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// instead of asserting on existence.
 			expectedOwnerReference := metav1.OwnerReference{
 				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
+				Kind:               notebookKind,
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
 				Controller:         ptr.To(true),
