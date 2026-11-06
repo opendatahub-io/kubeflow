@@ -331,7 +331,7 @@ var _ = Describe("Ingress assignment watch", func() {
 			return events.Items, err
 		}, 30*time.Second, 250*time.Millisecond).Should(ContainElement(And(
 			HaveField("Type", corev1.EventTypeWarning),
-			HaveField("InvolvedObject.Kind", "Notebook"),
+			HaveField("InvolvedObject.Kind", notebookKind),
 			HaveField("InvolvedObject.Name", notebookName),
 			HaveField("Message", ContainSubstring(`unknown ingress "beta"`)),
 		)))
