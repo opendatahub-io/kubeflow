@@ -530,15 +530,14 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
-	updatePendingAnnotation := "notebooks.opendatahub.io/update-pending"
 	// Initialize annotations to avoid panic error when map nil
 	if mutatedNotebook.Annotations == nil {
 		mutatedNotebook.Annotations = make(map[string]string)
 	}
 	if needsRestart != NoPendingUpdates {
-		mutatedNotebook.Annotations[updatePendingAnnotation] = needsRestart.Reason
+		mutatedNotebook.Annotations[AnnotationUpdatePending] = needsRestart.Reason
 	} else {
-		delete(mutatedNotebook.Annotations, updatePendingAnnotation)
+		delete(mutatedNotebook.Annotations, AnnotationUpdatePending)
 	}
 
 	// Create the mutated notebook object
@@ -574,7 +573,7 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 	}
 
 	// Restarting notebooks are also ok to update
-	if metav1.HasAnnotation(mutatedNotebook.ObjectMeta, "notebooks.opendatahub.io/notebook-restart") {
+	if metav1.HasAnnotation(mutatedNotebook.ObjectMeta, AnnotationNotebookRestart) {
 		log.Info("Not blocking update, notebook is (to be) restarted")
 		return mutatedNotebook, NoPendingUpdates, nil
 	}

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	configv1 "github.com/openshift/api/config/v1"
 	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
 	libgocrypto "github.com/openshift/library-go/pkg/crypto"
@@ -37,7 +38,11 @@ import (
 )
 
 const (
-	tlsMinVersionFlag       = "--tls-min-version="
+	tlsMinVersionFlag = "--tls-min-version="
+	// tlsUpdatePendingReason is recorded on a running notebook whose proxy
+	// flags differ from the cluster profile. The user restarts the workbench
+	// to apply it. The webhook replaces this text with its own diff.
+	tlsUpdatePendingReason  = "kube-rbac-proxy TLS settings differ from the cluster security profile"
 	tlsCipherSuitesFlag     = "--tls-cipher-suites="
 	tlsCurvePreferencesFlag = "--tls-curve-preferences="
 )
@@ -336,10 +341,11 @@ func (r *OpenshiftNotebookReconciler) apiReader() client.Reader {
 }
 
 // reconcileKubeRbacProxyTLS writes the resolved TLS flags onto the Notebook
-// pod template. notebook-controller copies that template onto the StatefulSet,
-// which rolls the proxy. The ODH controller does not update StatefulSets.
-// The proxy itself does not watch APIServer. An error is returned before the
-// notebook is updated.
+// pod template when the workbench is stopped or restarting. notebook-controller
+// then copies that template onto the StatefulSet. A running workbench keeps
+// its current args and gets notebooks.opendatahub.io/update-pending so the
+// user can apply the change with a manual restart. The ODH controller does
+// not update StatefulSets. An error is returned before the notebook is updated.
 func (r *OpenshiftNotebookReconciler) reconcileKubeRbacProxyTLS(ctx context.Context, notebook *nbv1.Notebook) error {
 	if !KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
 		return nil
@@ -358,20 +364,96 @@ func (r *OpenshiftNotebookReconciler) reconcileKubeRbacProxyTLS(ctx context.Cont
 			return nil
 		}
 		updated := mergeKubeRbacProxyTLSArgs(current.Spec.Template.Spec.Containers[idx].Args, resolved.Args)
-		if slices.Equal(current.Spec.Template.Spec.Containers[idx].Args, updated) {
-			notebook.ResourceVersion = current.ResourceVersion
+		argsMatch := slices.Equal(current.Spec.Template.Spec.Containers[idx].Args, updated)
+		if notebookDefersPodTemplateChange(current) {
+			return r.deferRunningNotebookTLS(ctx, notebook, current, argsMatch)
+		}
+		if argsMatch && current.Annotations[AnnotationUpdatePending] != tlsUpdatePendingReason {
+			syncReconciledNotebook(notebook, current)
 			return nil
 		}
-		current.Spec.Template.Spec.Containers[idx].Args = updated
+		if !argsMatch {
+			current.Spec.Template.Spec.Containers[idx].Args = updated
+		}
+		clearTLSUpdatePending(current)
 		if err := r.Update(ctx, current); err != nil {
 			return err
 		}
-		if local := kubeRbacProxyContainerIndex(notebook); local >= 0 {
-			notebook.Spec.Template.Spec.Containers[local].Args = append([]string(nil), updated...)
-		}
-		notebook.ResourceVersion = current.ResourceVersion
+		syncReconciledNotebook(notebook, current)
 		r.Log.Info("Updating kube-rbac-proxy TLS arguments to match the cluster security profile",
 			"notebook", notebook.Name, "namespace", notebook.Namespace)
 		return nil
 	})
+}
+
+// notebookDefersPodTemplateChange reports whether a pod-template write would
+// restart a workbench the user has not stopped or asked to restart. This
+// matches maybeRestartRunningNotebook: the reconciliation lock and a real
+// stop both use kubeflow-resource-stopped, and both may take the new flags.
+func notebookDefersPodTemplateChange(notebook *nbv1.Notebook) bool {
+	if _, stopped := notebook.Annotations[culler.STOP_ANNOTATION]; stopped {
+		return false
+	}
+	if _, restart := notebook.Annotations[AnnotationNotebookRestart]; restart {
+		return false
+	}
+	return true
+}
+
+// deferRunningNotebookTLS records a pending TLS change without writing the
+// pod template. An annotation that is already set is left alone so a second
+// reconcile does not write again, and so another pending reason is kept.
+func (r *OpenshiftNotebookReconciler) deferRunningNotebookTLS(ctx context.Context, notebook, current *nbv1.Notebook, argsMatch bool) error {
+	switch {
+	case argsMatch && current.Annotations[AnnotationUpdatePending] == tlsUpdatePendingReason:
+		clearTLSUpdatePending(current)
+	case argsMatch || current.Annotations[AnnotationUpdatePending] != "":
+		syncReconciledNotebook(notebook, current)
+		return nil
+	default:
+		if current.Annotations == nil {
+			current.Annotations = map[string]string{}
+		}
+		current.Annotations[AnnotationUpdatePending] = tlsUpdatePendingReason
+	}
+	if err := r.Update(ctx, current); err != nil {
+		return err
+	}
+	syncReconciledNotebook(notebook, current)
+	if argsMatch {
+		r.Log.Info("Cleared the pending kube-rbac-proxy TLS change; arguments already match",
+			"notebook", notebook.Name, "namespace", notebook.Namespace)
+		return nil
+	}
+	r.Log.Info("Deferring kube-rbac-proxy TLS argument change until the notebook is restarted",
+		"notebook", notebook.Name, "namespace", notebook.Namespace)
+	return nil
+}
+
+func clearTLSUpdatePending(notebook *nbv1.Notebook) {
+	if notebook.Annotations[AnnotationUpdatePending] != tlsUpdatePendingReason {
+		return
+	}
+	delete(notebook.Annotations, AnnotationUpdatePending)
+}
+
+func syncReconciledNotebook(notebook, current *nbv1.Notebook) {
+	notebook.ResourceVersion = current.ResourceVersion
+	if current.Annotations == nil {
+		if notebook.Annotations != nil {
+			delete(notebook.Annotations, AnnotationUpdatePending)
+		}
+	} else if value, ok := current.Annotations[AnnotationUpdatePending]; ok {
+		if notebook.Annotations == nil {
+			notebook.Annotations = map[string]string{}
+		}
+		notebook.Annotations[AnnotationUpdatePending] = value
+	} else if notebook.Annotations != nil {
+		delete(notebook.Annotations, AnnotationUpdatePending)
+	}
+	local := kubeRbacProxyContainerIndex(notebook)
+	stored := kubeRbacProxyContainerIndex(current)
+	if local >= 0 && stored >= 0 {
+		notebook.Spec.Template.Spec.Containers[local].Args = append([]string(nil), current.Spec.Template.Spec.Containers[stored].Args...)
+	}
 }

@@ -59,6 +59,8 @@ import (
 
 const (
 	AnnotationInjectAuth               = "notebooks.opendatahub.io/inject-auth"
+	AnnotationNotebookRestart          = "notebooks.opendatahub.io/notebook-restart"
+	AnnotationUpdatePending            = "notebooks.opendatahub.io/update-pending"
 	AnnotationValueReconciliationLock  = "odh-notebook-controller-lock"
 	AnnotationAuthSidecarCPURequest    = "notebooks.opendatahub.io/auth-sidecar-cpu-request"
 	AnnotationAuthSidecarMemoryRequest = "notebooks.opendatahub.io/auth-sidecar-memory-request"
@@ -504,9 +506,9 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 
-		// Write the resolved TLS flags onto the Notebook pod template. The
-		// notebook controller copies that template onto the StatefulSet, which
-		// rolls the proxy when the profile or adherence changes.
+		// Write the resolved TLS flags onto the Notebook pod template when the
+		// workbench is stopped or restarting. A running workbench keeps its
+		// current pod and records the pending change for a manual restart.
 		err = r.reconcileKubeRbacProxyTLS(ctx, notebook)
 		if err != nil {
 			log.Error(err, "Unable to apply kube-rbac-proxy TLS settings")

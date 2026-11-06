@@ -26,9 +26,9 @@ import (
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	configv1 "github.com/openshift/api/config/v1"
 	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -408,36 +408,31 @@ func TestInvalidStrictProfileLeavesPodTemplateUnchanged(t *testing.T) {
 	})
 }
 
-func TestProfileOrAdherenceChangeRollsKubeRbacProxy(t *testing.T) {
+func TestProfileOrAdherenceChangeWaitsForRestart(t *testing.T) {
 	withFIPS(t, false)
 	forEachProxyOverlay(t, func(t *testing.T, image string) {
 		intermediate, err := intermediateKubeRbacProxyTLS()
 		if err != nil {
 			t.Fatal(err)
 		}
-		nb := proxyNotebook(image, append([]string{
+		baseArgs := append([]string{
 			secureListenArg,
 			notebookUpstreamArg,
 			tlsCertFileArg,
 			tlsKeyFileArg,
-		}, intermediate.Args...))
+		}, intermediate.Args...)
+		nb := proxyNotebook(image, baseArgs)
 		server := apiServer(modernTLSProfile(), configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly)
 		reconciler := tlsReconciler(t, nb.DeepCopy(), server)
 
 		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
 			t.Fatal(err)
 		}
-		legacySpec := statefulSetFromNotebook(nb)
-		if !reflect.DeepEqual(proxyArgs(t, &legacySpec), nb.Spec.Template.Spec.Containers[0].Args) {
-			t.Fatal("StatefulSet copy does not match the Notebook pod template")
+		if !reflect.DeepEqual(nb.Spec.Template.Spec.Containers[0].Args, baseArgs) {
+			t.Fatalf("legacy adherence changed proxy args: %v", nb.Spec.Template.Spec.Containers[0].Args)
 		}
-		if !reflect.DeepEqual(proxyArgs(t, &legacySpec), append([]string{
-			secureListenArg,
-			notebookUpstreamArg,
-			tlsCertFileArg,
-			tlsKeyFileArg,
-		}, intermediate.Args...)) {
-			t.Fatalf("legacy adherence changed proxy args: %v", proxyArgs(t, &legacySpec))
+		if nb.Annotations[AnnotationUpdatePending] != "" {
+			t.Fatalf("pending annotation = %q", nb.Annotations[AnnotationUpdatePending])
 		}
 
 		if err := setAPIServerProfile(reconciler, modernTLSProfile(), configv1.TLSAdherencePolicyStrictAllComponents); err != nil {
@@ -446,34 +441,69 @@ func TestProfileOrAdherenceChangeRollsKubeRbacProxy(t *testing.T) {
 		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
 			t.Fatal(err)
 		}
-		strictSpec := statefulSetFromNotebook(nb)
-		if reflect.DeepEqual(legacySpec, strictSpec) {
-			t.Fatal("adherence change did not change the StatefulSet pod template")
+		if !reflect.DeepEqual(nb.Spec.Template.Spec.Containers[0].Args, baseArgs) {
+			t.Fatalf("running notebook args changed: %v", nb.Spec.Template.Spec.Containers[0].Args)
 		}
-		strictArgs := proxyArgs(t, &strictSpec)
+		if nb.Annotations[AnnotationUpdatePending] != tlsUpdatePendingReason {
+			t.Fatalf("pending annotation = %q", nb.Annotations[AnnotationUpdatePending])
+		}
+		pendingRevision := nb.ResourceVersion
+		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
+			t.Fatal(err)
+		}
+		if nb.ResourceVersion != pendingRevision {
+			t.Fatalf("second reconcile wrote the notebook again: %s -> %s", pendingRevision, nb.ResourceVersion)
+		}
+
+		if err := markNotebookRestart(t, reconciler, nb); err != nil {
+			t.Fatal(err)
+		}
+		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
+			t.Fatal(err)
+		}
+		strictArgs := nb.Spec.Template.Spec.Containers[0].Args
 		if _, ok := flagWithPrefix(strictArgs, tlsCipherSuitesFlag); ok {
 			t.Fatalf("strict Modern args include a cipher flag: %v", strictArgs)
 		}
 		if _, ok := flagWithPrefix(strictArgs, tls13MinVersionArg); !ok {
 			t.Fatalf("strict Modern args = %v", strictArgs)
 		}
-		if proxyContainerFromSpec(t, &strictSpec).Image != image {
+		if nb.Annotations[AnnotationUpdatePending] != "" {
+			t.Fatalf("pending annotation after restart = %q", nb.Annotations[AnnotationUpdatePending])
+		}
+		if nb.Spec.Template.Spec.Containers[0].Image != image {
 			t.Fatal("profile change replaced the proxy image")
 		}
 
+		delete(nb.Annotations, AnnotationNotebookRestart)
+		if err := reconciler.Update(context.Background(), nb); err != nil {
+			t.Fatal(err)
+		}
 		if err := setAPIServerProfile(reconciler, customTLS12Profile(), configv1.TLSAdherencePolicyStrictAllComponents); err != nil {
 			t.Fatal(err)
 		}
 		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
 			t.Fatal(err)
 		}
-		customSpec := statefulSetFromNotebook(nb)
-		if reflect.DeepEqual(strictSpec, customSpec) {
-			t.Fatal("profile change did not change the StatefulSet pod template")
+		if !reflect.DeepEqual(nb.Spec.Template.Spec.Containers[0].Args, strictArgs) {
+			t.Fatalf("running notebook took the custom profile: %v", nb.Spec.Template.Spec.Containers[0].Args)
 		}
-		customArgs := proxyArgs(t, &customSpec)
-		if _, ok := flagWithPrefix(customArgs, customCipherArg); !ok {
-			t.Fatalf("custom args = %v", customArgs)
+		if nb.Annotations[AnnotationUpdatePending] != tlsUpdatePendingReason {
+			t.Fatalf("pending annotation = %q", nb.Annotations[AnnotationUpdatePending])
+		}
+
+		nb.Annotations[culler.STOP_ANNOTATION] = "stopped"
+		if err := reconciler.Update(context.Background(), nb); err != nil {
+			t.Fatal(err)
+		}
+		if err := reconciler.reconcileKubeRbacProxyTLS(context.Background(), nb); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := flagWithPrefix(nb.Spec.Template.Spec.Containers[0].Args, customCipherArg); !ok {
+			t.Fatalf("stopped notebook args = %v", nb.Spec.Template.Spec.Containers[0].Args)
+		}
+		if nb.Annotations[AnnotationUpdatePending] != "" {
+			t.Fatalf("pending annotation after stop = %q", nb.Annotations[AnnotationUpdatePending])
 		}
 	})
 }
@@ -599,6 +629,15 @@ func proxyNotebook(image string, args []string) *nbv1.Notebook {
 	}
 }
 
+func markNotebookRestart(t *testing.T, reconciler *OpenshiftNotebookReconciler, nb *nbv1.Notebook) error {
+	t.Helper()
+	if nb.Annotations == nil {
+		nb.Annotations = map[string]string{}
+	}
+	nb.Annotations[AnnotationNotebookRestart] = trueString
+	return reconciler.Update(context.Background(), nb)
+}
+
 func tlsReconciler(t *testing.T, objects ...client.Object) *OpenshiftNotebookReconciler {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -677,35 +716,6 @@ func proxyContainer(t *testing.T, nb *nbv1.Notebook) corev1.Container {
 		t.Fatal("kube-rbac-proxy container not found")
 	}
 	return nb.Spec.Template.Spec.Containers[idx]
-}
-
-func statefulSetFromNotebook(nb *nbv1.Notebook) corev1.PodSpec {
-	// notebook-controller generateStatefulSet copies Notebook.Spec.Template.Spec
-	// onto the StatefulSet pod template. A difference here rolls the proxy.
-	sts := appsv1.StatefulSet{
-		Spec: appsv1.StatefulSetSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: *nb.Spec.Template.Spec.DeepCopy(),
-			},
-		},
-	}
-	return sts.Spec.Template.Spec
-}
-
-func proxyArgs(t *testing.T, spec *corev1.PodSpec) []string {
-	t.Helper()
-	return proxyContainerFromSpec(t, spec).Args
-}
-
-func proxyContainerFromSpec(t *testing.T, spec *corev1.PodSpec) corev1.Container {
-	t.Helper()
-	for _, container := range spec.Containers {
-		if container.Name == ContainerNameKubeRbacProxy {
-			return container
-		}
-	}
-	t.Fatal("kube-rbac-proxy container not found")
-	return corev1.Container{}
 }
 
 func assertIntermediateTLS(t *testing.T, resolved kubeRbacProxyTLS) {
