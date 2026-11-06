@@ -193,7 +193,7 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		foreign := NewEgressNetworkPolicy(nb)
 		foreign.UID = types.UID("foreign-matching-policy-uid")
 		foreign.OwnerReferences = []metav1.OwnerReference{
-			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind("Notebook")),
+			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind(notebookKind)),
 		}
 
 		fakeClient := fake.NewClientBuilder().
@@ -228,7 +228,7 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		foreignCtrl.UID = types.UID("np-partial-conflict-policy-uid")
 		foreignCtrl.Spec.Ingress = nil // drift would otherwise be repaired
 		foreignCtrl.OwnerReferences = []metav1.OwnerReference{
-			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind("Notebook")),
+			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind(notebookKind)),
 		}
 
 		fakeClient := fake.NewClientBuilder().
@@ -262,7 +262,7 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		nb.UID = types.UID("np-create-race-uid")
 		existing := NewNotebookNetworkPolicy(nb, odhNotebookControllerTestNamespace)
 		existing.UID = types.UID("np-create-race-policy-uid")
-		existing.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind("Notebook"))}
+		existing.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind(notebookKind))}
 		existing.Spec.Ingress = nil // force drift so the fallback path must repair it
 
 		fakeClient := fake.NewClientBuilder().
@@ -305,6 +305,106 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		Expect(reconciled.UID).To(Equal(unowned.UID))
 		Expect(reconciled.Spec.Egress).To(Equal([]netv1.NetworkPolicyEgressRule{{}}))
 		Expect(metav1.IsControlledBy(reconciled, nb)).To(BeTrue())
+	})
+
+	It("replaces a stale Notebook controller reference and repairs the policy", func() {
+		testScheme := networkPolicyTestScheme()
+		nb := createNotebook("np-stale-owner", "default")
+		nb.UID = types.UID("np-stale-owner-new-uid")
+		stale := NewEgressNetworkPolicy(nb)
+		stale.UID = types.UID("np-stale-owner-policy-uid")
+		staleOwner := *metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind(notebookKind))
+		staleOwner.UID = types.UID("np-stale-owner-old-uid")
+		stale.OwnerReferences = []metav1.OwnerReference{staleOwner}
+		stale.Spec.Egress = nil // force drift so the stale reference is repaired too
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithObjects(nb, stale).
+			Build()
+		r := fakeNotebookReconciler(fakeClient, record.NewFakeRecorder(10))
+
+		Expect(r.ReconcileAllNetworkPolicies(nb, context.Background())).To(Succeed())
+
+		reconciled := &netv1.NetworkPolicy{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+			Name: stale.Name, Namespace: nb.Namespace,
+		}, reconciled)).To(Succeed())
+		Expect(reconciled.UID).To(Equal(stale.UID))
+		Expect(reconciled.Spec.Egress).To(Equal([]netv1.NetworkPolicyEgressRule{{}}))
+		Expect(reconciled.OwnerReferences).To(HaveLen(1))
+		Expect(reconciled.OwnerReferences[0].UID).To(Equal(nb.UID))
+	})
+
+	It("rejects a same-name Notebook controller reference from another API group", func() {
+		testScheme := networkPolicyTestScheme()
+		nb := createNotebook("np-foreign-group", "default")
+		nb.UID = types.UID("np-foreign-group-uid")
+		foreign := NewEgressNetworkPolicy(nb)
+		foreign.UID = types.UID("np-foreign-group-policy-uid")
+		foreign.Spec.Egress = nil // drift must not be repaired
+		controller := true
+		foreign.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: "example.com/v1",
+			Kind:       notebookKind,
+			Name:       nb.Name,
+			UID:        types.UID("np-foreign-group-owner-uid"),
+			Controller: &controller,
+		}}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithObjects(nb, foreign).
+			Build()
+		recorder := record.NewFakeRecorder(10)
+		r := fakeNotebookReconciler(fakeClient, recorder)
+
+		Expect(r.ReconcileAllNetworkPolicies(nb, context.Background())).NotTo(Succeed())
+		Eventually(recorder.Events).Should(Receive(And(
+			ContainSubstring("Warning"),
+			ContainSubstring("NetworkPolicyOwnershipConflict"),
+		)))
+
+		unchanged := &netv1.NetworkPolicy{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+			Name: foreign.Name, Namespace: nb.Namespace,
+		}, unchanged)).To(Succeed())
+		Expect(unchanged.Spec.Egress).To(BeNil())
+		Expect(unchanged.OwnerReferences).To(HaveLen(1))
+		Expect(unchanged.OwnerReferences[0].APIVersion).To(Equal("example.com/v1"))
+		Expect(unchanged.OwnerReferences[0].UID).To(Equal(types.UID("np-foreign-group-owner-uid")))
+		Expect(metav1.IsControlledBy(unchanged, nb)).To(BeFalse())
+	})
+
+	It("replaces a stale Notebook controller reference from another supported version", func() {
+		testScheme := networkPolicyTestScheme()
+		nb := createNotebook("np-stale-owner-version", "default")
+		nb.UID = types.UID("np-stale-owner-version-new-uid")
+		stale := NewEgressNetworkPolicy(nb)
+		stale.UID = types.UID("np-stale-owner-version-policy-uid")
+		staleOwner := *metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind(notebookKind))
+		staleOwner.APIVersion = nbv1.GroupVersion.Group + "/v1beta1"
+		staleOwner.UID = types.UID("np-stale-owner-version-old-uid")
+		stale.OwnerReferences = []metav1.OwnerReference{staleOwner}
+		stale.Spec.Egress = nil // force drift so the stale reference is repaired too
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithObjects(nb, stale).
+			Build()
+		r := fakeNotebookReconciler(fakeClient, record.NewFakeRecorder(10))
+
+		Expect(r.ReconcileAllNetworkPolicies(nb, context.Background())).To(Succeed())
+
+		reconciled := &netv1.NetworkPolicy{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+			Name: stale.Name, Namespace: nb.Namespace,
+		}, reconciled)).To(Succeed())
+		Expect(reconciled.UID).To(Equal(stale.UID))
+		Expect(reconciled.Spec.Egress).To(Equal([]netv1.NetworkPolicyEgressRule{{}}))
+		Expect(reconciled.OwnerReferences).To(HaveLen(1))
+		Expect(reconciled.OwnerReferences[0].APIVersion).To(Equal(nbv1.GroupVersion.String()))
+		Expect(reconciled.OwnerReferences[0].UID).To(Equal(nb.UID))
 	})
 
 	It("keeps reconciling its own policies when a namespace default-deny exists", func() {
@@ -368,7 +468,7 @@ var _ = Describe("NetworkPolicy event reporting", func() {
 		testScheme := networkPolicyTestScheme()
 		nb := createNotebook("np-repair-failure", "default")
 		existing := NewNotebookNetworkPolicy(nb, "central")
-		existing.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind("Notebook"))}
+		existing.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(nb, nbv1.GroupVersion.WithKind(notebookKind))}
 		existing.Spec.Ingress = nil // force drift
 		fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(nb, existing).Build()
 		recorder := record.NewFakeRecorder(10)

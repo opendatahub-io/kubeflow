@@ -116,7 +116,17 @@ it. An unowned policy with that name is adopted by setting the Notebook
 controller reference and is then repaired to the desired spec and labels, so it
 is garbage-collected with the Notebook. This preserves the pre-existing behavior
 for same-named policies created outside the controller without taking over a
-policy that another resource owns.
+policy that another resource owns. A same-named owner is only treated as a stale
+Notebook when its API version belongs to the `kubeflow.org` group and a
+supported Notebook version; an owner with the same kind and name from another
+API group is still reported as a conflict.
+
+Adopting an existing policy requires changing its owner references. OpenShift's
+`OwnerReferencesPermissionEnforcement` admission requires the `delete` verb on
+the policy for any owner-reference change, even when `blockOwnerDeletion` is
+false. The controller therefore keeps `delete` permission on NetworkPolicies,
+but it never deletes or recreates them; background garbage collection removes
+them with the Notebook.
 
 Because Kubernetes NetworkPolicy allow rules are additive, the unrestricted
 egress rule in `<notebook>-egress-np` can override a namespace-level deny-all
