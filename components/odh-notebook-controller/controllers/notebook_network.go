@@ -17,6 +17,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -58,14 +59,15 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 		NewEgressNetworkPolicy(notebook),
 	}
 
+	var errs []error
 	for _, desiredNetworkPolicy := range desiredNetworkPolicies {
 		if err := r.reconcileNetworkPolicy(desiredNetworkPolicy, ctx, notebook); err != nil {
 			log.Error(err, "error reconciling Notebook network policy", "name", desiredNetworkPolicy.Name)
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *OpenshiftNotebookReconciler) recordNetworkPolicyEvent(notebook *nbv1.Notebook, eventType, reason, messageFmt string, args ...interface{}) {
@@ -112,6 +114,12 @@ func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desiredNetworkPolic
 	return r.reconcileExistingNetworkPolicy(desiredNetworkPolicy, ctx, notebook)
 }
 
+func (r *OpenshiftNotebookReconciler) networkPolicyOwnershipConflict(notebook *nbv1.Notebook, foundNetworkPolicy *netv1.NetworkPolicy) error {
+	r.recordNetworkPolicyEvent(notebook, corev1.EventTypeWarning, "NetworkPolicyOwnershipConflict",
+		"Refusing to overwrite NetworkPolicy %q because it is not controlled by this Notebook", foundNetworkPolicy.Name)
+	return fmt.Errorf("networkpolicy %q is not controlled by Notebook %s", foundNetworkPolicy.Name, notebook.Name)
+}
+
 func (r *OpenshiftNotebookReconciler) reconcileExistingNetworkPolicy(desiredNetworkPolicy *netv1.NetworkPolicy, ctx context.Context, notebook *nbv1.Notebook) error {
 	ownershipConflict := false
 	// Retry the update operation when the ingress controller eventually
@@ -125,19 +133,23 @@ func (r *OpenshiftNotebookReconciler) reconcileExistingNetworkPolicy(desiredNetw
 			return err
 		}
 
-		if CompareNotebookNetworkPolicies(*desiredNetworkPolicy, *foundNetworkPolicy) {
-			return nil
-		}
-
-		// Never overwrite a same-named policy that belongs to another owner.
-		// Unowned legacy policies are left untouched unless their spec already
-		// matches the desired policy above.
 		if !metav1.IsControlledBy(foundNetworkPolicy, notebook) {
-			ownershipConflict = true
-			err := fmt.Errorf("networkpolicy %q is not controlled by Notebook %s", foundNetworkPolicy.Name, notebook.Name)
-			r.recordNetworkPolicyEvent(notebook, corev1.EventTypeWarning, "NetworkPolicyOwnershipConflict",
-				"Refusing to overwrite NetworkPolicy %q because it is not controlled by this Notebook", foundNetworkPolicy.Name)
-			return err
+			// Never overwrite a policy controlled by another resource, even when
+			// its spec happens to match the desired policy.
+			if metav1.GetControllerOf(foundNetworkPolicy) != nil {
+				ownershipConflict = true
+				return r.networkPolicyOwnershipConflict(notebook, foundNetworkPolicy)
+			}
+
+			// Adopt an unowned policy by taking controller ownership. This keeps
+			// the pre-existing same-name behaviour for legacy policies, makes the
+			// garbage collector remove them with the Notebook, and avoids leaving
+			// drifted policies permanently unrepaired.
+			if err := ctrl.SetControllerReference(notebook, foundNetworkPolicy, r.Scheme); err != nil {
+				return err
+			}
+		} else if CompareNotebookNetworkPolicies(*desiredNetworkPolicy, *foundNetworkPolicy) {
+			return nil
 		}
 
 		// Reconcile labels and spec in place. The policy names are part of the

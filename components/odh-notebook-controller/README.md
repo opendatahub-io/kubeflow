@@ -110,9 +110,19 @@ error so the reconciliation is retried. This controller does not write Notebook
 readiness; readiness is reported independently by the upstream
 notebook-controller from StatefulSet and Pod status.
 
-If a same-named NetworkPolicy already exists but is not controlled by the
-Notebook and differs from the desired policy, the controller emits a
-`NetworkPolicyOwnershipConflict` Warning event and refuses to overwrite it.
+If a same-named NetworkPolicy is controlled by another resource, the controller
+emits a `NetworkPolicyOwnershipConflict` Warning event and refuses to overwrite
+it. An unowned policy with that name is adopted by setting the Notebook
+controller reference and is then repaired to the desired spec and labels, so it
+is garbage-collected with the Notebook. This preserves the pre-existing behavior
+for same-named policies created outside the controller without taking over a
+policy that another resource owns.
+
+Because Kubernetes NetworkPolicy allow rules are additive, the unrestricted
+egress rule in `<notebook>-egress-np` can override a namespace-level deny-all
+egress policy for Notebook pods. Administrators must enforce outbound
+restrictions with platform-level controls (for example, an egress firewall)
+rather than relying solely on a namespace default-deny policy.
 
 ### Verification
 

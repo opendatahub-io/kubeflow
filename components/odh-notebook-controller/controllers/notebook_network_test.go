@@ -148,7 +148,7 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		}
 	})
 
-	It("adds the egress policy to a pre-existing Notebook without touching legacy policies", func() {
+	It("adds the egress policy to a pre-existing Notebook and adopts matching legacy policies", func() {
 		testScheme := networkPolicyTestScheme()
 		preExisting := createNotebook("np-preexisting-notebook", "default")
 		legacyCtrl := NewNotebookNetworkPolicy(preExisting, odhNotebookControllerTestNamespace)
@@ -178,6 +178,81 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 			}, unchanged)).To(Succeed())
 			Expect(unchanged.UID).To(Equal(legacy.UID))
 			Expect(unchanged.Spec).To(Equal(legacy.Spec))
+			Expect(metav1.IsControlledBy(unchanged, preExisting)).To(BeTrue(),
+				"matching legacy policy %s should be adopted by the Notebook", legacy.Name)
+		}
+	})
+
+	It("refuses to accept a matching policy controlled by another resource", func() {
+		testScheme := networkPolicyTestScheme()
+		nb := createNotebook("np-foreign-owner", "default")
+		nb.UID = types.UID("np-foreign-owner-uid")
+		other := createNotebook("np-other-owner", "default")
+		other.UID = types.UID("np-other-owner-uid")
+
+		foreign := NewEgressNetworkPolicy(nb)
+		foreign.UID = types.UID("foreign-matching-policy-uid")
+		foreign.OwnerReferences = []metav1.OwnerReference{
+			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind("Notebook")),
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithObjects(nb, other, foreign).
+			Build()
+		recorder := record.NewFakeRecorder(10)
+		r := fakeNotebookReconciler(fakeClient, recorder)
+
+		err := r.ReconcileAllNetworkPolicies(nb, context.Background())
+		Expect(err).To(HaveOccurred())
+		Eventually(recorder.Events).Should(Receive(And(
+			ContainSubstring("Warning"),
+			ContainSubstring("NetworkPolicyOwnershipConflict"),
+		)))
+
+		unchanged := &netv1.NetworkPolicy{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+			Name: foreign.Name, Namespace: nb.Namespace,
+		}, unchanged)).To(Succeed())
+		Expect(metav1.IsControlledBy(unchanged, other)).To(BeTrue())
+		Expect(metav1.IsControlledBy(unchanged, nb)).To(BeFalse())
+	})
+
+	It("continues reconciling the remaining policies when one conflict occurs", func() {
+		testScheme := networkPolicyTestScheme()
+		nb := createNotebook("np-partial-conflict", "default")
+		nb.UID = types.UID("np-partial-conflict-uid")
+		other := createNotebook("np-partial-conflict-other", "default")
+		other.UID = types.UID("np-partial-conflict-other-uid")
+		foreignCtrl := NewNotebookNetworkPolicy(nb, odhNotebookControllerTestNamespace)
+		foreignCtrl.UID = types.UID("np-partial-conflict-policy-uid")
+		foreignCtrl.Spec.Ingress = nil // drift would otherwise be repaired
+		foreignCtrl.OwnerReferences = []metav1.OwnerReference{
+			*metav1.NewControllerRef(other, nbv1.GroupVersion.WithKind("Notebook")),
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(testScheme).
+			WithObjects(nb, other, foreignCtrl).
+			Build()
+		r := fakeNotebookReconciler(fakeClient, record.NewFakeRecorder(10))
+
+		Expect(r.ReconcileAllNetworkPolicies(nb, context.Background())).NotTo(Succeed())
+
+		unchanged := &netv1.NetworkPolicy{}
+		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+			Name: foreignCtrl.Name, Namespace: nb.Namespace,
+		}, unchanged)).To(Succeed())
+		Expect(unchanged.Spec.Ingress).To(BeNil())
+
+		for _, suffix := range []string{
+			NotebookKubeRbacProxyNetworkPolicySuffix,
+			NotebookEgressNetworkPolicySuffix,
+		} {
+			np := &netv1.NetworkPolicy{}
+			Expect(fakeClient.Get(context.Background(), types.NamespacedName{
+				Name: nb.Name + suffix, Namespace: nb.Namespace,
+			}, np)).To(Succeed(), "expected policy %s to be reconciled despite the earlier conflict", np.Name)
 		}
 	})
 
@@ -207,32 +282,29 @@ var _ = Describe("Notebook NetworkPolicy contract", func() {
 		Expect(reconciled.Spec.Ingress).To(HaveLen(1))
 	})
 
-	It("refuses to overwrite a same-named policy it does not control", func() {
+	It("adopts and repairs an unowned same-named policy with drift", func() {
 		testScheme := networkPolicyTestScheme()
-		nb := createNotebook("np-foreign-policy", "default")
-		foreign := NewEgressNetworkPolicy(nb)
-		foreign.Spec.Egress = nil // force drift so the controller would otherwise update it
+		nb := createNotebook("np-unowned-policy", "default")
+		nb.UID = types.UID("np-unowned-policy-uid")
+		unowned := NewEgressNetworkPolicy(nb)
+		unowned.UID = types.UID("np-unowned-policy-egress-uid")
+		unowned.Spec.Egress = nil // force drift so adoption must repair it
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(testScheme).
-			WithObjects(nb, foreign).
+			WithObjects(nb, unowned).
 			Build()
-		recorder := record.NewFakeRecorder(10)
-		r := fakeNotebookReconciler(fakeClient, recorder)
+		r := fakeNotebookReconciler(fakeClient, record.NewFakeRecorder(10))
 
-		err := r.ReconcileAllNetworkPolicies(nb, context.Background())
-		Expect(err).To(HaveOccurred())
-		Eventually(recorder.Events).Should(Receive(And(
-			ContainSubstring("Warning"),
-			ContainSubstring("NetworkPolicyOwnershipConflict"),
-		)))
+		Expect(r.ReconcileAllNetworkPolicies(nb, context.Background())).To(Succeed())
 
-		unchanged := &netv1.NetworkPolicy{}
+		reconciled := &netv1.NetworkPolicy{}
 		Expect(fakeClient.Get(context.Background(), types.NamespacedName{
-			Name: foreign.Name, Namespace: nb.Namespace,
-		}, unchanged)).To(Succeed())
-		Expect(unchanged.Spec.Egress).To(BeNil())
-		Expect(unchanged.OwnerReferences).To(BeEmpty())
+			Name: unowned.Name, Namespace: nb.Namespace,
+		}, reconciled)).To(Succeed())
+		Expect(reconciled.UID).To(Equal(unowned.UID))
+		Expect(reconciled.Spec.Egress).To(Equal([]netv1.NetworkPolicyEgressRule{{}}))
+		Expect(metav1.IsControlledBy(reconciled, nb)).To(BeTrue())
 	})
 
 	It("keeps reconciling its own policies when a namespace default-deny exists", func() {
