@@ -225,6 +225,7 @@ var _ = BeforeSuite(func() {
 		Namespace:     odhNotebookControllerTestNamespace,
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		APIReader:     mgr.GetAPIReader(),
 		MLflowEnabled: true,
 		GatewayURL:    "gateway.example.com",
 	}).SetupWithManager(mgr)
