@@ -27,6 +27,7 @@ import (
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
@@ -42,6 +43,7 @@ const (
 
 	namespaceNameLabelKey = "kubernetes.io/metadata.name"
 	notebookNameLabelKey  = "notebook-name"
+	notebookKind          = "Notebook"
 )
 
 // ReconcileAllNetworkPolicies will manage the network policies reconciliation
@@ -114,6 +116,25 @@ func (r *OpenshiftNotebookReconciler) reconcileNetworkPolicy(desiredNetworkPolic
 	return r.reconcileExistingNetworkPolicy(desiredNetworkPolicy, ctx, notebook)
 }
 
+func isKubeflowNotebookOwner(ownerRef *metav1.OwnerReference) bool {
+	if ownerRef == nil || ownerRef.Kind != notebookKind {
+		return false
+	}
+	groupVersion, err := schema.ParseGroupVersion(ownerRef.APIVersion)
+	if err != nil || groupVersion.Group != nbv1.GroupVersion.Group {
+		return false
+	}
+	// Versions within the Kubeflow API group refer to the same Notebook
+	// resource. Accept the versions supported by this repository and reject
+	// same-named owners from other API groups or unknown versions.
+	switch groupVersion.Version {
+	case "v1", "v1beta1", "v1alpha1":
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *OpenshiftNotebookReconciler) networkPolicyOwnershipConflict(notebook *nbv1.Notebook, foundNetworkPolicy *netv1.NetworkPolicy) error {
 	r.recordNetworkPolicyEvent(notebook, corev1.EventTypeWarning, "NetworkPolicyOwnershipConflict",
 		"Refusing to overwrite NetworkPolicy %q because it is not controlled by this Notebook", foundNetworkPolicy.Name)
@@ -136,9 +157,24 @@ func (r *OpenshiftNotebookReconciler) reconcileExistingNetworkPolicy(desiredNetw
 		if !metav1.IsControlledBy(foundNetworkPolicy, notebook) {
 			// Never overwrite a policy controlled by another resource, even when
 			// its spec happens to match the desired policy.
-			if metav1.GetControllerOf(foundNetworkPolicy) != nil {
-				ownershipConflict = true
-				return r.networkPolicyOwnershipConflict(notebook, foundNetworkPolicy)
+			if controllerRef := metav1.GetControllerOf(foundNetworkPolicy); controllerRef != nil {
+				if !isKubeflowNotebookOwner(controllerRef) || controllerRef.Name != notebook.Name {
+					ownershipConflict = true
+					return r.networkPolicyOwnershipConflict(notebook, foundNetworkPolicy)
+				}
+
+				// The policy is owned by a previous Notebook with the same name but
+				// a different UID. That can happen if a Notebook is recreated before
+				// garbage collection removes its policies. Drop the stale controller
+				// reference so the policy can be adopted below.
+				ownerRefs := foundNetworkPolicy.OwnerReferences[:0]
+				for _, ownerRef := range foundNetworkPolicy.OwnerReferences {
+					if ownerRef.Controller != nil && *ownerRef.Controller {
+						continue
+					}
+					ownerRefs = append(ownerRefs, ownerRef)
+				}
+				foundNetworkPolicy.OwnerReferences = ownerRefs
 			}
 
 			// Adopt an unowned policy by taking controller ownership. This keeps

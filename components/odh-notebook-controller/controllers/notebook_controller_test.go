@@ -883,7 +883,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               notebook.Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -920,7 +920,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               notebook.Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -1017,7 +1017,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		It("Should delete the Network Policies", func() {
 			expectedOwnerReference := metav1.OwnerReference{
 				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
+				Kind:               notebookKind,
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
 				Controller:         ptr.To(true),
@@ -1066,7 +1066,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -1148,7 +1148,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion:         "kubeflow.org/v1",
-						Kind:               "Notebook",
+						Kind:               notebookKind,
 						Name:               Name,
 						UID:                notebook.UID,
 						Controller:         ptr.To(true),
@@ -1411,7 +1411,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			// instead of asserting on existence.
 			expectedOwnerReference := metav1.OwnerReference{
 				APIVersion:         "kubeflow.org/v1",
-				Kind:               "Notebook",
+				Kind:               notebookKind,
 				Name:               Name,
 				UID:                notebook.GetObjectMeta().GetUID(),
 				Controller:         ptr.To(true),
