@@ -187,6 +187,11 @@ func tlsProfileSpecToProxyTLS(spec configv1.TLSProfileSpec, strict bool) (kubeRb
 	if err != nil {
 		return kubeRbacProxyTLS{}, fmt.Errorf("TLS profile minimum version %q cannot be represented: %w", spec.MinTLSVersion, err)
 	}
+	// The proxy only represents TLS 1.2 and TLS 1.3. TLS 1.0 and TLS 1.1,
+	// including the Old profile, fail closed so the workload stays unchanged.
+	if parsed < tls.VersionTLS12 {
+		return kubeRbacProxyTLS{}, fmt.Errorf("TLS profile minimum version %q cannot be represented", spec.MinTLSVersion)
+	}
 
 	curves, err := curvePreferenceIDs(spec.Groups, strict)
 	if err != nil {

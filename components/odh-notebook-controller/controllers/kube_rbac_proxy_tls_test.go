@@ -91,7 +91,9 @@ func TestResolveKubeRbacProxyTLS(t *testing.T) {
 			{name: "nil profile", adherence: configv1.TLSAdherencePolicyStrictAllComponents},
 			{name: "empty type", profile: &configv1.TLSSecurityProfile{}, adherence: configv1.TLSAdherencePolicyStrictAllComponents},
 			{name: "no opinion modern", profile: modernTLSProfile(), adherence: configv1.TLSAdherencePolicyNoOpinion},
+			{name: "no opinion old", profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType}, adherence: configv1.TLSAdherencePolicyNoOpinion},
 			{name: "legacy modern", profile: modernTLSProfile(), adherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly},
+			{name: "legacy old", profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType}, adherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly},
 			{name: "legacy invalid custom", profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileCustomType}, adherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly},
 		}
 		for _, tc := range cases {
@@ -148,24 +150,13 @@ func TestResolveKubeRbacProxyTLS(t *testing.T) {
 		}
 	})
 
-	t.Run("strict old stays representable", func(t *testing.T) {
-		resolved, err := resolveKubeRbacProxyTLS(
+	t.Run("strict old is unrepresentable", func(t *testing.T) {
+		_, err := resolveKubeRbacProxyTLS(
 			&configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType},
 			configv1.TLSAdherencePolicyStrictAllComponents,
 		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		min, ok := flagWithPrefix(resolved.Args, tlsMinVersionFlag)
-		if !ok || min != "--tls-min-version=VersionTLS10" {
-			t.Fatalf("min version = %q", min)
-		}
-		ciphers, ok := flagWithPrefix(resolved.Args, tlsCipherSuitesFlag)
-		if !ok || !strings.Contains(ciphers, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") {
-			t.Fatalf("old cipher flag = %q", ciphers)
-		}
-		if strings.Contains(ciphers, "TLS_AES_") || strings.Contains(ciphers, "TLS_CHACHA20_") {
-			t.Fatalf("TLS 1.3 cipher names leaked into the TLS 1.2 flag: %s", ciphers)
+		if err == nil {
+			t.Fatal("expected strict Old to fail")
 		}
 	})
 
@@ -175,6 +166,9 @@ func TestResolveKubeRbacProxyTLS(t *testing.T) {
 			profile *configv1.TLSSecurityProfile
 		}{
 			{name: "unknown type", profile: &configv1.TLSSecurityProfile{Type: "NotAProfile"}},
+			{name: "old", profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType}},
+			{name: "tls 1.0", profile: customProfile(configv1.TLSProfileSpec{MinTLSVersion: configv1.VersionTLS10})},
+			{name: "tls 1.1", profile: customProfile(configv1.TLSProfileSpec{MinTLSVersion: configv1.VersionTLS11})},
 			{name: "nil custom", profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileCustomType}},
 			{name: "empty min version", profile: customProfile(configv1.TLSProfileSpec{Ciphers: []string{"ECDHE-RSA-AES128-GCM-SHA256"}})},
 			{name: "all ciphers unusable", profile: customProfile(configv1.TLSProfileSpec{
@@ -331,7 +325,10 @@ func TestInvalidStrictProfileLeavesPodTemplateUnchanged(t *testing.T) {
 	forEachProxyOverlay(t, func(t *testing.T, image string) {
 		profiles := []*configv1.TLSSecurityProfile{
 			{Type: "NotAProfile"},
+			{Type: configv1.TLSProfileOldType},
 			{Type: configv1.TLSProfileCustomType},
+			customProfile(configv1.TLSProfileSpec{MinTLSVersion: configv1.VersionTLS10}),
+			customProfile(configv1.TLSProfileSpec{MinTLSVersion: configv1.VersionTLS11}),
 			customProfile(configv1.TLSProfileSpec{
 				MinTLSVersion: configv1.VersionTLS12,
 				Ciphers:       []string{unsupportedCipherName},
