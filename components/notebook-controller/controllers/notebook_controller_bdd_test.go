@@ -26,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	nbv1beta1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1beta1"
+	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 )
 
 var _ = Describe("Notebook controller", func() {
@@ -46,7 +46,7 @@ var _ = Describe("Notebook controller", func() {
 		It("Should create replicas", func() {
 			By("By creating a new Notebook")
 			ctx := context.Background()
-			notebook := &nbv1beta1.Notebook{
+			notebook := &nbv1.Notebook{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      Name,
 					Namespace: Namespace,
@@ -54,8 +54,8 @@ var _ = Describe("Notebook controller", func() {
 						testLabelName: testLabelValue,
 					},
 				},
-				Spec: nbv1beta1.NotebookSpec{
-					Template: nbv1beta1.NotebookTemplateSpec{
+				Spec: nbv1.NotebookSpec{
+					Template: nbv1.NotebookTemplateSpec{
 						Spec: v1.PodSpec{Containers: []v1.Container{{
 							Name:  "busybox",
 							Image: "busybox",
@@ -64,7 +64,7 @@ var _ = Describe("Notebook controller", func() {
 			Expect(k8sClient.Create(ctx, notebook)).Should(Succeed())
 
 			notebookLookupKey := types.NamespacedName{Name: Name, Namespace: Namespace}
-			createdNotebook := &nbv1beta1.Notebook{}
+			createdNotebook := &nbv1.Notebook{}
 
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, notebookLookupKey, createdNotebook)
@@ -88,6 +88,12 @@ var _ = Describe("Notebook controller", func() {
 
 				By("By checking that the StatefulSet has identical Labels as the Notebook")
 				Expect(sts.GetLabels()).To(Equal(notebook.GetLabels()))
+
+				By("By checking that the StatefulSet ownerReference uses kubeflow.org/v1")
+				Expect(sts.OwnerReferences).NotTo(BeEmpty())
+				Expect(sts.OwnerReferences[0].APIVersion).To(Equal(nbv1.GroupVersion.String()))
+				Expect(sts.OwnerReferences[0].Kind).To(Equal("Notebook"))
+				Expect(sts.OwnerReferences[0].Name).To(Equal(Name))
 
 				return true, nil
 			}, timeout, interval).Should(BeTrue())
