@@ -1,14 +1,25 @@
 module github.com/opendatahub-io/kubeflow/components/odh-notebook-controller
 
-go 1.26.10
+go 1.27.3
 
+// test dependencies
 require (
 	github.com/go-logr/logr v1.4.4
 	github.com/google/go-cmp v0.7.0
 	github.com/kubeflow/kubeflow/components/notebook-controller v0.0.0-20220728153354-fc09bd1eefb8
+	github.com/onsi/ginkgo v1.16.5
+	github.com/onsi/gomega v1.41.0
 	github.com/opendatahub-io/data-science-pipelines-operator v1.1.1-0.20250318214030-560cbc1d827a
+	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.1-0.20261015150943-4c8b32508ccc
+	github.com/opendatahub-io/operator-chaos v0.0.0-20260525094355-9e6ac9668b9a
 	github.com/openshift/api v0.0.0-20261002115817-f8795cdde518
+	github.com/openshift/controller-runtime-common v0.0.0-20261005093240-b39eb7218441
+	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
 	github.com/pkg/errors v0.9.1
+	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/otel v1.45.0
+	go.opentelemetry.io/otel/sdk v1.45.0
+	go.opentelemetry.io/otel/trace v1.45.0
 	go.uber.org/zap v1.28.0
 
 	// Used versions of Kubernetes API compatible with controller-runtime v0.23.3.
@@ -21,26 +32,6 @@ require (
 	// Used version that OpenShift 4.19 uses as the oldest supported OCP version.
 	// Keep in sync with what we have in config/crd/external/*.yaml files.
 	sigs.k8s.io/gateway-api v1.2.1
-)
-
-// test dependencies
-require (
-	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.41.0
-	github.com/stretchr/testify v1.11.1
-	go.opentelemetry.io/otel v1.45.0
-	go.opentelemetry.io/otel/sdk v1.45.0
-	go.opentelemetry.io/otel/trace v1.45.0
-)
-
-require (
-	github.com/openshift/controller-runtime-common v0.0.0-20261005093240-b39eb7218441
-	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
-)
-
-require (
-	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.1-0.20261015150943-4c8b32508ccc
-	github.com/opendatahub-io/operator-chaos v0.0.0-20260525094355-9e6ac9668b9a
 )
 
 require (
