@@ -25,16 +25,16 @@ import (
 // and reads ConfigMap and Secret data directly.
 func ManagerCacheOptions() (cache.Options, client.Options) {
 	return cache.Options{
-			DefaultTransform: cache.TransformStripManagedFields(),
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.ConfigMap{}: {Transform: stripConfigMapData},
-				&corev1.Secret{}:    {Transform: stripSecretData},
-			},
-		}, client.Options{
-			Cache: &client.CacheOptions{
-				DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}},
-			},
-		}
+		DefaultTransform: cache.TransformStripManagedFields(),
+		ByObject: map[client.Object]cache.ByObject{
+			&corev1.ConfigMap{}: {Transform: stripConfigMapData},
+			&corev1.Secret{}:    {Transform: stripSecretData},
+		},
+	}, client.Options{
+		Cache: &client.CacheOptions{
+			DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}},
+		},
+	}
 }
 
 // stripConfigMapData retains the controller ConfigMap payload for watch comparisons.
