@@ -65,7 +65,7 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
       # Defined here so backticks are plain YAML characters, avoiding
       # heredoc-inside-run indentation issues that break YAML parsing.
       PR_BODY: |

@@ -62,7 +62,17 @@ jobs:
         set -e
 
         # Checkout or create the target branch.
+        # Force-update path (base set) is only allowed for approved base/target
+        # pairs so main/stable/v1.10-branch cannot be force-overwritten.
         if [[ -n "$BASE_BRANCH" ]]; then
+          case "$BASE_BRANCH:$TARGET_BRANCH" in
+            stable:sync/main-to-stable) ;;
+            *)
+              echo "Refusing force-update for unapproved base/target pair: base='$BASE_BRANCH' target='$TARGET_BRANCH'."
+              echo "Allowed: base=stable target=sync/main-to-stable"
+              exit 1
+              ;;
+          esac
           git fetch origin "$BASE_BRANCH:$BASE_BRANCH"
           git checkout -b "$TARGET_BRANCH" "$BASE_BRANCH"
         else
@@ -120,8 +130,6 @@ jobs:
             echo "Keeping target branch version of $FILE."
             git checkout "$TARGET_COMMIT" -- "$FILE"
             git add "$FILE"
-          else
-            git rm -f --ignore-unmatch -- "$FILE"
           fi
         done
 
