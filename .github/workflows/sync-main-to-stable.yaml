@@ -62,9 +62,10 @@ jobs:
     if: needs.check.outputs.ahead != '0'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
     env:
+      # PAT so PR open/update events trigger pull_request CI (GITHUB_TOKEN cannot).
       GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
       # Defined here so backticks are plain YAML characters, avoiding
       # heredoc-inside-run indentation issues that break YAML parsing.
@@ -85,6 +86,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
+        token: ${{ secrets.GHA_SECRET_PAT }}
 
     - name: Check if merge branch was pushed and differs from stable
       id: diff_check
@@ -126,7 +128,15 @@ jobs:
           --jq '.[0].number // empty')
 
         if [[ -n "$EXISTING" ]]; then
-          echo "PR #$EXISTING already open for $MERGE_BRANCH — no duplicate created."
+          # sync-branches pushed with GITHUB_TOKEN, which does not re-trigger CI on
+          # an existing PR. Push an empty commit with the PAT so checks re-run.
+          git fetch origin "$MERGE_BRANCH"
+          git checkout "$MERGE_BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: trigger CI for sync PR"
+          git push origin "$MERGE_BRANCH"
+          echo "PR #$EXISTING already open for $MERGE_BRANCH — triggered CI refresh."
           exit 0
         fi
 
