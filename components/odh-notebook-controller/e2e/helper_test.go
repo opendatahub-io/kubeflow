@@ -86,6 +86,7 @@ const (
 	notebookControllerConfigMapName = "odh-notebook-controller-config"
 	namespaceIngressAnnotation      = "opendatahub.io/ingress-name"
 	controllerIngressesKey          = "ingresses"
+	notebookNameLabelKey            = "notebook-name"
 )
 
 // waitForNotebookHTTPRouteParents checks every test Notebook and propagates API errors.

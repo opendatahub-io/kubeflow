@@ -18,7 +18,10 @@ namePrefix: notebook-controller-
 
 #patchesStrategicMerge:
 #- manager_image_patch.yaml
-  # Protect the /metrics endpoint by putting it behind auth.
+  # Inactive. manager_auth_proxy_patch.yaml is not applied. It references
+  # quay.io/brancz/kube-rbac-proxy:v0.4.0 and is not the notebook sidecar
+  # injected by odh-notebook-controller. Do not uncomment it to configure
+  # that sidecar, and do not add OpenShift TLS profile flags to it.
   # Only one of manager_auth_proxy_patch.yaml and
   # manager_prometheus_metrics_patch.yaml should be enabled.
 #- manager_auth_proxy_patch.yaml

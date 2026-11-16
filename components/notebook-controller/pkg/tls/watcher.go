@@ -63,7 +63,7 @@ func (w *ProfileWatcher) Reconcile(ctx context.Context, _ reconcile.Request) (re
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	obj, err := dynClient.Resource(apiServerGVR).Get(fetchCtx, "cluster", metav1.GetOptions{})
+	obj, err := dynClient.Resource(apiServerGVR).Get(fetchCtx, apiserverName, metav1.GetOptions{})
 	if err != nil {
 		watcherLog.Info("TLS profile fetch did not succeed, retrying", "retryAfter", profileRetryInterval, "error", err)
 		return reconcile.Result{RequeueAfter: profileRetryInterval}, nil
@@ -100,10 +100,10 @@ func (w *ProfileWatcher) SetupWithManager(mgr ctrl.Manager) error {
 			&handler.TypedEnqueueRequestForObject[*unstructured.Unstructured]{},
 			predicate.TypedFuncs[*unstructured.Unstructured]{
 				CreateFunc: func(e event.TypedCreateEvent[*unstructured.Unstructured]) bool {
-					return e.Object.GetName() == "cluster"
+					return e.Object.GetName() == apiserverName
 				},
 				UpdateFunc: func(e event.TypedUpdateEvent[*unstructured.Unstructured]) bool {
-					return e.ObjectNew.GetName() == "cluster"
+					return e.ObjectNew.GetName() == apiserverName
 				},
 				DeleteFunc: func(_ event.TypedDeleteEvent[*unstructured.Unstructured]) bool {
 					return false

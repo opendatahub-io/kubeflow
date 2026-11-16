@@ -25,6 +25,7 @@ const (
 	KubeRbacProxyServiceSuffix = "-kube-rbac-proxy"
 	// mimics definition in notebook_network.go
 	NotebookKubeRbacProxyNetworkPolicySuffix = "-kube-rbac-proxy-np"
+	NotebookEgressNetworkPolicySuffix        = "-egress-np"
 	// mimics definition in notebook_mutating_webhook.go
 	ContainerNameKubeRbacProxy = "kube-rbac-proxy"
 )
@@ -169,7 +170,36 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 		return err
 	}
 
-	return tc.ensureOAuthNetworkPolicyExists(nbMeta)
+	err = tc.ensureOAuthNetworkPolicyExists(nbMeta)
+	if err != nil {
+		return err
+	}
+
+	return tc.ensureEgressNetworkPolicyExists(nbMeta)
+}
+
+func (tc *testContext) ensureEgressNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {
+	notebookEgressNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+NotebookEgressNetworkPolicySuffix)
+	if err != nil {
+		return fmt.Errorf("error getting egress network policy for Notebook %v: %v", nbMeta.Name, err)
+	}
+
+	if len(notebookEgressNetworkPolicy.Spec.PolicyTypes) != 1 ||
+		notebookEgressNetworkPolicy.Spec.PolicyTypes[0] != netv1.PolicyTypeEgress {
+		return fmt.Errorf("invalid egress policy types: %v", notebookEgressNetworkPolicy.Spec.PolicyTypes)
+	}
+	if len(notebookEgressNetworkPolicy.Spec.Egress) != 1 {
+		return fmt.Errorf("expected exactly one unrestricted egress rule, got %d", len(notebookEgressNetworkPolicy.Spec.Egress))
+	}
+	if len(notebookEgressNetworkPolicy.Spec.Egress[0].To) != 0 ||
+		len(notebookEgressNetworkPolicy.Spec.Egress[0].Ports) != 0 {
+		return fmt.Errorf("expected the documented unrestricted egress rule, got %+v", notebookEgressNetworkPolicy.Spec.Egress[0])
+	}
+	if notebookEgressNetworkPolicy.Spec.PodSelector.MatchLabels[notebookNameLabelKey] != nbMeta.Name {
+		return fmt.Errorf("egress network policy does not select Notebook %v pods: %+v",
+			nbMeta.Name, notebookEgressNetworkPolicy.Spec.PodSelector)
+	}
+	return nil
 }
 
 func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {

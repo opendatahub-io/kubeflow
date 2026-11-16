@@ -225,6 +225,7 @@ var _ = BeforeSuite(func() {
 		Namespace:     odhNotebookControllerTestNamespace,
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		APIReader:     mgr.GetAPIReader(),
 		MLflowEnabled: true,
 		GatewayURL:    "gateway.example.com",
 	}).SetupWithManager(mgr)
@@ -236,6 +237,7 @@ var _ = BeforeSuite(func() {
 		Handler: &NotebookWebhook{
 			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 			Config:    mgr.GetConfig(),
 			Namespace: odhNotebookControllerTestNamespace,
 			KubeRbacProxyConfig: KubeRbacProxyConfig{

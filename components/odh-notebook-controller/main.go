@@ -30,16 +30,19 @@ import (
 
 	"go.uber.org/zap/zapcore"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 
 	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
+	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
 	configv1 "github.com/openshift/api/config/v1"
 	imagev1 "github.com/openshift/api/image/v1"
 	oauthv1 "github.com/openshift/api/oauth/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
+	libgocrypto "github.com/openshift/library-go/pkg/crypto"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
@@ -77,6 +80,27 @@ var intermediateCiphers = []uint16{
 	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
+// nextProtos enables HTTP/2 with HTTP/1.1 fallback on the TLS servers.
+var nextProtos = []string{"h2", "http/1.1"}
+
+// runtimeCipherIDs is the set of cipher suite IDs this Go runtime can
+// negotiate, excluding RC4, which RFC 7465 prohibits outright. Custom
+// profiles may name any suite in this set; built-in profile handling is
+// unaffected because Old, Intermediate, and Modern only name secure suites
+// plus the Old profile's legacy list.
+var runtimeCipherIDs = func() map[uint16]bool {
+	ids := make(map[uint16]bool)
+	for _, cs := range tls.CipherSuites() {
+		ids[cs.ID] = true
+	}
+	for _, cs := range tls.InsecureCipherSuites() {
+		if !strings.Contains(cs.Name, "RC4") {
+			ids[cs.ID] = true
+		}
+	}
+	return ids
+}()
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
@@ -104,6 +128,167 @@ func getControllerNamespace() (string, error) {
 	}
 
 	return "", fmt.Errorf("unable to determine the namespace")
+}
+
+// tlsBootstrap is the outcome of the startup TLS policy bootstrap: the TLS
+// options for the webhook and metrics servers plus the state the security
+// profile watcher needs.
+type tlsBootstrap struct {
+	opts                  []func(*tls.Config)
+	profile               configv1.TLSProfileSpec
+	hasOpenShiftConfigAPI bool
+	adherence             configv1.TLSAdherencePolicy
+	adherenceFetched      bool
+	adherencePolicyRead   bool
+}
+
+// bootstrapTLS reads the cluster TLS profile and adherence policy and builds
+// the TLS options for the webhook and metrics servers. Denied (401/403) and
+// other non-transient read failures are returned as errors so the controller
+// does not start with an unknown TLS posture.
+func bootstrapTLS(ctx context.Context, bootstrapClient client.Client) (*tlsBootstrap, error) {
+	boot := &tlsBootstrap{}
+	profile, err := tlspkg.FetchAPIServerTLSProfile(ctx, bootstrapClient)
+	if err != nil {
+		switch {
+		case apimeta.IsNoMatchError(err):
+			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+		case k8serr.IsNotFound(err):
+			setupLog.Info("APIServer resource not found, using hardened defaults")
+		case isTransientAPIError(err):
+			boot.hasOpenShiftConfigAPI = true // register watcher so it self-heals when the API recovers
+			setupLog.Info("Transient API error reading TLS profile, using hardened defaults", "error", err)
+		default:
+			return nil, fmt.Errorf("reading APIServer TLS profile: %w", err)
+		}
+		boot.opts = append(boot.opts, func(c *tls.Config) {
+			c.MinVersion = tls.VersionTLS12
+			c.CipherSuites = intermediateCiphers
+			c.NextProtos = nextProtos
+		})
+	} else {
+		boot.hasOpenShiftConfigAPI = true
+		boot.profile = profile
+	}
+
+	// Fetch the TLS adherence policy (OpenShift only, requires the APIServer CRD)
+	if boot.hasOpenShiftConfigAPI {
+		if err := fetchTLSAdherence(ctx, bootstrapClient, boot); err != nil {
+			return nil, err
+		}
+	}
+	if err == nil {
+		validated, err := validateProfileSpec(profile, boot.adherence, boot.adherencePolicyRead)
+		if err != nil {
+			return nil, fmt.Errorf("validating TLS profile: %w", err)
+		}
+		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(validated)
+		if len(unsupportedCiphers) > 0 {
+			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
+		}
+		boot.opts = append(boot.opts, tlsConfigFn, func(c *tls.Config) {
+			c.NextProtos = nextProtos
+		})
+	}
+	return boot, nil
+}
+
+// fetchTLSAdherence reads the TLS adherence policy. Denied (401/403) and other
+// non-transient reads are errors; NoMatchError and NotFound leave the policy
+// unset; transient errors keep the watcher registered so it self-heals when
+// the API recovers (OCP ref: cluster-machine-approver).
+func fetchTLSAdherence(ctx context.Context, bootstrapClient client.Client, boot *tlsBootstrap) error {
+	adherence, err := tlspkg.FetchAPIServerTLSAdherencePolicy(ctx, bootstrapClient)
+	if err != nil {
+		switch {
+		case apimeta.IsNoMatchError(err):
+			setupLog.Info("TLS adherence policy not available (non-OpenShift or pre-4.22 cluster)")
+		case k8serr.IsNotFound(err):
+			setupLog.Info("APIServer resource not found for TLS adherence policy, leaving it unset")
+		case isTransientAPIError(err):
+			boot.adherenceFetched = true
+			setupLog.Info("Transient API error fetching TLS adherence policy, watcher will retry", "error", err)
+		default:
+			return fmt.Errorf("reading APIServer TLS adherence policy: %w", err)
+		}
+		return nil
+	}
+	boot.adherenceFetched = true
+	boot.adherence = adherence
+	boot.adherencePolicyRead = true
+	return nil
+}
+
+// isTransientAPIError reports whether the API error may resolve on retry.
+func isTransientAPIError(err error) bool {
+	return k8serr.IsServiceUnavailable(err) ||
+		k8serr.IsTimeout(err) ||
+		k8serr.IsServerTimeout(err) ||
+		k8serr.IsTooManyRequests(err) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+// validateProfileSpec rejects TLS profiles that cannot be honored without a
+// silent substitution. Empty cipher lists below TLS 1.3 are rejected under
+// Strict or unknown adherence; all-unusable lists are always rejected.
+func validateProfileSpec(profile configv1.TLSProfileSpec, policy configv1.TLSAdherencePolicy, policyRead bool) (configv1.TLSProfileSpec, error) {
+	if profile.MinTLSVersion == "" {
+		return profile, fmt.Errorf("TLS profile minimum version must be set")
+	}
+	minVersion, err := libgocrypto.TLSVersion(string(profile.MinTLSVersion))
+	if err != nil {
+		return profile, fmt.Errorf("invalid minimum TLS version %q: %w", profile.MinTLSVersion, err)
+	}
+	// Go 1.22+ defaults the server minimum to TLS 1.2 only when tls.Config.MinVersion
+	// is unset; the explicit minimum set here needs no GODEBUG.
+	if minVersion >= tls.VersionTLS13 {
+		return profile, nil
+	}
+	if len(profile.Ciphers) == 0 {
+		if !policyRead {
+			return profile, fmt.Errorf("TLS profile has no cipher suites for minimum TLS version below 1.3 because adherence policy could not be read")
+		}
+		if platformtls.ShouldHonorClusterTLSProfile(policy) {
+			return profile, fmt.Errorf("TLS profile has no cipher suites for minimum TLS version below 1.3 under adherence policy %q", policy)
+		}
+		return profile, nil
+	}
+
+	usable := make([]string, 0, len(profile.Ciphers))
+	var dropped []string
+	for _, cipher := range profile.Ciphers {
+		if cipherUsableForTLS12(cipher) {
+			usable = append(usable, cipher)
+		} else {
+			dropped = append(dropped, cipher)
+		}
+	}
+	if len(usable) == 0 {
+		return profile, fmt.Errorf("no cipher suite usable with minimum TLS version %q: requested ciphers %v", profile.MinTLSVersion, profile.Ciphers)
+	}
+	if len(dropped) > 0 {
+		setupLog.Info("dropping TLS profile ciphers not usable for TLS <= 1.2 handshakes", "dropped", dropped)
+		profile.Ciphers = usable
+	}
+	return profile, nil
+}
+
+// cipherUsableForTLS12 reports whether name, in IANA or OpenSSL form, resolves
+// to a cipher suite ID that a TLS <= 1.2 handshake can negotiate. TLS 1.3-only
+// suites (IDs 0x1300-0x13ff) and IDs the Go runtime does not implement never
+// qualify.
+func cipherUsableForTLS12(name string) bool {
+	id, err := libgocrypto.CipherSuite(name)
+	if err != nil {
+		iana := libgocrypto.OpenSSLToIANACipherSuites([]string{name})
+		if len(iana) != 1 {
+			return false
+		}
+		if id, err = libgocrypto.CipherSuite(iana[0]); err != nil {
+			return false
+		}
+	}
+	return (id < 0x1300 || id > 0x13ff) && runtimeCipherIDs[id]
 }
 
 func main() {
@@ -147,13 +332,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fetch the cluster TLS security profile for webhook and metrics servers (OpenShift only)
-	nextProtos := []string{"h2", "http/1.1"}
-	var tlsOpts []func(*tls.Config)
-	var profile configv1.TLSProfileSpec
-	hasOpenShiftConfigAPI := false
+	// Fetch the cluster TLS security profile and adherence policy for the
+	// webhook and metrics servers (OpenShift only)
 	restCfg := ctrl.GetConfigOrDie()
-	bootstrapClient, err := client.New(restCfg, client.Options{Scheme: scheme})
+	// Bound the bootstrap client's requests, including REST mapper discovery,
+	// which the bootstrap context does not cover.
+	bootstrapCfg := rest.CopyConfig(restCfg)
+	bootstrapCfg.Timeout = 10 * time.Second
+	bootstrapClient, err := client.New(bootstrapCfg, client.Options{Scheme: scheme})
 	if err != nil {
 		setupLog.Error(err, "unable to create bootstrap client for TLS profile")
 		os.Exit(1)
@@ -161,50 +347,10 @@ func main() {
 
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bootstrapCancel()
-	if profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient); err != nil {
-		switch {
-		case apimeta.IsNoMatchError(err):
-			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
-		case k8serr.IsNotFound(err):
-			setupLog.Info("APIServer resource not found, using hardened defaults")
-		case k8serr.IsServiceUnavailable(err),
-			k8serr.IsTimeout(err),
-			k8serr.IsServerTimeout(err),
-			k8serr.IsTooManyRequests(err),
-			errors.Is(err, context.DeadlineExceeded):
-			hasOpenShiftConfigAPI = true // register watcher so it self-heals when the API recovers
-			setupLog.Info("Transient API error reading TLS profile, using hardened defaults", "error", err)
-		default:
-			setupLog.Error(err, "unable to read APIServer TLS profile, refusing to start with unknown TLS posture")
-			os.Exit(1)
-		}
-		tlsOpts = append(tlsOpts, func(c *tls.Config) {
-			c.MinVersion = tls.VersionTLS12
-			c.CipherSuites = intermediateCiphers
-			c.NextProtos = nextProtos
-		})
-	} else {
-		hasOpenShiftConfigAPI = true
-		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
-		if len(unsupportedCiphers) > 0 {
-			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
-		}
-		tlsOpts = append(tlsOpts, tlsConfigFn, func(c *tls.Config) {
-			c.NextProtos = nextProtos
-		})
-	}
-
-	// Fetch the TLS adherence policy (OpenShift only, requires the APIServer CRD)
-	tlsAdherenceFetched := false
-	var tlsAdherence configv1.TLSAdherencePolicy
-	if hasOpenShiftConfigAPI {
-		adherenceCtx, adherenceCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer adherenceCancel()
-		tlsAdherence, err = tlspkg.FetchAPIServerTLSAdherencePolicy(adherenceCtx, bootstrapClient)
-		if err != nil {
-			setupLog.Info("unable to fetch TLS adherence policy, watcher will retry", "error", err)
-		}
-		tlsAdherenceFetched = true // always register watcher; it self-heals when the API recovers (OCP ref: cluster-machine-approver)
+	tlsBoot, err := bootstrapTLS(bootstrapCtx, bootstrapClient)
+	if err != nil {
+		setupLog.Error(err, "refusing to start with unknown TLS posture")
+		os.Exit(1)
 	}
 
 	// Setup controller manager
@@ -212,7 +358,7 @@ func main() {
 		BindAddress:    metricsAddr,
 		SecureServing:  true,
 		FilterProvider: filters.WithAuthenticationAndAuthorization,
-		TLSOpts:        tlsOpts,
+		TLSOpts:        tlsBoot.opts,
 	}
 	if metricsCertPath != "" {
 		metricsOpts.CertDir = metricsCertPath
@@ -231,7 +377,7 @@ func main() {
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port:    webhookPort,
 			CertDir: webhookCertDir,
-			TLSOpts: tlsOpts,
+			TLSOpts: tlsBoot.opts,
 		}),
 	}
 
@@ -262,6 +408,7 @@ func main() {
 		Scheme:        mgr.GetScheme(),
 		Config:        mgr.GetConfig(),
 		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
+		APIReader:     mgr.GetAPIReader(),
 		MLflowEnabled: mlflowEnabled,
 		GatewayURL:    gatewayURL,
 	}).SetupWithManager(mgr); err != nil {
@@ -275,6 +422,7 @@ func main() {
 		Handler: &controllers.NotebookWebhook{
 			Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-webhook"),
 			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 			Config:    mgr.GetConfig(),
 			Namespace: namespace,
 			KubeRbacProxyConfig: controllers.KubeRbacProxyConfig{
@@ -311,21 +459,21 @@ func main() {
 	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts
 	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 	defer cancel()
-	if hasOpenShiftConfigAPI {
+	if tlsBoot.hasOpenShiftConfigAPI {
 		watcher := &tlspkg.SecurityProfileWatcher{
 			Client:                mgr.GetClient(),
-			InitialTLSProfileSpec: profile,
+			InitialTLSProfileSpec: tlsBoot.profile,
 			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
 				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
 				cancel()
 			},
 		}
-		if tlsAdherenceFetched {
-			watcher.InitialTLSAdherencePolicy = tlsAdherence
-			watcher.OnAdherencePolicyChange = func(_ context.Context, _, _ configv1.TLSAdherencePolicy) {
-				setupLog.Info("TLS adherence policy changed, initiating shutdown to reload")
-				cancel()
-			}
+		if tlsBoot.adherenceFetched {
+			watcher.InitialTLSAdherencePolicy = tlsBoot.adherence
+		}
+		watcher.OnAdherencePolicyChange = func(_ context.Context, _, _ configv1.TLSAdherencePolicy) {
+			setupLog.Info("TLS adherence policy changed, initiating shutdown to reload")
+			cancel()
 		}
 		if err := watcher.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to register TLS security profile watcher")

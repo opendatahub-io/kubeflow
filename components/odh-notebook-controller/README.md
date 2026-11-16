@@ -66,6 +66,82 @@ permission on the specific notebook resource in the specified namespace:
 oc get notebook example -n <YOUR_NAMESPACE>
 ```
 
+## NetworkPolicy contract compliance
+
+The controller owns the NetworkPolicies for every Notebook pod in the user
+project namespace. They are created with an owner reference to the Notebook and
+repaired in place when modified; the policy names are part of the lifecycle
+contract and are never renamed or deleted/recreated.
+
+| Policy | Purpose | Behaviour |
+|--------|---------|-----------|
+| `<notebook>-ctrl-np` | Notebook HTTP port `8888` | Allows the controller namespace (`redhat-ods-applications` on RHOAI) |
+| `<notebook>-kube-rbac-proxy-np` | kube-rbac-proxy port `8443` | Unrestricted sources, known port (documented compatibility rule) |
+| `<notebook>-egress-np` | Outbound traffic from the Notebook pod | `egress: - {}` (unrestricted egress) |
+
+The `8888` peer intentionally covers the whole controller namespace. That
+namespace is shared by the upstream notebook-controller, whose idle culler calls
+the Notebook Service on `8888`, this controller, and other platform workloads.
+Narrowing the peer requires an administrator-selected profile that must be
+passed down from the `Workbenches` CR by the Workbenches operator. That plumbing
+is not part of this component today, so the controller preserves the existing
+namespace-scoped behaviour.
+
+The `8443` rule has no `from` peer because gateway caller identity differs per
+platform (OpenShift router/HAProxy, Gateway API/istio, or host-network
+implementations). Control in depth is provided by kube-rbac-proxy, which
+terminates TLS and performs authentication and authorization before proxying to
+the Notebook on `8888`.
+
+The egress policy is required even though outbound traffic is unrestricted:
+notebooks reach external object storage, package and model registries, managed
+databases, and arbitrary user Services, which cannot be expressed as stable
+NetworkPolicy peers. The policy therefore documents the allow-all-egress
+carve-out and makes sure every Notebook workload is selected by an egress
+policy even when the namespace has no blanket platform policy. External
+controls (platform egress firewall/infrastructure policy) remain responsible
+for restricting outbound traffic.
+
+### Failure reporting
+
+If a required policy cannot be created or repaired, the controller emits a
+`NetworkPolicyReconcileFailed` Warning event on the Notebook and returns the
+error so the reconciliation is retried. This controller does not write Notebook
+readiness; readiness is reported independently by the upstream
+notebook-controller from StatefulSet and Pod status.
+
+If a same-named NetworkPolicy is controlled by another resource, the controller
+emits a `NetworkPolicyOwnershipConflict` Warning event and refuses to overwrite
+it. An unowned policy with that name is adopted by setting the Notebook
+controller reference and is then repaired to the desired spec and labels, so it
+is garbage-collected with the Notebook. This preserves the pre-existing behavior
+for same-named policies created outside the controller without taking over a
+policy that another resource owns. A same-named owner is only treated as a stale
+Notebook when its API version belongs to the `kubeflow.org` group and a
+supported Notebook version; an owner with the same kind and name from another
+API group is still reported as a conflict.
+
+Adopting an existing policy requires changing its owner references. OpenShift's
+`OwnerReferencesPermissionEnforcement` admission requires the `delete` verb on
+the policy for any owner-reference change, even when `blockOwnerDeletion` is
+false. The controller therefore keeps `delete` permission on NetworkPolicies,
+but it never deletes or recreates them; background garbage collection removes
+them with the Notebook.
+
+Because Kubernetes NetworkPolicy allow rules are additive, the unrestricted
+egress rule in `<notebook>-egress-np` can override a namespace-level deny-all
+egress policy for Notebook pods. Administrators must enforce outbound
+restrictions with platform-level controls (for example, an egress firewall)
+rather than relying solely on a namespace default-deny policy.
+
+### Verification
+
+```shell
+oc get networkpolicy -n <user-project> \
+  <notebook>-ctrl-np <notebook>-kube-rbac-proxy-np <notebook>-egress-np
+oc get networkpolicy -n <user-project> <notebook>-egress-np -o yaml
+```
+
 ## Developer docs
 
 Follow the instructions below if you want to extend the controller
