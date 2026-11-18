@@ -15,43 +15,59 @@ updates:
       - ".github/workflows/tls-lint.yml"
       - ".github/workflows/semgrep-tls.yml"
 
-  # only open security update PRs (see linked docs for explanation of `open-pull-requests-limit: 0`)
-  #  https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates#overriding-the-default-behavior-with-a-configuration-file
-  #  https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#open-pull-requests-limit
-
-  # security PRs need to be further enabled in the repository settings
-  #  https://docs.github.com/en/code-security/dependabot/dependabot-auto-triage-rules/customizing-auto-triage-rules-to-prioritize-dependabot-alerts
-
-  - package-ecosystem: "gomod"
-    open-pull-requests-limit: 0
-    directory: "/components/notebook-controller"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "fix(deps)"
-    # https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates#overriding-the-default-behavior-with-a-configuration-file
-    groups:
-      go:
-        applies-to: security-updates
+  # Security update PRs only. `open-pull-requests-limit: 0` disables version
+  # updates; the `ignore.update-types` rules do the same and do not apply to
+  # security updates.
+  # https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates#overriding-the-default-behavior-with-a-configuration-file
+  # https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#open-pull-requests-limit
+  #
+  # Security PRs also need to be enabled in the repository settings:
+  # https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates#enabling-or-disabling-dependabot-security-updates-for-an-individual-repository
+  #
+  # `directories` lets one group update every module below in a single PR.
+  # Groups cover families that must move together. A dependency that matches
+  # no group still gets its own security PR. There is no "*" group, so
+  # unrelated packages are not batched together.
 
   - package-ecosystem: "gomod"
-    open-pull-requests-limit: 0
-    directory: "/components/odh-notebook-controller"
+    directories:
+      - "/components/notebook-controller"
+      - "/components/odh-notebook-controller"
+      - "/components/common"
     schedule:
       interval: "weekly"
-    commit-message:
-      prefix: "fix(deps)"
-    groups:
-      go:
-        applies-to: security-updates
-
-  - package-ecosystem: "gomod"
     open-pull-requests-limit: 0
-    directory: "/components/common"
-    schedule:
-      interval: "weekly"
     commit-message:
       prefix: "fix(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     groups:
-      go:
+      opentelemetry:
         applies-to: security-updates
+        patterns:
+          - "go.opentelemetry.io/*"
+      golang-org:
+        applies-to: security-updates
+        patterns:
+          - "golang.org/*"
+      kubernetes:
+        applies-to: security-updates
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+      google-golang:
+        applies-to: security-updates
+        patterns:
+          - "google.golang.org/*"
+      openapi:
+        applies-to: security-updates
+        patterns:
+          - "github.com/go-openapi/*"
+      prometheus:
+        applies-to: security-updates
+        patterns:
+          - "github.com/prometheus/*"
