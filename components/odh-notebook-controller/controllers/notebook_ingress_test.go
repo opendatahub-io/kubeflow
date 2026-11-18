@@ -512,3 +512,62 @@ func TestNotebookIngressAssignment(t *testing.T) {
 		})
 	}
 }
+
+func TestNotebookRouteCopiesDashboardHostnames(t *testing.T) {
+	const dashboardHost = "rh-ai.apps.example.com"
+	cases := []struct {
+		name      string
+		dashboard *gatewayv1.HTTPRoute
+		want      []gatewayv1.Hostname
+	}{
+		{name: "no dashboard route"},
+		{
+			name: "hostname-less rhods-dashboard",
+			dashboard: &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{
+				Name: "rhods-dashboard", Namespace: centralTestNamespace,
+			}},
+		},
+		{
+			name: "rhods-dashboard hostname",
+			dashboard: &gatewayv1.HTTPRoute{
+				ObjectMeta: metav1.ObjectMeta{Name: "rhods-dashboard", Namespace: centralTestNamespace},
+				Spec:       gatewayv1.HTTPRouteSpec{Hostnames: []gatewayv1.Hostname{dashboardHost}},
+			},
+			want: []gatewayv1.Hostname{dashboardHost},
+		},
+		{
+			name: "odh-dashboard hostname",
+			dashboard: &gatewayv1.HTTPRoute{
+				ObjectMeta: metav1.ObjectMeta{Name: "odh-dashboard", Namespace: centralTestNamespace},
+				Spec:       gatewayv1.HTTPRouteSpec{Hostnames: []gatewayv1.Hostname{dashboardHost}},
+			},
+			want: []gatewayv1.Hostname{dashboardHost},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, gatewayv1.Install, nbv1.AddToScheme} {
+				require.NoError(t, add(scheme))
+			}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}
+			notebook := &nbv1.Notebook{ObjectMeta: metav1.ObjectMeta{Name: "book", Namespace: ns.Name}}
+			original := NewNotebookHTTPRoute(notebook, centralTestNamespace, defaultNotebookIngress())
+			objects := []client.Object{ns, notebook, original}
+			if tc.dashboard != nil {
+				objects = append(objects, tc.dashboard)
+			}
+			cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			r := &OpenshiftNotebookReconciler{
+				Client: cli, Namespace: centralTestNamespace, Log: logr.Discard(), EventRecorder: record.NewFakeRecorder(1),
+			}
+
+			require.NoError(t, r.ReconcileHTTPRoute(notebook, ctx, nil))
+
+			var route gatewayv1.HTTPRoute
+			require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(original), &route))
+			require.Equal(t, tc.want, route.Spec.Hostnames)
+		})
+	}
+}

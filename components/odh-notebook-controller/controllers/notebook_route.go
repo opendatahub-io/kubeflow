@@ -161,6 +161,14 @@ func (r *OpenshiftNotebookReconciler) reconcileHTTPRoute(notebook *nbv1.Notebook
 	}
 
 	desiredHTTPRoute := newHTTPRoute(notebook, r.Namespace, ingress)
+	hostnames, err := r.dashboardRouteHostnames(ctx)
+	if err != nil {
+		log.Error(err, "Unable to read dashboard HTTPRoute hostnames")
+		return err
+	}
+	// Match the dashboard route so /notebook/<ns>/<name> stays in the same Envoy virtual host.
+	// A hostname-less dashboard route must stay hostname-less here too.
+	desiredHTTPRoute.Spec.Hostnames = hostnames
 
 	// Create the HTTPRoute if it does not already exist
 	foundHTTPRoute := &gatewayv1.HTTPRoute{}
@@ -293,6 +301,26 @@ func (r *OpenshiftNotebookReconciler) notebookIngress(ctx context.Context, names
 		ingresses = append(ingresses, defaultNotebookIngress())
 	}
 	return ingressassignment.Resolve(ctx, r.Client, namespaceName, ingresses)
+}
+
+// dashboardRouteHostnames returns the hostname list on the shared dashboard HTTPRoute.
+// rhods-dashboard is the RHOAI name; odh-dashboard is the ODH name. An empty result
+// means every route on the Gateway stays hostname-less.
+func (r *OpenshiftNotebookReconciler) dashboardRouteHostnames(ctx context.Context) ([]gatewayv1.Hostname, error) {
+	for _, name := range []string{"rhods-dashboard", "odh-dashboard"} {
+		route := &gatewayv1.HTTPRoute{}
+		err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: r.Namespace}, route)
+		if apierrs.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(route.Spec.Hostnames) > 0 {
+			return append([]gatewayv1.Hostname(nil), route.Spec.Hostnames...), nil
+		}
+	}
+	return nil, nil
 }
 
 // ReconcileHTTPRoute will manage the creation, update and deletion of the
