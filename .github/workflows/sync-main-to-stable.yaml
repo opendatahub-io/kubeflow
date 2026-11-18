@@ -10,6 +10,7 @@ permissions: {}
 env:
   SOURCE_BRANCH: main
   TARGET_BRANCH: stable
+  MERGE_BRANCH: sync/main-to-stable
 
 jobs:
   # ── 1. Check whether main has commits not yet in stable ──────────────────────
@@ -19,7 +20,6 @@ jobs:
       contents: read
     outputs:
       ahead: ${{ steps.check.outputs.ahead }}
-      merge_branch: ${{ steps.name.outputs.merge_branch }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,28 +38,71 @@ jobs:
           echo "$AHEAD commit(s) in main not yet in stable."
         fi
 
-    - name: Set merge branch name
-      id: name
-      run: echo "merge_branch=sync/main-to-stable" >> "$GITHUB_OUTPUT"
+  # ── 2. Reset the sync branch from stable so sync-branches can use a normal push ─
+  prepare:
+    needs: check
+    if: needs.check.outputs.ahead != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      previous_tip: ${{ steps.reset.outputs.previous_tip }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
 
-  # ── 2. Create the merge branch and apply changes (shared logic) ───────────────
+    - name: Reset sync branch from stable
+      id: reset
+      run: |
+        set -e
+        git fetch origin "$TARGET_BRANCH"
+        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+        PREV=$(git rev-parse "origin/$MERGE_BRANCH" 2>/dev/null || echo "")
+        echo "previous_tip=$PREV" >> "$GITHUB_OUTPUT"
+        git checkout -B "$MERGE_BRANCH" "origin/$TARGET_BRANCH"
+        git push --force-with-lease origin "$MERGE_BRANCH"
+
+  # ── 3. Merge main into the sync branch (shared logic) ─────────────────────────
   # Delegates to sync-branches so the merge/conflict-resolution logic lives in
   # one place and is reused by any future sync workflow (e.g. stable→v1.10-branch).
   sync:
-    needs: check
+    needs: [check, prepare]
     if: needs.check.outputs.ahead != '0'
     uses: ./.github/workflows/sync-branches.yaml
     permissions:
       contents: write
     with:
       source: main
-      target: ${{ needs.check.outputs.merge_branch }}
-      base: stable
+      target: sync/main-to-stable
 
-  # ── 3. Open (or reuse) a pull request ─────────────────────────────────────────
+  # If sync skipped its push (e.g. only protected-path changes), restore the tip
+  # prepare overwrote so we don't leave sync/main-to-stable identical to stable.
+  restore:
+    needs: [prepare, sync]
+    if: needs.sync.outputs.pushed != 'true' && needs.prepare.outputs.previous_tip != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Restore previous sync branch tip
+      env:
+        PREVIOUS_TIP: ${{ needs.prepare.outputs.previous_tip }}
+      run: |
+        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+        git push --force-with-lease origin "$PREVIOUS_TIP:refs/heads/$MERGE_BRANCH"
+        echo "Restored $MERGE_BRANCH to $PREVIOUS_TIP (sync had nothing to push)."
+
+  # ── 4. Open (or reuse) a pull request ─────────────────────────────────────────
   create-pr:
     needs: [check, sync]
-    if: needs.check.outputs.ahead != '0'
+    if: needs.check.outputs.ahead != '0' && needs.sync.outputs.pushed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,35 +131,7 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GHA_SECRET_PAT }}
 
-    - name: Check if merge branch was pushed and differs from stable
-      id: diff_check
-      env:
-        MERGE_BRANCH: ${{ needs.check.outputs.merge_branch }}
-      run: |
-        # Fetch the specific sync branch by name — git fetch origin without args
-        # uses the checkout refspec which may not include newly created branches.
-        git fetch origin "$TARGET_BRANCH" "$MERGE_BRANCH" 2>/dev/null || \
-          git fetch origin "$TARGET_BRANCH" 2>/dev/null || true
-        # sync-branches skips the push when the merged result is identical to the
-        # target (e.g. all incoming changes were to protected files).
-        if ! git rev-parse --verify "origin/${MERGE_BRANCH}" >/dev/null 2>&1; then
-          echo "Merge branch was not pushed — no effective changes after protected-path restore. Skipping PR."
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        # Guard against a merge branch whose tree is identical to stable (should
-        # not happen given the push-skip above, but kept as a safety net).
-        if git diff --quiet "origin/$TARGET_BRANCH" "origin/${MERGE_BRANCH}"; then
-          echo "Merge branch tree is identical to stable. Skipping PR."
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        echo "skip=false" >> "$GITHUB_OUTPUT"
-
     - name: Open or reuse pull request
-      if: steps.diff_check.outputs.skip != 'true'
-      env:
-        MERGE_BRANCH: ${{ needs.check.outputs.merge_branch }}
       run: |
         # Reuse an existing open PR for the same branch if one exists.
         # Use `// empty` so jq emits nothing (not "null") on an empty list.
