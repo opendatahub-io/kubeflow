@@ -30,13 +30,28 @@ jobs:
       id: check
       run: |
         git fetch origin "$SOURCE_BRANCH" "$TARGET_BRANCH"
+        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+
         AHEAD=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH")
-        echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
         if [[ "$AHEAD" -eq 0 ]]; then
+          echo "ahead=0" >> "$GITHUB_OUTPUT"
           echo "stable is already up to date with main. Nothing to do."
-        else
-          echo "$AHEAD commit(s) in main not yet in stable."
+          exit 0
         fi
+
+        # While a sync PR is open, skip if the sync branch already contains both
+        # tips — otherwise every daily run would remake the merge, force-push,
+        # re-trigger CI, and possibly dismiss approvals.
+        if git rev-parse --verify "origin/$MERGE_BRANCH" >/dev/null 2>&1 \
+          && git merge-base --is-ancestor "origin/$SOURCE_BRANCH" "origin/$MERGE_BRANCH" \
+          && git merge-base --is-ancestor "origin/$TARGET_BRANCH" "origin/$MERGE_BRANCH"; then
+          echo "ahead=0" >> "$GITHUB_OUTPUT"
+          echo "Sync branch already contains main and stable. Nothing to do."
+          exit 0
+        fi
+
+        echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+        echo "$AHEAD commit(s) in main not yet in stable."
 
   # ── 2. Reset the sync branch from stable so sync-branches can use a normal push ─
   prepare:
@@ -61,6 +76,10 @@ jobs:
         git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
         PREV=$(git rev-parse "origin/$MERGE_BRANCH" 2>/dev/null || echo "")
         echo "previous_tip=$PREV" >> "$GITHUB_OUTPUT"
+        # Keep previous tip reachable for restore (force-push below orphans it).
+        if [[ -n "$PREV" ]]; then
+          git push --force origin "$PREV:refs/sync-backup/main-to-stable"
+        fi
         git checkout -B "$MERGE_BRANCH" "origin/$TARGET_BRANCH"
         git push --force-with-lease origin "$MERGE_BRANCH"
 
@@ -77,11 +96,11 @@ jobs:
       source: main
       target: sync/main-to-stable
 
-  # If sync skipped its push (e.g. only protected-path changes), restore the tip
-  # prepare overwrote so we don't leave sync/main-to-stable identical to stable.
+  # If sync skipped its push or failed after prepare, restore the tip prepare
+  # overwrote so we don't leave sync/main-to-stable identical to stable.
   restore:
     needs: [prepare, sync]
-    if: needs.sync.outputs.pushed != 'true' && needs.prepare.outputs.previous_tip != ''
+    if: ${{ !cancelled() && needs.sync.outputs.pushed != 'true' && needs.prepare.outputs.previous_tip != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -95,9 +114,11 @@ jobs:
       env:
         PREVIOUS_TIP: ${{ needs.prepare.outputs.previous_tip }}
       run: |
-        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+        set -e
+        git fetch origin "+refs/sync-backup/main-to-stable:refs/sync-backup/main-to-stable"
         git push --force-with-lease origin "$PREVIOUS_TIP:refs/heads/$MERGE_BRANCH"
-        echo "Restored $MERGE_BRANCH to $PREVIOUS_TIP (sync had nothing to push)."
+        git push origin --delete refs/sync-backup/main-to-stable 2>/dev/null || true
+        echo "Restored $MERGE_BRANCH to $PREVIOUS_TIP (sync did not push a new tip)."
 
   # ── 4. Open (or reuse) a pull request ─────────────────────────────────────────
   create-pr:
@@ -133,6 +154,9 @@ jobs:
 
     - name: Open or reuse pull request
       run: |
+        # Drop the prepare backup ref; sync pushed a new tip successfully.
+        git push origin --delete refs/sync-backup/main-to-stable 2>/dev/null || true
+
         # Reuse an existing open PR for the same branch if one exists.
         # Use `// empty` so jq emits nothing (not "null") on an empty list.
         EXISTING=$(gh pr list \
