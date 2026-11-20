@@ -1,0 +1,33 @@
+name: API contract checks
+
+# Onboards this repository to the RHOAI API contract compatibility checks.
+# See https://github.com/red-hat-data-services/api-contract-tests and
+# https://redhat.atlassian.net/browse/RHOAIENG-103183.
+#
+# This file is downstream-only (opendatahub-io); keep it across upstream syncs.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  crd-contract:
+    # Baseline: tag v1.10.0-17 (newest GA release tag at onboarding time,
+    # 2026-11-20) — the RHOAI release the contract is pinned against.
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-crd-check.yml@latest
+    with:
+      crd-glob: components/notebook-controller/config/crd/bases/*.yaml
+      baseline-refs: e075c5cd52a36ef5efb013cd011be3cf43cce86c
+      mode: enforce
+
+  coverage:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-coverage-check.yml@latest
+    with:
+      crd-globs: components/notebook-controller/config/crd/bases/*.yaml
+      # Excluded: vendored CRDs owned by other projects (Gateway API,
+      # OpenShift ImageStream, kubeflow.org Notebook, opendatahub.io DSPA),
+      # copied into odh-notebook-controller for local testing only.
+      crd-exclude-globs: components/odh-notebook-controller/config/crd/external/*.yaml
+      yq-version: "4.45.1"
+      mode: enforce
