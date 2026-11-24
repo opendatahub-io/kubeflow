@@ -52,6 +52,16 @@ jobs:
       ahead: ${{ steps.check.outputs.ahead }}
       open_pr: ${{ steps.check.outputs.open_pr }}
     steps:
+    # Fail before prepare/sync so a missing PAT cannot leave a stranded sync tip.
+    - name: Require GHA_SECRET_PAT
+      env:
+        GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
+      run: |
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "::error::Repository Actions secret GHA_SECRET_PAT is not configured (or empty). Add a PAT with contents + pull-requests access so sync can open PRs that trigger pull_request CI. Without it, prepare/sync would push a merge branch and create-pr would fail."
+          exit 1
+        fi
+
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -198,6 +208,13 @@ jobs:
       PR_BODY: ${{ inputs.pr_body }}
       OPEN_PR_ONLY: ${{ needs.check.outputs.open_pr }}
     steps:
+    - name: Require GHA_SECRET_PAT
+      run: |
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "::error::Repository Actions secret GHA_SECRET_PAT is not configured (or empty). Cannot open or refresh the sync PR."
+          exit 1
+        fi
+
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
