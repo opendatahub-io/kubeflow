@@ -15,7 +15,8 @@ repos:
         name: golangci-lint (notebook-controller)
         entry: bash -c 'cd components/notebook-controller && golangci-lint run --timeout=5m ./...'
         language: golang
-        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2']
+        language_version: '1.27.3'
+        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0']
         files: ^components/notebook-controller/.*\.go$
         pass_filenames: false
         types: [go]
@@ -24,7 +25,8 @@ repos:
         name: golangci-lint (odh-notebook-controller)
         entry: bash -c 'cd components/odh-notebook-controller && golangci-lint run --timeout=5m ./...'
         language: golang
-        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2']
+        language_version: '1.27.3'
+        additional_dependencies: ['github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0']
         files: ^components/odh-notebook-controller/.*\.go$
         pass_filenames: false
         types: [go]

@@ -1,12 +1,13 @@
 module github.com/kubeflow/kubeflow/components/notebook-controller
 
-go 1.26.10
+go 1.27.3
 
 require (
 	github.com/go-logr/logr v1.4.4
 	github.com/kubeflow/kubeflow/components/common v0.0.0-20220218084159-4ad0158e955e
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.41.0
+	github.com/opendatahub-io/operator-chaos v0.0.0-20260525094355-9e6ac9668b9a
 	github.com/prometheus/client_golang v1.23.2
 
 	// Used versions of Kubernetes API compatible with controller-runtime v0.23.3.
@@ -15,8 +16,6 @@ require (
 	k8s.io/client-go v0.35.2
 	sigs.k8s.io/controller-runtime v0.23.3
 )
-
-require github.com/opendatahub-io/operator-chaos v0.0.0-20260525094355-9e6ac9668b9a
 
 require (
 	cel.dev/expr v0.25.2 // indirect
