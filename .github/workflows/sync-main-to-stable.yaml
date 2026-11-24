@@ -7,133 +7,19 @@ on:
 
 permissions: {}
 
-env:
-  SOURCE_BRANCH: main
-  TARGET_BRANCH: stable
-  MERGE_BRANCH: sync/main-to-stable
-
 jobs:
-  # ── 1. Check whether main has commits not yet in stable ──────────────────────
-  check:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      ahead: ${{ steps.check.outputs.ahead }}
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-
-    - name: Check if main has new commits not in stable
-      id: check
-      run: |
-        git fetch origin "$SOURCE_BRANCH" "$TARGET_BRANCH"
-        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
-
-        AHEAD=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH")
-        if [[ "$AHEAD" -eq 0 ]]; then
-          echo "ahead=0" >> "$GITHUB_OUTPUT"
-          echo "stable is already up to date with main. Nothing to do."
-          exit 0
-        fi
-
-        # While a sync PR is open, skip if the sync branch already contains both
-        # tips — otherwise every daily run would remake the merge, force-push,
-        # re-trigger CI, and possibly dismiss approvals.
-        if git rev-parse --verify "origin/$MERGE_BRANCH" >/dev/null 2>&1 \
-          && git merge-base --is-ancestor "origin/$SOURCE_BRANCH" "origin/$MERGE_BRANCH" \
-          && git merge-base --is-ancestor "origin/$TARGET_BRANCH" "origin/$MERGE_BRANCH"; then
-          echo "ahead=0" >> "$GITHUB_OUTPUT"
-          echo "Sync branch already contains main and stable. Nothing to do."
-          exit 0
-        fi
-
-        echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
-        echo "$AHEAD commit(s) in main not yet in stable."
-
-  # ── 2. Reset the sync branch from stable so sync-branches can use a normal push ─
-  prepare:
-    needs: check
-    if: needs.check.outputs.ahead != '0'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      previous_tip: ${{ steps.reset.outputs.previous_tip }}
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-
-    - name: Reset sync branch from stable
-      id: reset
-      run: |
-        set -e
-        git fetch origin "$TARGET_BRANCH"
-        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
-        PREV=$(git rev-parse "origin/$MERGE_BRANCH" 2>/dev/null || echo "")
-        echo "previous_tip=$PREV" >> "$GITHUB_OUTPUT"
-        # Keep previous tip reachable for restore (force-push below orphans it).
-        if [[ -n "$PREV" ]]; then
-          git push --force origin "$PREV:refs/sync-backup/main-to-stable"
-        fi
-        git checkout -B "$MERGE_BRANCH" "origin/$TARGET_BRANCH"
-        git push --force-with-lease origin "$MERGE_BRANCH"
-
-  # ── 3. Merge main into the sync branch (shared logic) ─────────────────────────
-  # Delegates to sync-branches so the merge/conflict-resolution logic lives in
-  # one place and is reused by any future sync workflow (e.g. stable→v1.10-branch).
   sync:
-    needs: [check, prepare]
-    if: needs.check.outputs.ahead != '0'
-    uses: ./.github/workflows/sync-branches.yaml
-    permissions:
-      contents: write
-    with:
-      source: main
-      target: sync/main-to-stable
-
-  # If sync skipped its push or failed after prepare, restore the tip prepare
-  # overwrote so we don't leave sync/main-to-stable identical to stable.
-  restore:
-    needs: [prepare, sync]
-    if: ${{ !cancelled() && needs.sync.outputs.pushed != 'true' && needs.prepare.outputs.previous_tip != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-
-    - name: Restore previous sync branch tip
-      env:
-        PREVIOUS_TIP: ${{ needs.prepare.outputs.previous_tip }}
-      run: |
-        set -e
-        git fetch origin "+refs/sync-backup/main-to-stable:refs/sync-backup/main-to-stable"
-        git push --force-with-lease origin "$PREVIOUS_TIP:refs/heads/$MERGE_BRANCH"
-        git push origin --delete refs/sync-backup/main-to-stable 2>/dev/null || true
-        echo "Restored $MERGE_BRANCH to $PREVIOUS_TIP (sync did not push a new tip)."
-
-  # ── 4. Open (or reuse) a pull request ─────────────────────────────────────────
-  create-pr:
-    needs: [check, sync]
-    if: needs.check.outputs.ahead != '0' && needs.sync.outputs.pushed == 'true'
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/sync-via-pr.yaml
+    secrets: inherit
     permissions:
       contents: write
       pull-requests: write
-    env:
-      # PAT so PR open/update events trigger pull_request CI (GITHUB_TOKEN cannot).
-      GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
-      # Defined here so backticks are plain YAML characters, avoiding
-      # heredoc-inside-run indentation issues that break YAML parsing.
-      PR_BODY: |
+    with:
+      source: main
+      target: stable
+      merge_branch: sync/main-to-stable
+      pr_title: "chore: sync main → stable"
+      pr_body: |
         Automated daily sync of `main` into `stable`.
 
         **What this PR does**
@@ -145,42 +31,3 @@ jobs:
         - [ ] CI is green
 
         > Generated by the *Sync main → stable (PR)* workflow.
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.GHA_SECRET_PAT }}
-
-    - name: Open or reuse pull request
-      run: |
-        # Drop the prepare backup ref; sync pushed a new tip successfully.
-        git push origin --delete refs/sync-backup/main-to-stable 2>/dev/null || true
-
-        # Reuse an existing open PR for the same branch if one exists.
-        # Use `// empty` so jq emits nothing (not "null") on an empty list.
-        EXISTING=$(gh pr list \
-          --head "$MERGE_BRANCH" \
-          --base "$TARGET_BRANCH" \
-          --state open \
-          --json number \
-          --jq '.[0].number // empty')
-
-        if [[ -n "$EXISTING" ]]; then
-          # sync-branches pushed with GITHUB_TOKEN, which does not re-trigger CI on
-          # an existing PR. Push an empty commit with the PAT so checks re-run.
-          git fetch origin "$MERGE_BRANCH"
-          git checkout "$MERGE_BRANCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore: trigger CI for sync PR"
-          git push origin "$MERGE_BRANCH"
-          echo "PR #$EXISTING already open for $MERGE_BRANCH — triggered CI refresh."
-          exit 0
-        fi
-
-        gh pr create \
-          --base "$TARGET_BRANCH" \
-          --head "$MERGE_BRANCH" \
-          --title "chore: sync main → stable" \
-          --body "$PR_BODY"
