@@ -96,7 +96,10 @@ jobs:
         BACKUP_REF="refs/sync-backup/${MERGE_BRANCH//\//-}"
         git fetch origin "$TARGET_BRANCH"
         git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
-        PREV=$(git rev-parse "origin/$MERGE_BRANCH" 2>/dev/null || echo "")
+        # --verify is required: plain rev-parse prints the ref name on stdout
+        # even when it does not exist, which makes PREV non-empty and breaks the
+        # backup push on the first run (no sync branch yet).
+        PREV=$(git rev-parse --verify "origin/$MERGE_BRANCH" 2>/dev/null || true)
         echo "previous_tip=$PREV" >> "$GITHUB_OUTPUT"
         # Keep previous tip reachable for restore (force-push below orphans it).
         if [[ -n "$PREV" ]]; then
