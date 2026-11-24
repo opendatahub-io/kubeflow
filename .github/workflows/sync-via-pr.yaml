@@ -25,6 +25,10 @@ on:
         description: "Body markdown for the opened sync PR"
         required: true
         type: string
+    secrets:
+      GHA_SECRET_PAT:
+        description: "PAT used to open/refresh sync PRs so pull_request CI runs"
+        required: true
 
 # Serialize runs that share a merge branch so prepare/restore cannot race.
 concurrency:

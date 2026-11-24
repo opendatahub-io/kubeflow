@@ -15,7 +15,8 @@ permissions: {}
 jobs:
   sync:
     uses: ./.github/workflows/sync-via-pr.yaml
-    secrets: inherit
+    secrets:
+      GHA_SECRET_PAT: ${{ secrets.GHA_SECRET_PAT }}
     permissions:
       contents: write
     with:
