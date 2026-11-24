@@ -26,6 +26,11 @@ on:
         required: true
         type: string
 
+# Serialize runs that share a merge branch so prepare/restore cannot race.
+concurrency:
+  group: sync-via-pr-${{ inputs.merge_branch }}
+  cancel-in-progress: false
+
 permissions: {}
 
 env:
@@ -34,13 +39,14 @@ env:
   MERGE_BRANCH: ${{ inputs.merge_branch }}
 
 jobs:
-  # ── 1. Check whether source has commits not yet in target ────────────────────
+  # ── 1. Decide whether to rebuild, only open a PR, or no-op ───────────────────
   check:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       ahead: ${{ steps.check.outputs.ahead }}
+      open_pr: ${{ steps.check.outputs.open_pr }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,25 +55,40 @@ jobs:
 
     - name: Check if source has new commits not in target
       id: check
+      env:
+        # PAT so gh pr list works even if GITHUB_TOKEN lacks pull-requests:read.
+        GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
       run: |
+        echo "ahead=0" >> "$GITHUB_OUTPUT"
+        echo "open_pr=false" >> "$GITHUB_OUTPUT"
+
         git fetch origin "$SOURCE_BRANCH" "$TARGET_BRANCH"
         git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
 
         AHEAD=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH")
         if [[ "$AHEAD" -eq 0 ]]; then
-          echo "ahead=0" >> "$GITHUB_OUTPUT"
           echo "$TARGET_BRANCH is already up to date with $SOURCE_BRANCH. Nothing to do."
           exit 0
         fi
 
-        # While a sync PR is open, skip if the sync branch already contains both
-        # tips — otherwise every daily run would remake the merge, force-push,
-        # re-trigger CI, and possibly dismiss approvals.
+        # Sync branch already contains both tips: either an open PR is waiting
+        # (skip), or a prior run pushed the merge but failed to open the PR
+        # (retry create-pr only — do not rebuild).
         if git rev-parse --verify "origin/$MERGE_BRANCH" >/dev/null 2>&1 \
           && git merge-base --is-ancestor "origin/$SOURCE_BRANCH" "origin/$MERGE_BRANCH" \
           && git merge-base --is-ancestor "origin/$TARGET_BRANCH" "origin/$MERGE_BRANCH"; then
-          echo "ahead=0" >> "$GITHUB_OUTPUT"
-          echo "Sync branch already contains $SOURCE_BRANCH and $TARGET_BRANCH. Nothing to do."
+          EXISTING=$(gh pr list \
+            --head "$MERGE_BRANCH" \
+            --base "$TARGET_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [[ -n "$EXISTING" ]]; then
+            echo "Sync branch already contains $SOURCE_BRANCH and $TARGET_BRANCH with open PR #$EXISTING. Nothing to do."
+            exit 0
+          fi
+          echo "open_pr=true" >> "$GITHUB_OUTPUT"
+          echo "Sync branch already contains both tips but no open PR — will retry PR creation."
           exit 0
         fi
 
@@ -147,11 +168,23 @@ jobs:
   # ── 4. Open (or reuse) a pull request ─────────────────────────────────────────
   create-pr:
     needs: [check, sync]
-    if: needs.check.outputs.ahead != '0' && needs.sync.outputs.pushed == 'true'
+    # open_pr retries after a stranded sync push; otherwise require a fresh push.
+    # always() so a skipped sync (open_pr path) does not auto-skip this job.
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.check.result == 'success' &&
+      (
+        needs.check.outputs.open_pr == 'true' ||
+        (
+          needs.check.outputs.ahead != '0' &&
+          needs.sync.result == 'success' &&
+          needs.sync.outputs.pushed == 'true'
+        )
+      )
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+    # PAT authenticates gh/git; do not also grant GITHUB_TOKEN write.
+    permissions: {}
     env:
       # PAT so PR open/update events trigger pull_request CI (GITHUB_TOKEN cannot).
       GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
@@ -159,6 +192,7 @@ jobs:
       # Defined as an input/env so backticks are plain YAML characters, avoiding
       # heredoc-inside-run indentation issues that break YAML parsing.
       PR_BODY: ${{ inputs.pr_body }}
+      OPEN_PR_ONLY: ${{ needs.check.outputs.open_pr }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,7 +203,7 @@ jobs:
     - name: Open or reuse pull request
       run: |
         BACKUP_REF="refs/sync-backup/${MERGE_BRANCH//\//-}"
-        # Drop the prepare backup ref; sync pushed a new tip successfully.
+        # Drop the prepare backup ref if present; sync pushed a new tip successfully.
         git push origin --delete "$BACKUP_REF" 2>/dev/null || true
 
         # Reuse an existing open PR for the same branch if one exists.
@@ -184,13 +218,18 @@ jobs:
         if [[ -n "$EXISTING" ]]; then
           # sync-branches pushed with GITHUB_TOKEN, which does not re-trigger CI on
           # an existing PR. Push an empty commit with the PAT so checks re-run.
-          git fetch origin "$MERGE_BRANCH"
-          git checkout "$MERGE_BRANCH"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore: trigger CI for sync PR"
-          git push origin "$MERGE_BRANCH"
-          echo "PR #$EXISTING already open for $MERGE_BRANCH — triggered CI refresh."
+          # Skip the empty commit when we only came here to open a missing PR.
+          if [[ "$OPEN_PR_ONLY" != "true" ]]; then
+            git fetch origin "$MERGE_BRANCH"
+            git checkout "$MERGE_BRANCH"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: trigger CI for sync PR"
+            git push origin "$MERGE_BRANCH"
+            echo "PR #$EXISTING already open for $MERGE_BRANCH — triggered CI refresh."
+          else
+            echo "PR #$EXISTING already open for $MERGE_BRANCH — nothing to do."
+          fi
           exit 0
         fi
 
