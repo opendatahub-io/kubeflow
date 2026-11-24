@@ -83,17 +83,6 @@ func isControlledByNotebook(obj metav1.Object, notebook metav1.Object) bool {
 	return ref != nil && ref.UID == notebook.GetUID()
 }
 
-// copyOwnerReferences copies ownerReferences from desired to live, returning
-// true when they differ. This upgrades stale kubeflow.org/v1beta1 owner refs
-// to kubeflow.org/v1 without requiring a child-object recreate.
-func copyOwnerReferences(from, to metav1.Object) bool {
-	if reflect.DeepEqual(from.GetOwnerReferences(), to.GetOwnerReferences()) {
-		return false
-	}
-	to.SetOwnerReferences(from.GetOwnerReferences())
-	return true
-}
-
 // NotebookReconciler reconciles a Notebook object
 type NotebookReconciler struct {
 	client.Client
@@ -213,8 +202,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Update the foundStateful object and write the result back if there are any changes
-	if !justCreated && (reconcilehelper.CopyStatefulSetFields(ss, foundStateful) ||
-		copyOwnerReferences(ss, foundStateful)) {
+	if !justCreated && reconcilehelper.CopyStatefulSetFields(ss, foundStateful) {
 		log.Info("Updating StatefulSet", "namespace", ss.Namespace, "name", ss.Name)
 		err = r.Update(ctx, foundStateful)
 		if err != nil {
@@ -245,8 +233,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 	// Update the foundService object and write the result back if there are any changes
-	if !justCreated && (reconcilehelper.CopyServiceFields(service, foundService) ||
-		copyOwnerReferences(service, foundService)) {
+	if !justCreated && reconcilehelper.CopyServiceFields(service, foundService) {
 		log.Info("Updating Service\n", "namespace", service.Namespace, "name", service.Name)
 		err = r.Update(ctx, foundService)
 		if err != nil {
@@ -707,8 +694,7 @@ func (r *NotebookReconciler) reconcileVirtualService(instance *nbv1.Notebook) er
 		return err
 	}
 
-	if !justCreated && (reconcilehelper.CopyVirtualService(virtualService, foundVirtual) ||
-		copyOwnerReferences(virtualService, foundVirtual)) {
+	if !justCreated && reconcilehelper.CopyVirtualService(virtualService, foundVirtual) {
 		log.Info("Updating virtual service", "namespace", instance.Namespace, "name",
 			virtualServiceName(instance.Name, instance.Namespace))
 		err = r.Update(context.TODO(), foundVirtual)

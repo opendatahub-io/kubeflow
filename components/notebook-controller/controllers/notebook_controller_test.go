@@ -299,7 +299,7 @@ func createMockReconciler() *NotebookReconciler {
 }
 
 const (
-	testNotebookUID  = testNotebookUID
+	testNotebookUID  = "94751738-d4f8-4712-9192-e473a7c98d4b"
 	testNotebookKind = "Notebook"
 	testBusyboxImage = "busybox"
 )
@@ -370,37 +370,5 @@ func TestIsControlledByNotebookIgnoresAPIVersion(t *testing.T) {
 	}
 	if !isControlledByNotebook(sts, nb) {
 		t.Fatal("expected stale v1beta1 ownerReference to still match the Notebook UID")
-	}
-}
-
-func TestCopyOwnerReferencesUpgradesAPIVersion(t *testing.T) {
-	controller := true
-	desired := &appsv1.StatefulSet{
-		ObjectMeta: v1.ObjectMeta{
-			OwnerReferences: []v1.OwnerReference{{
-				APIVersion: "kubeflow.org/v1",
-				Kind:       testNotebookKind,
-				Name:       "test-notebook",
-				UID:        testNotebookUID,
-				Controller: &controller,
-			}},
-		},
-	}
-	existing := &appsv1.StatefulSet{
-		ObjectMeta: v1.ObjectMeta{
-			OwnerReferences: []v1.OwnerReference{{
-				APIVersion: "kubeflow.org/v1beta1",
-				Kind:       testNotebookKind,
-				Name:       "test-notebook",
-				UID:        testNotebookUID,
-				Controller: &controller,
-			}},
-		},
-	}
-	if !copyOwnerReferences(desired, existing) {
-		t.Fatal("expected ownerReference copy to report a change")
-	}
-	if got := existing.OwnerReferences[0].APIVersion; got != "kubeflow.org/v1" {
-		t.Fatalf("ownerReference.apiVersion = %q, want kubeflow.org/v1", got)
 	}
 }
