@@ -5,10 +5,6 @@ on:
     - cron: "0 6 * * *"  # 06:00 UTC daily
   workflow_dispatch: {}
 
-concurrency:
-  group: sync-via-pr-main-to-stable
-  cancel-in-progress: false
-
 permissions: {}
 
 jobs:
