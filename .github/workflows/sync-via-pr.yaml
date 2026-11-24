@@ -1,0 +1,244 @@
+name: Sync via PR
+
+# Reusable PR-based branch sync. Callers supply source/target/merge branch and
+# PR metadata; merge/.tekton/pin logic lives in sync-branches.yaml.
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: "Branch to merge from (e.g. main)"
+        required: true
+        type: string
+      target:
+        description: "Branch the sync PR targets (e.g. stable)"
+        required: true
+        type: string
+      merge_branch:
+        description: "Fixed working branch for the sync PR head"
+        required: true
+        type: string
+      pr_title:
+        description: "Title for the opened sync PR"
+        required: true
+        type: string
+      pr_body:
+        description: "Body markdown for the opened sync PR"
+        required: true
+        type: string
+    secrets:
+      GHA_SECRET_PAT:
+        description: "PAT used to open/refresh sync PRs so pull_request CI runs"
+        required: true
+
+# Serialize runs that share a merge branch so prepare/restore cannot race.
+concurrency:
+  group: sync-via-pr-${{ inputs.merge_branch }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  SOURCE_BRANCH: ${{ inputs.source }}
+  TARGET_BRANCH: ${{ inputs.target }}
+  MERGE_BRANCH: ${{ inputs.merge_branch }}
+
+jobs:
+  # ── 1. Decide whether to rebuild, only open a PR, or no-op ───────────────────
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      ahead: ${{ steps.check.outputs.ahead }}
+      open_pr: ${{ steps.check.outputs.open_pr }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Check if source has new commits not in target
+      id: check
+      env:
+        # PAT so gh pr list works even if GITHUB_TOKEN lacks pull-requests:read.
+        GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
+      run: |
+        echo "ahead=0" >> "$GITHUB_OUTPUT"
+        echo "open_pr=false" >> "$GITHUB_OUTPUT"
+
+        git fetch origin "$SOURCE_BRANCH" "$TARGET_BRANCH"
+        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+
+        AHEAD=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH")
+        if [[ "$AHEAD" -eq 0 ]]; then
+          echo "$TARGET_BRANCH is already up to date with $SOURCE_BRANCH. Nothing to do."
+          exit 0
+        fi
+
+        # Sync branch already contains both tips: either an open PR is waiting
+        # (skip), or a prior run pushed the merge but failed to open the PR
+        # (retry create-pr only — do not rebuild).
+        if git rev-parse --verify "origin/$MERGE_BRANCH" >/dev/null 2>&1 \
+          && git merge-base --is-ancestor "origin/$SOURCE_BRANCH" "origin/$MERGE_BRANCH" \
+          && git merge-base --is-ancestor "origin/$TARGET_BRANCH" "origin/$MERGE_BRANCH"; then
+          EXISTING=$(gh pr list \
+            --head "$MERGE_BRANCH" \
+            --base "$TARGET_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [[ -n "$EXISTING" ]]; then
+            echo "Sync branch already contains $SOURCE_BRANCH and $TARGET_BRANCH with open PR #$EXISTING. Nothing to do."
+            exit 0
+          fi
+          echo "open_pr=true" >> "$GITHUB_OUTPUT"
+          echo "Sync branch already contains both tips but no open PR — will retry PR creation."
+          exit 0
+        fi
+
+        echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+        echo "$AHEAD commit(s) in $SOURCE_BRANCH not yet in $TARGET_BRANCH."
+
+  # ── 2. Reset the sync branch from target so sync-branches can use a normal push ─
+  prepare:
+    needs: check
+    if: needs.check.outputs.ahead != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      previous_tip: ${{ steps.reset.outputs.previous_tip }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Reset sync branch from target
+      id: reset
+      run: |
+        set -e
+        BACKUP_REF="refs/sync-backup/${MERGE_BRANCH//\//-}"
+        git fetch origin "$TARGET_BRANCH"
+        git fetch origin "$MERGE_BRANCH" 2>/dev/null || true
+        # --verify is required: plain rev-parse prints the ref name on stdout
+        # even when it does not exist, which makes PREV non-empty and breaks the
+        # backup push on the first run (no sync branch yet).
+        PREV=$(git rev-parse --verify "origin/$MERGE_BRANCH" 2>/dev/null || true)
+        echo "previous_tip=$PREV" >> "$GITHUB_OUTPUT"
+        # Keep previous tip reachable for restore (force-push below orphans it).
+        if [[ -n "$PREV" ]]; then
+          git push --force origin "$PREV:$BACKUP_REF"
+        fi
+        git checkout -B "$MERGE_BRANCH" "origin/$TARGET_BRANCH"
+        git push --force-with-lease origin "$MERGE_BRANCH"
+
+  # ── 3. Merge source into the sync branch (shared logic) ──────────────────────
+  sync:
+    needs: [check, prepare]
+    if: needs.check.outputs.ahead != '0'
+    uses: ./.github/workflows/sync-branches.yaml
+    permissions:
+      contents: write
+    with:
+      source: ${{ inputs.source }}
+      target: ${{ inputs.merge_branch }}
+
+  # If sync skipped its push or failed after prepare, restore the tip prepare
+  # overwrote so we don't leave the merge branch identical to target.
+  restore:
+    needs: [prepare, sync]
+    if: ${{ !cancelled() && needs.sync.outputs.pushed != 'true' && needs.prepare.outputs.previous_tip != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Restore previous sync branch tip
+      env:
+        PREVIOUS_TIP: ${{ needs.prepare.outputs.previous_tip }}
+      run: |
+        set -e
+        BACKUP_REF="refs/sync-backup/${MERGE_BRANCH//\//-}"
+        git fetch origin "+${BACKUP_REF}:${BACKUP_REF}"
+        git push --force-with-lease origin "$PREVIOUS_TIP:refs/heads/$MERGE_BRANCH"
+        git push origin --delete "$BACKUP_REF" 2>/dev/null || true
+        echo "Restored $MERGE_BRANCH to $PREVIOUS_TIP (sync did not push a new tip)."
+
+  # ── 4. Open (or reuse) a pull request ─────────────────────────────────────────
+  create-pr:
+    needs: [check, sync]
+    # open_pr retries after a stranded sync push; otherwise require a fresh push.
+    # always() so a skipped sync (open_pr path) does not auto-skip this job.
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.check.result == 'success' &&
+      (
+        needs.check.outputs.open_pr == 'true' ||
+        (
+          needs.check.outputs.ahead != '0' &&
+          needs.sync.result == 'success' &&
+          needs.sync.outputs.pushed == 'true'
+        )
+      )
+    runs-on: ubuntu-latest
+    # PAT authenticates gh/git; do not also grant GITHUB_TOKEN write.
+    permissions: {}
+    env:
+      # PAT so PR open/update events trigger pull_request CI (GITHUB_TOKEN cannot).
+      GH_TOKEN: ${{ secrets.GHA_SECRET_PAT }}
+      PR_TITLE: ${{ inputs.pr_title }}
+      # Defined as an input/env so backticks are plain YAML characters, avoiding
+      # heredoc-inside-run indentation issues that break YAML parsing.
+      PR_BODY: ${{ inputs.pr_body }}
+      OPEN_PR_ONLY: ${{ needs.check.outputs.open_pr }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GHA_SECRET_PAT }}
+
+    - name: Open or reuse pull request
+      run: |
+        BACKUP_REF="refs/sync-backup/${MERGE_BRANCH//\//-}"
+        # Drop the prepare backup ref if present; sync pushed a new tip successfully.
+        git push origin --delete "$BACKUP_REF" 2>/dev/null || true
+
+        # Reuse an existing open PR for the same branch if one exists.
+        # Use `// empty` so jq emits nothing (not "null") on an empty list.
+        EXISTING=$(gh pr list \
+          --head "$MERGE_BRANCH" \
+          --base "$TARGET_BRANCH" \
+          --state open \
+          --json number \
+          --jq '.[0].number // empty')
+
+        if [[ -n "$EXISTING" ]]; then
+          # sync-branches pushed with GITHUB_TOKEN, which does not re-trigger CI on
+          # an existing PR. Push an empty commit with the PAT so checks re-run.
+          # Skip the empty commit when we only came here to open a missing PR.
+          if [[ "$OPEN_PR_ONLY" != "true" ]]; then
+            git fetch origin "$MERGE_BRANCH"
+            git checkout "$MERGE_BRANCH"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: trigger CI for sync PR"
+            git push origin "$MERGE_BRANCH"
+            echo "PR #$EXISTING already open for $MERGE_BRANCH — triggered CI refresh."
+          else
+            echo "PR #$EXISTING already open for $MERGE_BRANCH — nothing to do."
+          fi
+          exit 0
+        fi
+
+        gh pr create \
+          --base "$TARGET_BRANCH" \
+          --head "$MERGE_BRANCH" \
+          --title "$PR_TITLE" \
+          --body "$PR_BODY"
