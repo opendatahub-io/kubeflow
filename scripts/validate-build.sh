@@ -499,9 +499,17 @@ cmd_flag_contract() {
   local used overlay
   local render_args=()
   for overlay in "${OVERLAYS[@]}"; do
-    local name
+    local name render
     name="${TARGET}-$(basename "$overlay")"
-    render_args+=("$SIM_BUILD_DIR/render-$name.yaml")
+    render="$SIM_BUILD_DIR/render-$name.yaml"
+    # Render on demand: in CI this job runs standalone (only the --help
+    # artifacts are downloaded), so renders from a `manifests` run must not
+    # be a hidden prerequisite.
+    if [ ! -s "$render" ]; then
+      [ -n "$SIM_KUSTOMIZE_BIN" ] || { echo "❌ kustomize not found; set SIM_KUSTOMIZE_BIN" >&2; exit 1; }
+      render_overlay "$name" "$COMPONENT_DIR/$overlay"
+    fi
+    render_args+=("$render")
   done
 
   log "flag-contract: $IMAGE_NAME overlay flags vs /manager --help (RHOAIENG-100779 class)"
@@ -702,8 +710,34 @@ IMAGES
 
   log "kind: reconcile evidence — a Notebook must produce its StatefulSet"
   K create namespace kubeflow-sim-notebooks
-  K -n kubeflow-sim-notebooks apply -f \
-    "$work/components/odh-notebook-controller/config/samples/_v1_notebook.yaml"
+  # The create must pass through the mutating webhook (failurePolicy: Fail),
+  # but right after a fast rollout kube-proxy may not have programmed the
+  # webhook Service endpoints yet ("connection refused" on the ClusterIP).
+  # Retry the admission call itself; the reconcile assertion below stays
+  # strict.
+  local attempt notebook_applied=false apply_out
+  for attempt in 1 2 3 4 5 6; do
+    if apply_out="$(K -n kubeflow-sim-notebooks apply -f \
+      "$work/components/odh-notebook-controller/config/samples/_v1_notebook.yaml" 2>&1)"; then
+      echo "$apply_out"
+      notebook_applied=true
+      break
+    fi
+    echo "$apply_out" >&2
+    if ! grep -q "failed calling webhook" <<<"$apply_out"; then
+      bad "the Notebook sample failed to apply for a non-webhook reason"
+      exit 1
+    fi
+    echo "webhook not reachable yet (attempt $attempt/6); waiting for the service endpoints to settle" >&2
+    sleep 5
+  done
+  if [ "$notebook_applied" != true ]; then
+    bad "the Notebook could not be admitted through the mutating webhook after 6 attempts"
+    K -n opendatahub get endpoints odh-notebook-controller-webhook-service >&2 || true
+    K -n opendatahub get pods -l app=odh-notebook-controller -o wide >&2 || true
+    K -n opendatahub logs deployment/odh-notebook-controller-manager --tail=40 >&2 || true
+    exit 1
+  fi
   local deadline=$((SECONDS + 180)) statefulset
   while true; do
     statefulset="$(K -n kubeflow-sim-notebooks get statefulset -o name 2>/dev/null | head -1 || true)"
