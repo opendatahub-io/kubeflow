@@ -738,6 +738,19 @@ IMAGES
     K -n opendatahub logs deployment/odh-notebook-controller-manager --tail=40 >&2 || true
     exit 1
   fi
+  # Positive control that admission really went through the webhook, not just
+  # that the object exists: on CREATE the odh mutating webhook unconditionally
+  # injects the reconciliation-lock annotation (kubeflow-resource-stopped =
+  # odh-notebook-controller-lock), which the controller removes only after the
+  # first reconcile. Read it immediately, before that happens.
+  local lock
+  lock="$(K -n kubeflow-sim-notebooks get notebook notebook-sample-v1 \
+    -o jsonpath='{.metadata.annotations.kubeflow-resource-stopped}' 2>/dev/null || true)"
+  if [ "$lock" != "odh-notebook-controller-lock" ]; then
+    bad "the Notebook was created without the mutating webhook's annotation (kubeflow-resource-stopped='${lock:-unset}'); admission may have bypassed the webhook (rules no longer matching CREATE?)"
+    exit 1
+  fi
+  ok "the Notebook was admitted through the mutating webhook (reconciliation lock injected)"
   local deadline=$((SECONDS + 180)) statefulset
   while true; do
     statefulset="$(K -n kubeflow-sim-notebooks get statefulset -o name 2>/dev/null | head -1 || true)"

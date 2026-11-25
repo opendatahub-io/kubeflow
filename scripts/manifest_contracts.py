@@ -165,6 +165,61 @@ WATCH_CALL_RE = re.compile(
     r"\.\s*(For|Owns|Watches)\s*\(\s*(?:client\.Object\()?\s*&([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\s*[,{)]"
 )
 
+# A watch whose object argument is a bare identifier (a variable assigned
+# elsewhere, e.g. `ns := &corev1.Namespace{}; ... Watches(ns, ...)`) is
+# resolved through a per-file assignment scan; a variable we cannot resolve
+# fails loudly rather than silently under-checking.
+WATCH_CALL_BARE_RE = re.compile(
+    r"\.\s*(For|Owns|Watches)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]"
+)
+TYPED_ASSIGN_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\s*\{"
+)
+UNSTRUCTURED_ASSIGN_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&unstructured\.Unstructured\s*\{"
+)
+
+
+def pluralize(kind: str) -> str:
+    """Kind -> resource plural, matching what the API server serves."""
+    lowered = kind.lower()
+    if lowered.endswith(("s", "x", "ch", "sh")):
+        return lowered + "es"
+    if lowered.endswith("y"):
+        return lowered[:-1] + "ies"
+    return lowered + "s"
+
+
+def watch_variable_types(source: str, name: str):
+    """Map a variable name to the (apiGroup, plural) it watches.
+
+    Recognizes `v := &pkg.Type{}` and the dynamic-client idiom
+    `v := &unstructured.Unstructured{}` followed by SetAPIVersion/SetKind."""
+    for match in TYPED_ASSIGN_RE.finditer(source):
+        if match.group(1) != name:
+            continue
+        if match.group(2) == "unstructured.Unstructured":
+            continue  # handled by the dynamic-client pattern below
+        gvk = WATCHED_KINDS.get(match.group(2))
+        if gvk is None:
+            fail(
+                f"variable {name} is assigned unknown watched kind {match.group(2)}: "
+                f"add it to WATCHED_KINDS in scripts/manifest_contracts.py"
+            )
+        return gvk
+    for match in UNSTRUCTURED_ASSIGN_RE.finditer(source):
+        if match.group(1) != name:
+            continue
+        window = source[match.end():match.end() + 600]
+        api_version = re.search(
+            rf"{name}\.SetAPIVersion\(\"([^\"]+)\"\)", window
+        )
+        kind = re.search(rf"{name}\.SetKind\(\"([^\"]+)\"\)", window)
+        if api_version and kind:
+            group = api_version.group(1).partition("/")[0]
+            return (group, pluralize(kind.group(1)))
+    return None
+
 
 def parse_watches(component_dir: str):
     """Return {(apiGroup, plural): set(call types)} for every kind the
@@ -179,28 +234,93 @@ def parse_watches(component_dir: str):
             if not name.endswith(".go") or name.endswith("_test.go"):
                 continue
             checked += 1
-            with open(os.path.join(root, name), encoding="utf-8") as handle:
-                for match in WATCH_CALL_RE.finditer(handle.read()):
-                    call, go_type = match.group(1), match.group(2)
-                    gvk = WATCHED_KINDS.get(go_type)
-                    if gvk is None:
-                        fail(
-                            f"unknown watched kind {go_type} in {name}: add it to "
-                            f"WATCHED_KINDS in scripts/manifest_contracts.py"
-                        )
-                    watches.setdefault(gvk, set()).add(call)
+            source = open(os.path.join(root, name), encoding="utf-8").read()
+            for match in WATCH_CALL_BARE_RE.finditer(source):
+                if WATCH_CALL_RE.search(match.group(0)):
+                    continue
+                call, variable = match.group(1), match.group(2)
+                gvk = watch_variable_types(source, variable)
+                if gvk is None:
+                    fail(
+                        f"{name}: {call}() is passed the variable '{variable}' whose type "
+                        f"this parser cannot resolve. Pass the type literal, or teach "
+                        f"watch_variable_types in scripts/manifest_contracts.py to resolve it."
+                    )
+                watches.setdefault(gvk, set()).add(call)
+            for match in WATCH_CALL_RE.finditer(source):
+                call, go_type = match.group(1), match.group(2)
+                gvk = WATCHED_KINDS.get(go_type)
+                if gvk is None:
+                    fail(
+                        f"unknown watched kind {go_type} in {name}: add it to "
+                        f"WATCHED_KINDS in scripts/manifest_contracts.py"
+                    )
+                watches.setdefault(gvk, set()).add(call)
     if not checked:
         fail(f"{controllers_dir}: no non-test Go sources found")
     return watches
 
 
-def cluster_role_rules(docs):
-    """Union of (apiGroup, resource) -> verbs over every ClusterRole."""
+def workload_service_accounts(docs):
+    """{(namespace, name)} for every ServiceAccount a rendered pod runs as.
+
+    The implicit `default` ServiceAccount is always resolvable server-side, so
+    it is included."""
+    accounts = {("", "default")}
+    for doc, pod_spec in pod_specs(docs):
+        meta = doc.get("metadata") or {}
+        namespace = meta.get("namespace") or "default"
+        sa = pod_spec.get("serviceAccountName") or pod_spec.get("serviceAccount")
+        if sa:
+            accounts.add((namespace, sa))
+    return accounts
+
+
+def bound_role_rules(docs):
+    """Union of (apiGroup, resource) -> verbs over exactly the roles that
+    reach a rendered workload: a role counts only when some RoleBinding or
+    ClusterRoleBinding whose subject is one of the workloads' ServiceAccounts
+    references it. An unbound (or differently bound) ClusterRole in the render
+    grants the controller nothing.
+
+    Rules restricted by `resourceNames` cannot back a cluster-wide
+    list/watch informer and are excluded."""
+    accounts = workload_service_accounts(docs)
+    wanted = {"ClusterRole": set(), "Role": set()}  # Role is namespaced
+    for doc in docs:
+        kind = doc.get("kind")
+        if kind not in {"RoleBinding", "ClusterRoleBinding"}:
+            continue
+        meta = doc.get("metadata") or {}
+        binding_ns = meta.get("namespace") or "default"
+        for subject in doc.get("subjects") or []:
+            if subject.get("kind") != "ServiceAccount":
+                continue
+            subject_ns = subject.get("namespace") or (
+                binding_ns if kind == "RoleBinding" else ""
+            )
+            if (subject_ns, subject.get("name")) not in accounts:
+                continue
+            ref = doc.get("roleRef") or {}
+            ref_kind = ref.get("kind")
+            if ref_kind == "ClusterRole":
+                wanted["ClusterRole"].add(ref.get("name"))
+            elif ref_kind == "Role":
+                wanted["Role"].add((binding_ns, ref.get("name")))
     rules = {}
     for doc in docs:
-        if doc.get("kind") != "ClusterRole":
+        kind = doc.get("kind")
+        if kind not in ("ClusterRole", "Role"):
+            continue
+        meta = doc.get("metadata") or {}
+        if kind == "Role":
+            if (meta.get("namespace") or "default", meta.get("name")) not in wanted["Role"]:
+                continue
+        elif meta.get("name") not in wanted["ClusterRole"]:
             continue
         for rule in doc.get("rules") or []:
+            if rule.get("resourceNames"):
+                continue  # name-restricted grants cannot serve an informer
             verbs = set(rule.get("verbs") or [])
             for group in rule.get("apiGroups") or [""]:
                 for resource in rule.get("resources") or []:
@@ -215,9 +335,11 @@ def cmd_rbac_watch_coverage(args):
     docs = []
     for path in args.rendered:
         docs.extend(load_docs(path))
-    rules = cluster_role_rules(docs)
+    # Only roles that are actually bound to a rendered workload's
+    # ServiceAccount count: a leftover unbound ClusterRole grants nothing.
+    rules = bound_role_rules(docs)
     if not rules:
-        fail("no ClusterRole found in the rendered manifests")
+        fail("no role bound to a rendered workload ServiceAccount found")
 
     missing = []
     for (group, plural), calls in sorted(watches.items()):
@@ -259,10 +381,14 @@ def cmd_rbac_identity(args):
         if meta.get("name"):
             service_accounts.add((meta.get("namespace") or "", meta["name"]))
     if not service_accounts:
-        print("no ServiceAccount in render set; skipping identity check")
-        return
+        # An empty set is still a meaningful check: every subject and pod
+        # identity must then fail to resolve (unless it uses the implicit
+        # `default` ServiceAccount, which the API server always provides).
+        print("no ServiceAccount in render set; checking references against the empty set")
 
     def resolves(namespace, name):
+        if name == "default":
+            return True  # implicit in every namespace
         return (namespace, name) in service_accounts or ("", name) in service_accounts
 
     problems = []
@@ -312,44 +438,60 @@ def cmd_webhook_contract(args):
         docs.extend(load_docs(path))
 
     services = {}
-    deployments = []
+    workloads = []  # (doc, namespace, template_labels, pod_spec)
     webhook_configs = []
     for doc in docs:
         kind = doc.get("kind")
         meta = doc.get("metadata") or {}
         if kind == "Service":
-            services[(meta.get("namespace") or "", meta["name"])] = doc
-        elif kind == "Deployment":
-            deployments.append(doc)
+            services[(meta.get("namespace") or "default", meta["name"])] = doc
+        elif kind in WORKLOAD_KINDS:
+            template = ((doc.get("spec") or {}).get("template") or {})
+            workloads.append(
+                (
+                    doc,
+                    meta.get("namespace") or "default",
+                    (template.get("metadata") or {}).get("labels") or {},
+                    template.get("spec") or {},
+                )
+            )
         elif kind in {"MutatingWebhookConfiguration", "ValidatingWebhookConfiguration"}:
             webhook_configs.append(doc)
     if not webhook_configs:
         print("no webhook configurations in render set; nothing to check")
         return
-    if not deployments:
-        fail("webhook configurations present but no Deployment in render set")
+    if not workloads:
+        fail("webhook configurations present but no workload in render set")
 
     problems = []
 
-    # 1. Every webhook configuration's clientConfig service must resolve and
-    #    expose the port the webhook server listens on.
-    named_ports = set()
-    port_numbers = {}
-    for doc in deployments:
-        for container in (doc["spec"]["template"]["spec"].get("containers") or []):
-            for port in container.get("ports") or []:
-                if port.get("name"):
-                    named_ports.add(port["name"])
-                    if isinstance(port.get("containerPort"), int):
-                        port_numbers[port["name"]] = port["containerPort"]
+    # 1. Every webhook configuration's clientConfig service must resolve, its
+    #    selector must match a rendered workload, and that backend must listen
+    #    on the Service's targetPort (checking a port on an unrelated
+    #    Deployment would prove nothing).
     for doc in webhook_configs:
         for hook in doc.get("webhooks") or []:
             service = ((hook.get("clientConfig") or {}).get("service")) or {}
             service_port = service.get("port", 443)  # 443 when omitted
-            key = (service.get("namespace"), service.get("name"))
+            key = (service.get("namespace") or "default", service.get("name"))
             svc = services.get(key)
             if svc is None:
                 problems.append(f"{where(doc)} webhook {hook.get('name')}: no Service {key}")
+                continue
+            selector = (svc.get("spec") or {}).get("selector") or {}
+            if not selector:
+                problems.append(
+                    f"Service/{key[1]} has no selector; nothing routes the webhook traffic"
+                )
+                continue
+            backends = [
+                w for w in workloads
+                if w[1] == key[0] and all(w[2].get(k) == v for k, v in selector.items())
+            ]
+            if not backends:
+                problems.append(
+                    f"Service/{key[1]} selector {selector} matches no rendered workload"
+                )
                 continue
             ports = svc.get("spec", {}).get("ports") or []
             target = next(
@@ -361,68 +503,113 @@ def cmd_webhook_contract(args):
                     f"Service/{key[1]} exposes no port {service_port} for webhook {hook.get('name')}"
                 )
                 continue
-            if str(target) not in named_ports:
+            listens = any(
+                (port.get("name") == str(target) or port.get("containerPort") == target)
+                for _, _, _, pod_spec in backends
+                for container in pod_spec.get("containers") or []
+                for port in container.get("ports") or []
+            )
+            if not listens:
                 problems.append(
-                    f"Service/{key[1]} targetPort {target} matches no named container port "
-                    f"({sorted(named_ports)}) on the controller Deployment"
+                    f"Service/{key[1]} targetPort {target} matches no container port on the "
+                    f"workload its selector selects"
                 )
 
-    # 2. The Service must request a serving cert and the Deployment must mount
-    #    exactly that secret for the webhook cert dir (RHOAIENG-84738).
-    managers = [d for d in deployments if "manager" in (d.get("metadata") or {}).get("name", "")]
-    manager = managers[0] if managers else deployments[0]
-    pod_spec = manager["spec"]["template"]["spec"]
-    cert_secrets = set()
-    for doc in docs:
-        if doc.get("kind") != "Service":
-            continue
-        annotations = (doc.get("metadata") or {}).get("annotations") or {}
-        secret_name = annotations.get("service.beta.openshift.io/serving-cert-secret-name")
-        if secret_name:
-            cert_secrets.add(secret_name)
-    mounted = set()
-    for volume in pod_spec.get("volumes") or []:
-        secret = (volume.get("secret") or {}).get("secretName")
-        if secret and "webhook" in volume.get("name", ""):
-            mounted.add(secret)
-    if not cert_secrets:
+    # 2. The Service referenced by the webhook must request a serving cert, and
+    #    the manager container must mount exactly that secret (RHOAIENG-84738).
+    #    Follow the container's volumeMounts, not the pod's volumes: a volume
+    #    without a mount serves nobody.
+    managers = [w for w in workloads if "manager" in (w[0].get("metadata") or {}).get("name", "")]
+    manager = managers[0] if managers else workloads[0]
+    doc, manager_ns, template_labels, pod_spec = manager
+    containers = pod_spec.get("containers") or []
+    manager_container = next(
+        (c for c in containers if c.get("name") == "manager"), containers[0] if containers else None
+    )
+    volumes_by_name = {v.get("name"): v for v in pod_spec.get("volumes") or []}
+    mounted_secrets = set()
+    if manager_container:
+        for mount in manager_container.get("volumeMounts") or []:
+            volume = volumes_by_name.get(mount.get("name")) or {}
+            secret = (volume.get("secret") or {}).get("secretName")
+            if secret:
+                mounted_secrets.add(secret)
+    webhook_cert_secrets = set()
+    for doc2 in webhook_configs:
+        for hook in doc2.get("webhooks") or []:
+            service = ((hook.get("clientConfig") or {}).get("service")) or {}
+            svc = services.get((service.get("namespace") or "default", service.get("name")))
+            if svc is None:
+                continue
+            annotations = (svc.get("metadata") or {}).get("annotations") or {}
+            secret_name = annotations.get("service.beta.openshift.io/serving-cert-secret-name")
+            if secret_name:
+                webhook_cert_secrets.add(secret_name)
+    if not webhook_cert_secrets:
         problems.append(
-            "no Service carries a serving-cert annotation but webhook configurations are shipped"
+            "no Service referenced by a webhook carries a serving-cert annotation"
         )
-    elif not mounted:
-        problems.append("controller Deployment mounts no webhook cert secret volume")
-    elif not (cert_secrets & mounted):
+    elif not mounted_secrets:
+        problems.append("manager container mounts no secret volumes at all")
+    elif not (webhook_cert_secrets & mounted_secrets):
         problems.append(
-            f"serving-cert secret {sorted(cert_secrets)} is not the mounted webhook secret {sorted(mounted)}"
+            f"serving-cert secret {sorted(webhook_cert_secrets)} is not mounted by the manager "
+            f"container (mounted: {sorted(mounted_secrets)})"
         )
 
     # 3. A NetworkPolicy that selects the controller pod must allow the
     #    webhook port (RHOAIENG-99636: default-deny NP blocked the webhook).
-    template_labels = (manager["spec"]["template"].get("metadata") or {}).get("labels") or {}
-    webhook_port_numbers = {
-        num for name, num in port_numbers.items() if name == "webhook"
-    }
-    for doc in docs:
-        if doc.get("kind") != "NetworkPolicy":
+    #    * The policy only applies in its own namespace.
+    #    * An empty podSelector selects every pod in that namespace.
+    #    * A port rule with `from`/`to` peers cannot be relied on for
+    #      kube-apiserver traffic (it originates outside any selectable pod
+    #      network), so only unrestricted-source port rules count.
+    webhook_ports = set()
+    for container in containers:
+        for port in container.get("ports") or []:
+            if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
+                webhook_ports.add(port["containerPort"])
+    if not webhook_ports:
+        problems.append("manager container declares no port named webhook")
+    for doc2 in docs:
+        if doc2.get("kind") != "NetworkPolicy":
             continue
-        spec = doc.get("spec") or {}
+        spec = doc2.get("spec") or {}
         if "Ingress" not in (spec.get("policyTypes") or ["Ingress"]):
             continue
-        selector = (spec.get("podSelector") or {}).get("matchLabels") or {}
-        if not selector or not all(template_labels.get(k) == v for k, v in selector.items()):
+        meta = doc2.get("metadata") or {}
+        policy_ns = meta.get("namespace") or "default"
+        if policy_ns != manager_ns:
+            continue  # a NetworkPolicy only governs its own namespace
+        selector = spec.get("podSelector") or {}
+        match_labels = selector.get("matchLabels") or {}
+        if selector.get("matchExpressions"):
+            # Cannot evaluate matchExpressions here; assume it may select the
+            # manager so the port check below still applies.
+            selects = True
+        else:
+            # An empty selector matches every pod in the namespace.
+            selects = not match_labels or all(
+                template_labels.get(k) == v for k, v in match_labels.items()
+            )
+        if not selects:
             continue
         allowed = False
         for rule in spec.get("ingress") or []:
             if not rule.get("ports"):
-                allowed = True  # a rule without port restriction allows everything
-                break
+                if not rule.get("from"):
+                    allowed = True  # fully unrestricted rule
+                    break
+                continue  # peer-restricted, port-unrestricted: not for the apiserver
             for port in rule.get("ports") or []:
-                if port.get("port") in webhook_port_numbers and port.get("protocol", "TCP") == "TCP":
+                if rule.get("from"):
+                    continue  # peer-restricted: cannot carry apiserver traffic
+                if str(port.get("port")) in {str(p) for p in webhook_ports} and port.get("protocol", "TCP") == "TCP":
                     allowed = True
-        if not allowed and webhook_port_numbers:
+        if not allowed and webhook_ports:
             problems.append(
-                f"{where(doc)} selects the controller pod but allows no ingress on the "
-                f"webhook port(s) {sorted(webhook_port_numbers)}"
+                f"{where(doc2)} selects the controller pod but allows no ingress on the "
+                f"webhook port(s) {sorted(webhook_ports)}"
             )
 
     if problems:
@@ -589,53 +776,84 @@ def cmd_image_params(args):
 
 def cmd_config_refs(args):
     """Every non-optional ConfigMap/Secret a rendered workload references must
-    either be rendered alongside it or be an explicitly allowed external
-    dependency (platform- or sibling-component-provided)."""
+    either be rendered alongside it — in the workload's own namespace — or be
+    an explicitly allowed external dependency (platform- or sibling-component
+    provided). For rendered ConfigMaps the requested key is verified too."""
     allow = set(args.allow or [])
     docs = []
     for path in args.rendered:
         docs.extend(load_docs(path))
 
-    rendered = {"ConfigMap": set(), "Secret": set()}
+    rendered = {"ConfigMap": set(), "Secret": set()}  # (namespace, name)
+    configmap_keys = {}  # (namespace, name) -> set(keys)
     for doc in docs:
         kind = doc.get("kind")
         if kind in rendered:
-            rendered[kind].add((doc.get("metadata") or {}).get("name"))
+            meta = doc.get("metadata") or {}
+            key = (meta.get("namespace") or "default", meta.get("name"))
+            rendered[kind].add(key)
+            if kind == "ConfigMap":
+                configmap_keys[key] = set((doc.get("data") or {}).keys())
 
-    def resolves(kind, name):
-        return name in rendered[kind] or name in allow
+    def resolves(kind, namespace, name):
+        # Kubernetes resolves the reference in the pod's namespace; a same-named
+        # object in another namespace does not satisfy it.
+        return (namespace, name) in rendered[kind] or name in allow
 
     problems = []
+
+    def check_ref(kind, namespace, ref, what, optional=None):
+        if ref is None:
+            return
+        name = ref.get("name")
+        if optional is None:
+            optional = ref.get("optional")
+        if optional:
+            return
+        if not resolves(kind, namespace, name):
+            problems.append(f"{what} references {kind} {name} which is not rendered")
+            return
+        if kind == "ConfigMap" and (namespace, name) in configmap_keys:
+            # Rendered alongside: the key must exist too (a misspelled key
+            # blocks the container just as effectively).
+            key = ref.get("key")
+            if key and key not in configmap_keys[(namespace, name)]:
+                problems.append(
+                    f"{what} references key {key} which {kind} {name} does not define"
+                )
+
     for doc, pod_spec in pod_specs(docs):
+        meta = doc.get("metadata") or {}
+        namespace = meta.get("namespace") or "default"
         for container in (pod_spec.get("containers") or []) + (
             pod_spec.get("initContainers") or []
         ):
+            what = f"{where(doc)} container {container.get('name')}"
             for entry in container.get("env") or []:
                 source = entry.get("valueFrom") or {}
-                ref = source.get("configMapKeyRef")
-                if ref and not ref.get("optional") and not resolves("ConfigMap", ref.get("name")):
-                    problems.append(
-                        f"{where(doc)} container {container.get('name')}: env {entry.get('name')} "
-                        f"references ConfigMap {ref.get('name')} which is not rendered"
-                    )
-                ref = source.get("secretRef")
-                if ref and not ref.get("optional") and not resolves("Secret", ref.get("name")):
-                    problems.append(
-                        f"{where(doc)} container {container.get('name')}: env {entry.get('name')} "
-                        f"references Secret {ref.get('name')} which is not rendered"
-                    )
+                env_what = f"{what}: env {entry.get('name')}"
+                check_ref("ConfigMap", namespace, source.get("configMapKeyRef"), env_what)
+                check_ref("Secret", namespace, source.get("secretKeyRef"), env_what)
+            for source in container.get("envFrom") or []:
+                env_what = f"{what}: envFrom"
+                check_ref("ConfigMap", namespace, source.get("configMapRef"), env_what)
+                check_ref("Secret", namespace, source.get("secretRef"), env_what)
         for volume in pod_spec.get("volumes") or []:
-            name = (volume.get("configMap") or {}).get("name")
-            if name and not resolves("ConfigMap", name):
-                problems.append(
-                    f"{where(doc)}: volume {volume.get('name')} references ConfigMap {name} "
-                    f"which is not rendered"
+            what = f"{where(doc)}: volume {volume.get('name')}"
+            check_ref("ConfigMap", namespace, volume.get("configMap"), what)
+            secret = volume.get("secret")
+            # Secret volumes identify the object with secretName, not name.
+            if secret is not None:
+                secret = {"name": secret.get("secretName"), "optional": secret.get("optional")}
+            check_ref("Secret", namespace, secret, what)
+            for source in ((volume.get("projected") or {}).get("sources") or []):
+                check_ref(
+                    "ConfigMap", namespace, source.get("configMap"),
+                    f"{what} (projected)", source.get("configMap", {}).get("optional"),
                 )
-            name = (volume.get("secret") or {}).get("secretName")
-            if name and not (volume.get("secret") or {}).get("optional") and not resolves("Secret", name):
-                problems.append(
-                    f"{where(doc)}: volume {volume.get('name')} references Secret {name} "
-                    f"which is not rendered"
+                check_ref(
+                    "Secret", namespace, source.get("secret"),
+                    f"{what} (projected)", source.get("secret", {}).get("optional"),
                 )
 
     if problems:
