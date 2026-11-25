@@ -717,9 +717,9 @@ IMAGES
   # strict.
   local attempt notebook_applied=false apply_out
   for attempt in 1 2 3 4 5 6; do
-    if apply_out="$(K -n kubeflow-sim-notebooks apply -f \
+    if apply_out="$(K -n kubeflow-sim-notebooks apply -o json -f \
       "$work/components/odh-notebook-controller/config/samples/_v1_notebook.yaml" 2>&1)"; then
-      echo "$apply_out"
+      echo "notebook.apps/notebook-sample-v1 created"
       notebook_applied=true
       break
     fi
@@ -741,11 +741,16 @@ IMAGES
   # Positive control that admission really went through the webhook, not just
   # that the object exists: on CREATE the odh mutating webhook unconditionally
   # injects the reconciliation-lock annotation (kubeflow-resource-stopped =
-  # odh-notebook-controller-lock), which the controller removes only after the
-  # first reconcile. Read it immediately, before that happens.
+  # odh-notebook-controller-lock). Read it from the CREATE response itself —
+  # the controller removes the lock after the first reconcile, so a later GET
+  # could race that removal.
   local lock
-  lock="$(K -n kubeflow-sim-notebooks get notebook notebook-sample-v1 \
-    -o jsonpath='{.metadata.annotations.kubeflow-resource-stopped}' 2>/dev/null || true)"
+  lock="$(python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+annotations = (doc.get("metadata") or {}).get("annotations") or {}
+print(annotations.get("kubeflow-resource-stopped", ""))
+' <<<"$apply_out")"
   if [ "$lock" != "odh-notebook-controller-lock" ]; then
     bad "the Notebook was created without the mutating webhook's annotation (kubeflow-resource-stopped='${lock:-unset}'); admission may have bypassed the webhook (rules no longer matching CREATE?)"
     exit 1

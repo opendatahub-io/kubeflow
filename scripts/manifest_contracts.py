@@ -190,11 +190,15 @@ def pluralize(kind: str) -> str:
     return lowered + "s"
 
 
-def watch_variable_types(source: str, name: str):
+def watch_variable_types(source: str, name: str, filename: str):
     """Map a variable name to the (apiGroup, plural) it watches.
 
     Recognizes `v := &pkg.Type{}` and the dynamic-client idiom
-    `v := &unstructured.Unstructured{}` followed by SetAPIVersion/SetKind."""
+    `v := &unstructured.Unstructured{}` followed by SetAPIVersion/SetKind.
+    If the name is assigned more than one distinct type in the file, the
+    call-site binding cannot be determined syntactically: fail loudly
+    instead of guessing one of them."""
+    resolved = set()
     for match in TYPED_ASSIGN_RE.finditer(source):
         if match.group(1) != name:
             continue
@@ -206,7 +210,7 @@ def watch_variable_types(source: str, name: str):
                 f"variable {name} is assigned unknown watched kind {match.group(2)}: "
                 f"add it to WATCHED_KINDS in scripts/manifest_contracts.py"
             )
-        return gvk
+        resolved.add(gvk)
     for match in UNSTRUCTURED_ASSIGN_RE.finditer(source):
         if match.group(1) != name:
             continue
@@ -217,8 +221,14 @@ def watch_variable_types(source: str, name: str):
         kind = re.search(rf"{name}\.SetKind\(\"([^\"]+)\"\)", window)
         if api_version and kind:
             group = api_version.group(1).partition("/")[0]
-            return (group, pluralize(kind.group(1)))
-    return None
+            resolved.add((group, pluralize(kind.group(1))))
+    if len(resolved) > 1:
+        fail(
+            f"{filename}: variable '{name}' is assigned {len(resolved)} distinct types "
+            f"({sorted(resolved)}); the call-site binding cannot be resolved "
+            f"syntactically. Pass the type literal to the watch call instead."
+        )
+    return next(iter(resolved)) if resolved else None
 
 
 def parse_watches(component_dir: str):
@@ -229,17 +239,25 @@ def parse_watches(component_dir: str):
     if not os.path.isdir(controllers_dir):
         fail(f"{component_dir}: no controllers/ directory to parse")
     checked = 0
+    tree_root = os.path.realpath(controllers_dir)
     for root, _, files in os.walk(controllers_dir):
         for name in sorted(files):
             if not name.endswith(".go") or name.endswith("_test.go"):
                 continue
+            path = os.path.join(root, name)
+            # A symlinked .go file could point outside the controller tree;
+            # only read sources that stay inside it.
+            if os.path.realpath(path) != path and not os.path.realpath(path).startswith(
+                tree_root + os.sep
+            ):
+                fail(f"{name}: symlink escapes the controller tree; refusing to read it")
             checked += 1
-            source = open(os.path.join(root, name), encoding="utf-8").read()
+            source = open(path, encoding="utf-8").read()
             for match in WATCH_CALL_BARE_RE.finditer(source):
                 if WATCH_CALL_RE.search(match.group(0)):
                     continue
                 call, variable = match.group(1), match.group(2)
-                gvk = watch_variable_types(source, variable)
+                gvk = watch_variable_types(source, variable, name)
                 if gvk is None:
                     fail(
                         f"{name}: {call}() is passed the variable '{variable}' whose type "
@@ -264,28 +282,49 @@ def parse_watches(component_dir: str):
 def workload_service_accounts(docs):
     """{(namespace, name)} for every ServiceAccount a rendered pod runs as.
 
-    The implicit `default` ServiceAccount is always resolvable server-side, so
-    it is included."""
-    accounts = {("", "default")}
+    A workload that omits serviceAccountName runs as the implicit `default`
+    ServiceAccount of its own namespace, so that pair is recorded too."""
+    accounts = set()
     for doc, pod_spec in pod_specs(docs):
         meta = doc.get("metadata") or {}
         namespace = meta.get("namespace") or "default"
-        sa = pod_spec.get("serviceAccountName") or pod_spec.get("serviceAccount")
-        if sa:
-            accounts.add((namespace, sa))
+        sa = pod_spec.get("serviceAccountName") or pod_spec.get("serviceAccount") or "default"
+        accounts.add((namespace, sa))
     return accounts
 
 
-def bound_role_rules(docs):
-    """Union of (apiGroup, resource) -> verbs over exactly the roles that
-    reach a rendered workload: a role counts only when some RoleBinding or
-    ClusterRoleBinding whose subject is one of the workloads' ServiceAccounts
-    references it. An unbound (or differently bound) ClusterRole in the render
-    grants the controller nothing.
+def manager_service_accounts(docs):
+    """{(namespace, name)} for the controller manager workload only.
 
-    Rules restricted by `resourceNames` cannot back a cluster-wide
-    list/watch informer and are excluded."""
-    accounts = workload_service_accounts(docs)
+    Grants held by *other* rendered workloads (e.g. a culler or proxy) must
+    not satisfy the manager's watch coverage."""
+    workloads = [w for w in pod_specs(docs)]
+    if not workloads:
+        return set()
+    managers = [w for w in workloads if "manager" in (w[0].get("metadata") or {}).get("name", "")]
+    chosen = managers or [workloads[0]]
+    accounts = set()
+    for doc, pod_spec in chosen:
+        meta = doc.get("metadata") or {}
+        namespace = meta.get("namespace") or "default"
+        sa = pod_spec.get("serviceAccountName") or pod_spec.get("serviceAccount") or "default"
+        accounts.add((namespace, sa))
+    return accounts
+
+
+def bound_role_rules(docs, accounts=None):
+    """Union of (apiGroup, resource) -> verbs over exactly the roles that
+    reach the given ServiceAccounts (default: every rendered workload's): a
+    role counts only when a binding whose subject is one of those accounts
+    references it. An unbound (or differently bound) ClusterRole in the
+    render grants the controller nothing.
+
+    A ClusterRole referenced through a *RoleBinding* is deliberately not
+    counted: that grants access only within the binding's namespace, which
+    cannot back a cluster-wide list/watch informer. Rules restricted by
+    `resourceNames` are excluded for the same reason."""
+    if accounts is None:
+        accounts = workload_service_accounts(docs)
     wanted = {"ClusterRole": set(), "Role": set()}  # Role is namespaced
     for doc in docs:
         kind = doc.get("kind")
@@ -303,7 +342,7 @@ def bound_role_rules(docs):
                 continue
             ref = doc.get("roleRef") or {}
             ref_kind = ref.get("kind")
-            if ref_kind == "ClusterRole":
+            if ref_kind == "ClusterRole" and kind == "ClusterRoleBinding":
                 wanted["ClusterRole"].add(ref.get("name"))
             elif ref_kind == "Role":
                 wanted["Role"].add((binding_ns, ref.get("name")))
@@ -335,11 +374,12 @@ def cmd_rbac_watch_coverage(args):
     docs = []
     for path in args.rendered:
         docs.extend(load_docs(path))
-    # Only roles that are actually bound to a rendered workload's
-    # ServiceAccount count: a leftover unbound ClusterRole grants nothing.
-    rules = bound_role_rules(docs)
+    # Only grants that reach the *manager* count: a verb held by another
+    # rendered workload's ServiceAccount (culler, proxy, ...) does not
+    # authorize the manager's informers.
+    rules = bound_role_rules(docs, accounts=manager_service_accounts(docs))
     if not rules:
-        fail("no role bound to a rendered workload ServiceAccount found")
+        fail("no role bound to the manager's ServiceAccount found")
 
     missing = []
     for (group, plural), calls in sorted(watches.items()):
@@ -432,6 +472,27 @@ def cmd_rbac_identity(args):
 # webhook-contract
 # --------------------------------------------------------------------------
 
+def selector_selects(pod_selector, labels):
+    """True when a LabelSelector (matchLabels + matchExpressions) selects a pod
+    template with the given labels. An empty selector selects everything."""
+    pod_selector = pod_selector or {}
+    match_labels = pod_selector.get("matchLabels") or {}
+    if any(labels.get(k) != v for k, v in match_labels.items()):
+        return False
+    for expr in pod_selector.get("matchExpressions") or []:
+        key, op, values = expr.get("key"), expr.get("operator"), expr.get("values") or []
+        present = key in labels
+        if op == "In" and (not present or labels[key] not in values):
+            return False
+        if op == "NotIn" and present and labels[key] in values:
+            return False
+        if op == "Exists" and not present:
+            return False
+        if op == "DoesNotExist" and present:
+            return False
+    return True
+
+
 def cmd_webhook_contract(args):
     docs = []
     for path in args.rendered:
@@ -464,6 +525,11 @@ def cmd_webhook_contract(args):
         fail("webhook configurations present but no workload in render set")
 
     problems = []
+    # Container ports webhook traffic actually lands on (Service port ->
+    # targetPort -> backend container port), and the Services referenced by
+    # webhook configurations.
+    resolved_webhook_ports = set()
+    referenced_services = {}
 
     # 1. Every webhook configuration's clientConfig service must resolve, its
     #    selector must match a rendered workload, and that backend must listen
@@ -478,6 +544,7 @@ def cmd_webhook_contract(args):
             if svc is None:
                 problems.append(f"{where(doc)} webhook {hook.get('name')}: no Service {key}")
                 continue
+            referenced_services[key] = svc
             selector = (svc.get("spec") or {}).get("selector") or {}
             if not selector:
                 problems.append(
@@ -503,22 +570,28 @@ def cmd_webhook_contract(args):
                     f"Service/{key[1]} exposes no port {service_port} for webhook {hook.get('name')}"
                 )
                 continue
-            listens = any(
-                (port.get("name") == str(target) or port.get("containerPort") == target)
+            listens = [
+                port.get("containerPort")
                 for _, _, _, pod_spec in backends
                 for container in pod_spec.get("containers") or []
                 for port in container.get("ports") or []
-            )
+                if (port.get("name") == str(target) or port.get("containerPort") == target)
+                and isinstance(port.get("containerPort"), int)
+            ]
             if not listens:
                 problems.append(
                     f"Service/{key[1]} targetPort {target} matches no container port on the "
                     f"workload its selector selects"
                 )
+            else:
+                resolved_webhook_ports.update(listens)
 
-    # 2. The Service referenced by the webhook must request a serving cert, and
-    #    the manager container must mount exactly that secret (RHOAIENG-84738).
+    # 2. Every Service referenced by a webhook must request a serving cert, and
+    #    the manager container must mount that exact secret (RHOAIENG-84738).
     #    Follow the container's volumeMounts, not the pod's volumes: a volume
-    #    without a mount serves nobody.
+    #    without a mount serves nobody. Each referenced Service is validated
+    #    on its own: one correctly annotated Service must not cover for
+    #    another that lost its annotation.
     managers = [w for w in workloads if "manager" in (w[0].get("metadata") or {}).get("name", "")]
     manager = managers[0] if managers else workloads[0]
     doc, manager_ns, template_labels, pod_spec = manager
@@ -534,43 +607,44 @@ def cmd_webhook_contract(args):
             secret = (volume.get("secret") or {}).get("secretName")
             if secret:
                 mounted_secrets.add(secret)
-    webhook_cert_secrets = set()
-    for doc2 in webhook_configs:
-        for hook in doc2.get("webhooks") or []:
-            service = ((hook.get("clientConfig") or {}).get("service")) or {}
-            svc = services.get((service.get("namespace") or "default", service.get("name")))
-            if svc is None:
-                continue
-            annotations = (svc.get("metadata") or {}).get("annotations") or {}
-            secret_name = annotations.get("service.beta.openshift.io/serving-cert-secret-name")
-            if secret_name:
-                webhook_cert_secrets.add(secret_name)
-    if not webhook_cert_secrets:
-        problems.append(
-            "no Service referenced by a webhook carries a serving-cert annotation"
-        )
-    elif not mounted_secrets:
+    if not mounted_secrets and referenced_services:
         problems.append("manager container mounts no secret volumes at all")
-    elif not (webhook_cert_secrets & mounted_secrets):
-        problems.append(
-            f"serving-cert secret {sorted(webhook_cert_secrets)} is not mounted by the manager "
-            f"container (mounted: {sorted(mounted_secrets)})"
-        )
+    for (svc_ns, svc_name), svc in sorted(referenced_services.items()):
+        annotations = (svc.get("metadata") or {}).get("annotations") or {}
+        secret_name = annotations.get("service.beta.openshift.io/serving-cert-secret-name")
+        if not secret_name:
+            problems.append(
+                f"Service/{svc_name} is referenced by a webhook but carries no "
+                f"serving-cert annotation"
+            )
+        elif secret_name not in mounted_secrets:
+            problems.append(
+                f"serving-cert secret {secret_name} requested by Service/{svc_name} is not "
+                f"mounted by the manager container (mounted: {sorted(mounted_secrets)})"
+            )
 
     # 3. A NetworkPolicy that selects the controller pod must allow the
     #    webhook port (RHOAIENG-99636: default-deny NP blocked the webhook).
     #    * The policy only applies in its own namespace.
-    #    * An empty podSelector selects every pod in that namespace.
+    #    * An empty podSelector selects every pod in that namespace;
+    #      matchExpressions are evaluated against the manager's labels.
+    #    * The port that must be allowed is the one the webhook Service
+    #      actually targets (resolved in section 1), not any port the manager
+    #      happens to declare.
     #    * A port rule with `from`/`to` peers cannot be relied on for
     #      kube-apiserver traffic (it originates outside any selectable pod
     #      network), so only unrestricted-source port rules count.
-    webhook_ports = set()
-    for container in containers:
-        for port in container.get("ports") or []:
-            if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
-                webhook_ports.add(port["containerPort"])
+    webhook_ports = resolved_webhook_ports
     if not webhook_ports:
-        problems.append("manager container declares no port named webhook")
+        # No service-based webhook resolved its backend port (section 1
+        # already reports that). Fall back to ports the manager declares for
+        # the webhook so the NetworkPolicy guard still applies.
+        for container in containers:
+            for port in container.get("ports") or []:
+                if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
+                    webhook_ports.add(port["containerPort"])
+        if not webhook_ports and not problems:
+            problems.append("manager container declares no port named webhook")
     for doc2 in docs:
         if doc2.get("kind") != "NetworkPolicy":
             continue
@@ -581,18 +655,7 @@ def cmd_webhook_contract(args):
         policy_ns = meta.get("namespace") or "default"
         if policy_ns != manager_ns:
             continue  # a NetworkPolicy only governs its own namespace
-        selector = spec.get("podSelector") or {}
-        match_labels = selector.get("matchLabels") or {}
-        if selector.get("matchExpressions"):
-            # Cannot evaluate matchExpressions here; assume it may select the
-            # manager so the port check below still applies.
-            selects = True
-        else:
-            # An empty selector matches every pod in the namespace.
-            selects = not match_labels or all(
-                template_labels.get(k) == v for k, v in match_labels.items()
-            )
-        if not selects:
+        if not selector_selects(spec.get("podSelector"), template_labels):
             continue
         allowed = False
         for rule in spec.get("ingress") or []:
@@ -785,7 +848,8 @@ def cmd_config_refs(args):
         docs.extend(load_docs(path))
 
     rendered = {"ConfigMap": set(), "Secret": set()}  # (namespace, name)
-    configmap_keys = {}  # (namespace, name) -> set(keys)
+    configmap_data_keys = {}  # (namespace, name) -> set(keys) in data only
+    configmap_all_keys = {}  # (namespace, name) -> set(keys) in data + binaryData
     for doc in docs:
         kind = doc.get("kind")
         if kind in rendered:
@@ -793,7 +857,10 @@ def cmd_config_refs(args):
             key = (meta.get("namespace") or "default", meta.get("name"))
             rendered[kind].add(key)
             if kind == "ConfigMap":
-                configmap_keys[key] = set((doc.get("data") or {}).keys())
+                configmap_data_keys[key] = set((doc.get("data") or {}).keys())
+                configmap_all_keys[key] = configmap_data_keys[key] | set(
+                    (doc.get("binaryData") or {}).keys()
+                )
 
     def resolves(kind, namespace, name):
         # Kubernetes resolves the reference in the pod's namespace; a same-named
@@ -813,14 +880,21 @@ def cmd_config_refs(args):
         if not resolves(kind, namespace, name):
             problems.append(f"{what} references {kind} {name} which is not rendered")
             return
-        if kind == "ConfigMap" and (namespace, name) in configmap_keys:
-            # Rendered alongside: the key must exist too (a misspelled key
-            # blocks the container just as effectively).
+        if kind == "ConfigMap" and (namespace, name) in configmap_all_keys:
+            # Rendered alongside: the requested key must exist too (a misspelled
+            # key blocks the container just as effectively). Env valueFrom only
+            # reads `data`; volume `items` may also come from `binaryData`.
             key = ref.get("key")
-            if key and key not in configmap_keys[(namespace, name)]:
+            if key and key not in configmap_data_keys.get((namespace, name), set()):
                 problems.append(
                     f"{what} references key {key} which {kind} {name} does not define"
                 )
+            for item in ref.get("items") or []:
+                item_key = item.get("key")
+                if item_key and item_key not in configmap_all_keys[(namespace, name)]:
+                    problems.append(
+                        f"{what} requests item key {item_key} which {kind} {name} does not define"
+                    )
 
     for doc, pod_spec in pod_specs(docs):
         meta = doc.get("metadata") or {}
