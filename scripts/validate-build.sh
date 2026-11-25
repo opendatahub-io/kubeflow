@@ -502,13 +502,12 @@ cmd_flag_contract() {
     local name render
     name="${TARGET}-$(basename "$overlay")"
     render="$SIM_BUILD_DIR/render-$name.yaml"
-    # Render on demand: in CI this job runs standalone (only the --help
-    # artifacts are downloaded), so renders from a `manifests` run must not
-    # be a hidden prerequisite.
-    if [ ! -s "$render" ]; then
-      [ -n "$SIM_KUSTOMIZE_BIN" ] || { echo "❌ kustomize not found; set SIM_KUSTOMIZE_BIN" >&2; exit 1; }
-      render_overlay "$name" "$COMPONENT_DIR/$overlay"
-    fi
+    # Always render fresh: in CI this job runs standalone (only the --help
+    # artifacts are downloaded), and locally a reused SIM_BUILD_DIR could hold
+    # a render from an earlier checkout of the tree. Only the --help captures
+    # (expensive: they need the built image) are reused.
+    [ -n "$SIM_KUSTOMIZE_BIN" ] || { echo "❌ kustomize not found; set SIM_KUSTOMIZE_BIN" >&2; exit 1; }
+    render_overlay "$name" "$COMPONENT_DIR/$overlay"
     render_args+=("$render")
   done
 

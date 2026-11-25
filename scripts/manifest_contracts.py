@@ -259,6 +259,8 @@ def strip_go_source(source: str) -> str:
             i = n if j < 0 else j  # keep the newline itself
         elif c == "/" and nxt == "*":
             j = source.find("*/", i + 2)
+            # Replace with a space: `var/* note */ns` must not become `varns`.
+            out.append(" ")
             i = n if j < 0 else j + 2
         else:
             out.append(c)
@@ -615,6 +617,7 @@ def cmd_webhook_contract(args):
                 for port in container.get("ports") or []
                 if (port.get("name") == str(target) or port.get("containerPort") == target)
                 and isinstance(port.get("containerPort"), int)
+                and port.get("protocol", "TCP") == "TCP"
             ]
             if not listens:
                 problems.append(
@@ -716,8 +719,18 @@ def cmd_webhook_contract(args):
             selecting_policies.append(doc2)
         if not selecting_policies:
             continue  # nothing isolates this backend; ingress is unrestricted
+        # Named ports in rules resolve on this backend's own container ports.
+        backend_named_ports = {
+            port.get("name"): port["containerPort"]
+            for container in workloads[idx][3].get("containers") or []
+            for port in container.get("ports") or []
+            if port.get("name") and isinstance(port.get("containerPort"), int)
+            and port.get("protocol", "TCP") == "TCP"
+        }
         unrestricted = False
-        allowed_ports = set()
+        covered_all = False
+        covered = set()  # exact TCP port numbers
+        ranges = []  # (start, end) TCP port ranges from endPort
         for doc2 in selecting_policies:
             for rule in (doc2.get("spec") or {}).get("ingress") or []:
                 if not rule.get("ports"):
@@ -726,16 +739,33 @@ def cmd_webhook_contract(args):
                     continue  # peer-restricted, port-unrestricted
                 if rule.get("from"):
                     continue  # peer-restricted: cannot carry apiserver traffic
-                for port in rule.get("ports") or []:
-                    if port.get("protocol", "TCP") == "TCP":
-                        allowed_ports.add(str(port.get("port")))
-        if unrestricted:
+                for entry in rule.get("ports") or []:
+                    if entry.get("protocol", "TCP") != "TCP":
+                        continue
+                    port = entry.get("port")
+                    if port is None:
+                        covered_all = True  # a TCP rule without a port covers every TCP port
+                        continue
+                    if isinstance(port, str):
+                        number = backend_named_ports.get(port)
+                        if number is not None:
+                            covered.add(number)
+                        continue
+                    end = entry.get("endPort")
+                    if isinstance(end, int) and end >= port:
+                        ranges.append((port, end))
+                    else:
+                        covered.add(port)
+        if unrestricted or covered_all:
             continue
-        missing = {str(p) for p in required} - allowed_ports
+        missing = {
+            p for p in required
+            if p not in covered and not any(a <= p <= b for a, b in ranges)
+        }
         if missing:
             problems.append(
                 f"NetworkPolicies selecting {where(backend_doc)} allow no ingress on the "
-                f"webhook port(s) {sorted(missing)} (allowed: {sorted(allowed_ports) or 'none'})"
+                f"webhook port(s) {sorted(missing)}"
             )
 
     if problems:
