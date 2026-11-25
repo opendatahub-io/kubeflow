@@ -176,7 +176,12 @@ WATCH_VARIABLE_ARG_RE = re.compile(
 )
 # Any assignment to a name, whatever the right-hand side: used to detect
 # assignments this parser cannot interpret and fail instead of guessing.
-ASSIGN_ANY_RE_TMPL = r"\b{name}\s*:?=\s*([^;\n]+)"
+# Splits a line before every assignment opener (== comparisons excluded).
+ASSIGN_SPLIT_RE = re.compile(r"(?=\b[A-Za-z_][A-Za-z0-9_]*\s*:?=(?!=))")
+# Function signatures (named, methods, and closures): the parameter list is
+# scanned for parameters sharing a watch variable's name — a same-name
+# parameter in another scope makes the call-site binding ambiguous.
+FUNC_PARAMS_RE = re.compile(r"\bfunc\s+(?:\([^)]*\)\s*)?[A-Za-z0-9_]*\s*\(([^()]*)\)")
 UNSTRUCTURED_ASSIGN_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&unstructured\.Unstructured\s*\{"
 )
@@ -195,7 +200,11 @@ def pluralize(kind: str) -> str:
 def mask_go_strings(source: str) -> str:
     """Blank the contents of string/rune/raw-string literals (apply after
     strip_go_source) so scans cannot match code that only exists inside a
-    literal: `x := "obj := &corev1.Pod{}"` must not count as an assignment."""
+    literal: `x := "obj := &corev1.Pod{}"` must not count as an assignment.
+    Each literal's contents are replaced with same-length spaces, so every
+    character position in the result maps to the same position in `source`:
+    a construct detected in the masked text (live code) can have its literal
+    arguments read from the unmasked text at the identical span."""
     out = []
     i, n = 0, len(source)
     while i < n:
@@ -210,8 +219,9 @@ def mask_go_strings(source: str) -> str:
                 if source[j] == quote:
                     break
                 j += 1
-            out.append(quote + quote)
-            i = j + 1
+            end = min(j + 1, n)
+            out.append(quote + " " * (end - i - 2) + (quote if j < n else ""))
+            i = end
         else:
             out.append(c)
             i += 1
@@ -221,49 +231,96 @@ def mask_go_strings(source: str) -> str:
 def watch_variable_types(source: str, masked: str, name: str, filename: str):
     """Map a variable name to the (apiGroup, plural) it watches.
 
-    `source` is comment-stripped with string literals intact (needed to read
-    the SetAPIVersion/SetKind arguments of the unstructured idiom); `masked`
-    additionally has literal contents blanked, so assignment scans only see
-    live code. Every assignment to the name must be one this parser
-    understands — an unparseable one fails loudly instead of being skipped —
-    and more than one distinct resolved type is an unresolvable ambiguity."""
+    `source` is comment-stripped with string literals intact; `masked`
+    additionally has literal contents blanked (position-preserving), so
+    assignment scans only see live code and literal arguments can still be
+    read from `source` at the same offsets. Every binding of the name —
+    assignments *and* function parameters — must be one this parser
+    understands; an unparseable one fails loudly instead of being skipped,
+    and more than one distinct resolved type is an unresolvable ambiguity
+    (a same-name binding in another Go scope cannot be told apart
+    syntactically)."""
     resolved = set()
-    for assign in re.finditer(ASSIGN_ANY_RE_TMPL.format(name=re.escape(name)), masked):
-        rhs = assign.group(1).strip()
-        if rhs.startswith("="):
-            continue  # `name == expr` is a comparison, not an assignment
-        if rhs.startswith("&unstructured.Unstructured"):
-            continue  # resolved through the Set* idiom below
-        if rhs.startswith("&"):
-            go_type = rhs[1:].split("{")[0].strip()
+    # Split each line into assignment statements first: a greedy per-line
+    # capture would swallow a second assignment on the same line once
+    # comments collapse (`ns = &A{} /* */ ns = &B{}`), missing its binding.
+    # The split stops at every `name :=` / `name =` opener that is not a
+    # comparison (== is excluded by the [^=] lookahead).
+    for line in masked.splitlines():
+        for stmt in ASSIGN_SPLIT_RE.split(line):
+            match = re.match(rf"{re.escape(name)}\s*:?=\s*([^;]*)", stmt)
+            if not match:
+                continue
+            rhs = match.group(1).strip()
+            if rhs.startswith("="):
+                continue  # `name == expr` is a comparison, not an assignment
+            if rhs[:1] in ('"', "'", "`"):
+                continue  # a string/rune literal is not a watch binding
+            if rhs.startswith("&unstructured.Unstructured"):
+                continue  # resolved through the Set* idiom below
+            if rhs.startswith("&"):
+                go_type = rhs[1:].split("{")[0].strip()
+                gvk = WATCHED_KINDS.get(go_type)
+                if gvk is None:
+                    fail(
+                        f"{filename}: variable '{name}' is assigned '{go_type}', which is not "
+                        f"a known watched kind: add it to WATCHED_KINDS in "
+                        f"scripts/manifest_contracts.py"
+                    )
+                resolved.add(gvk)
+                continue
+            fail(
+                f"{filename}: variable '{name}' is assigned '{rhs[:50]}' which this parser "
+                f"cannot resolve. Pass a &pkg.Type{{}} literal to the watch call, or teach "
+                f"watch_variable_types in scripts/manifest_contracts.py to resolve it."
+            )
+    # A parameter with this name is a binding too — and one this parser
+    # cannot see through: if the same name is a parameter somewhere and an
+    # assignment elsewhere, the call-site binding is ambiguous. A parameter
+    # of a known watched kind resolves; any other parameter type (interface,
+    # client.Object, grouped declaration) fails loudly.
+    for sig in re.finditer(FUNC_PARAMS_RE, masked):
+        for piece in sig.group(1).split(","):
+            tokens = piece.split()
+            if not tokens or tokens[0] != name:
+                continue
+            if len(tokens) == 1 or tokens[-1] == name:
+                fail(
+                    f"{filename}: '{name}' is declared as a grouped parameter "
+                    f"('{piece.strip()}'); its type cannot be resolved syntactically"
+                )
+            go_type = tokens[-1].lstrip(".*")
             gvk = WATCHED_KINDS.get(go_type)
             if gvk is None:
                 fail(
-                    f"{filename}: variable '{name}' is assigned '{go_type}', which is not "
-                    f"a known watched kind: add it to WATCHED_KINDS in "
-                    f"scripts/manifest_contracts.py"
+                    f"{filename}: '{name}' is a parameter of type '{tokens[-1]}' which "
+                    f"this parser cannot resolve to a watched kind. Pass the "
+                    f"&pkg.Type{{}} literal to the watch call instead."
                 )
             resolved.add(gvk)
-            continue
-        fail(
-            f"{filename}: variable '{name}' is assigned '{rhs[:50]}' which this parser "
-            f"cannot resolve. Pass a &pkg.Type{{}} literal to the watch call, or teach "
-            f"watch_variable_types in scripts/manifest_contracts.py to resolve it."
-        )
-    for match in UNSTRUCTURED_ASSIGN_RE.finditer(source):
+    # The dynamic-client idiom: assignments and Set* calls are detected in
+    # the masked text (live code only — a fake idiom inside a string literal
+    # is blanked), and the literal arguments are read from `source` at the
+    # identical offsets.
+    for match in UNSTRUCTURED_ASSIGN_RE.finditer(masked):
         if match.group(1) != name:
             continue
-        window = source[match.end():match.end() + 600]
+        window = masked[match.end():match.end() + 600]
+        has_version = re.search(rf"{name}\.SetAPIVersion\(", window)
+        has_kind = re.search(rf"{name}\.SetKind\(", window)
+        if not (has_version and has_kind):
+            continue
+        src_window = source[match.end():match.end() + 600]
         api_version = re.search(
-            rf"{name}\.SetAPIVersion\(\"([^\"]+)\"\)", window
+            rf"{name}\.SetAPIVersion\(\"([^\"]+)\"\)", src_window
         )
-        kind = re.search(rf"{name}\.SetKind\(\"([^\"]+)\"\)", window)
+        kind = re.search(rf"{name}\.SetKind\(\"([^\"]+)\"\)", src_window)
         if api_version and kind:
             group = api_version.group(1).partition("/")[0]
             resolved.add((group, pluralize(kind.group(1))))
     if len(resolved) > 1:
         fail(
-            f"{filename}: variable '{name}' is assigned {len(resolved)} distinct types "
+            f"{filename}: variable '{name}' is bound to {len(resolved)} distinct types "
             f"({sorted(resolved)}); the call-site binding cannot be resolved "
             f"syntactically. Pass the type literal to the watch call instead."
         )
@@ -298,8 +355,11 @@ def strip_go_source(source: str) -> str:
             i = n if j < 0 else j  # keep the newline itself
         elif c == "/" and nxt == "*":
             j = source.find("*/", i + 2)
-            # Replace with a space: `var/* note */ns` must not become `varns`.
-            out.append(" ")
+            comment = source[i:j if j >= 0 else n]
+            # Replace with a space (token boundaries survive: `var/*x*/ns`
+            # must not become `varns`) but keep the newlines, so statements
+            # separated by a multiline comment stay separated.
+            out.append(" " + "\n" * comment.count("\n"))
             i = n if j < 0 else j + 2
         else:
             out.append(c)
@@ -693,7 +753,9 @@ def cmd_webhook_contract(args):
                     f"Service/{key[1]} exposes no port {service_port} for webhook {hook.get('name')}"
                 )
                 continue
-            listens = []
+            # Every selected backend must listen on the target port on its
+            # own: one backend with the port must not mask another without
+            # it (the Service routes to all of them).
             for idx in backend_indices:
                 container = manager_container(idx)
                 if container is None:
@@ -702,20 +764,20 @@ def cmd_webhook_contract(args):
                         f"container named manager to serve the webhook"
                     )
                     continue
-                for port in container.get("ports") or []:
-                    if (
-                        port.get("name") == str(target) or port.get("containerPort") == target
-                    ) and isinstance(port.get("containerPort"), int) \
-                            and port.get("protocol", "TCP") == "TCP":
-                        listens.append((idx, port["containerPort"]))
-            if not listens:
-                problems.append(
-                    f"Service/{key[1]} targetPort {target} matches no manager container port "
-                    f"on the workload its selector selects"
-                )
-            else:
-                for idx, port in listens:
-                    required_by_backend.setdefault(idx, set()).add(port)
+                matched = [
+                    port["containerPort"]
+                    for port in container.get("ports") or []
+                    if (port.get("name") == str(target) or port.get("containerPort") == target)
+                    and isinstance(port.get("containerPort"), int)
+                    and port.get("protocol", "TCP") == "TCP"
+                ]
+                if not matched:
+                    problems.append(
+                        f"Service/{key[1]} targetPort {target} matches no manager container "
+                        f"port on {where(workloads[idx][0])}"
+                    )
+                else:
+                    required_by_backend.setdefault(idx, set()).update(matched)
 
     # 2. Every Service referenced by a webhook must request a serving cert, and
     #    the manager container of each backend it selects must mount that exact
@@ -792,13 +854,18 @@ def cmd_webhook_contract(args):
     if not required_by_backend:
         # No service-based webhook resolved its backend port (section 1
         # already reports that). Fall back to ports declared for the webhook
-        # on manager workloads so the NetworkPolicy guard still applies.
+        # on manager workloads so the NetworkPolicy guard still applies —
+        # TCP only, matching the Service-target check above.
         for idx, (_, _, _, pod_spec) in enumerate(workloads):
             if not any(c.get("name") == "manager" for c in pod_spec.get("containers") or []):
                 continue
             for container in pod_spec.get("containers") or []:
                 for port in container.get("ports") or []:
-                    if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
+                    if (
+                        port.get("name") == "webhook"
+                        and isinstance(port.get("containerPort"), int)
+                        and port.get("protocol", "TCP") == "TCP"
+                    ):
                         required_by_backend.setdefault(idx, set()).add(port["containerPort"])
         if not required_by_backend and not problems:
             problems.append("no manager workload declares a port named webhook")
