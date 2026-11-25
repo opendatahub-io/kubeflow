@@ -161,20 +161,22 @@ WATCHED_KINDS = {
 # .For( and .Owns( reconcile the object (Get), .Watches( populates an
 # informer. All three need get+list+watch. The builder chain is often wrapped
 # across lines, so the dot and the method name may be separated by whitespace.
-WATCH_CALL_RE = re.compile(
-    r"\.\s*(For|Owns|Watches)\s*\(\s*(?:client\.Object\()?\s*&([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\s*[,{)]"
-)
 
-# A watch whose object argument is a bare identifier (a variable assigned
-# elsewhere, e.g. `ns := &corev1.Namespace{}; ... Watches(ns, ...)`) is
-# resolved through a per-file assignment scan; a variable we cannot resolve
-# fails loudly rather than silently under-checking.
-WATCH_CALL_BARE_RE = re.compile(
-    r"\.\s*(For|Owns|Watches)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]"
+# Every controller-builder watch call site must match one of the known
+# argument forms: a &pkg.Type{} literal, optionally wrapped in
+# client.Object(&pkg.Type{...}), or a bare variable assigned elsewhere in the
+# file (possibly inside client.Object(...)). Any other form fails loudly: a
+# silently skipped watch is an unchecked RBAC grant.
+WATCH_CALL_START_RE = re.compile(r"\.\s*(For|Owns|Watches)\s*\(")
+WATCH_LITERAL_ARG_RE = re.compile(
+    r"^(?:client\.Object\s*\(\s*)?&([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\s*\{"
 )
-TYPED_ASSIGN_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&([A-Za-z0-9_]+\.[A-Za-z0-9_]+)\s*\{"
+WATCH_VARIABLE_ARG_RE = re.compile(
+    r"^(?:client\.Object\s*\(\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*[,)]"
 )
+# Any assignment to a name, whatever the right-hand side: used to detect
+# assignments this parser cannot interpret and fail instead of guessing.
+ASSIGN_ANY_RE_TMPL = r"\b{name}\s*:?=\s*([^;\n]+)"
 UNSTRUCTURED_ASSIGN_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*&unstructured\.Unstructured\s*\{"
 )
@@ -190,27 +192,64 @@ def pluralize(kind: str) -> str:
     return lowered + "s"
 
 
-def watch_variable_types(source: str, name: str, filename: str):
+def mask_go_strings(source: str) -> str:
+    """Blank the contents of string/rune/raw-string literals (apply after
+    strip_go_source) so scans cannot match code that only exists inside a
+    literal: `x := "obj := &corev1.Pod{}"` must not count as an assignment."""
+    out = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if c in ('"', "'", "`"):
+            quote = c
+            j = i + 1
+            while j < n:
+                if quote != "`" and source[j] == "\\":
+                    j += 2
+                    continue
+                if source[j] == quote:
+                    break
+                j += 1
+            out.append(quote + quote)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def watch_variable_types(source: str, masked: str, name: str, filename: str):
     """Map a variable name to the (apiGroup, plural) it watches.
 
-    Recognizes `v := &pkg.Type{}` and the dynamic-client idiom
-    `v := &unstructured.Unstructured{}` followed by SetAPIVersion/SetKind.
-    If the name is assigned more than one distinct type in the file, the
-    call-site binding cannot be determined syntactically: fail loudly
-    instead of guessing one of them."""
+    `source` is comment-stripped with string literals intact (needed to read
+    the SetAPIVersion/SetKind arguments of the unstructured idiom); `masked`
+    additionally has literal contents blanked, so assignment scans only see
+    live code. Every assignment to the name must be one this parser
+    understands — an unparseable one fails loudly instead of being skipped —
+    and more than one distinct resolved type is an unresolvable ambiguity."""
     resolved = set()
-    for match in TYPED_ASSIGN_RE.finditer(source):
-        if match.group(1) != name:
+    for assign in re.finditer(ASSIGN_ANY_RE_TMPL.format(name=re.escape(name)), masked):
+        rhs = assign.group(1).strip()
+        if rhs.startswith("="):
+            continue  # `name == expr` is a comparison, not an assignment
+        if rhs.startswith("&unstructured.Unstructured"):
+            continue  # resolved through the Set* idiom below
+        if rhs.startswith("&"):
+            go_type = rhs[1:].split("{")[0].strip()
+            gvk = WATCHED_KINDS.get(go_type)
+            if gvk is None:
+                fail(
+                    f"{filename}: variable '{name}' is assigned '{go_type}', which is not "
+                    f"a known watched kind: add it to WATCHED_KINDS in "
+                    f"scripts/manifest_contracts.py"
+                )
+            resolved.add(gvk)
             continue
-        if match.group(2) == "unstructured.Unstructured":
-            continue  # handled by the dynamic-client pattern below
-        gvk = WATCHED_KINDS.get(match.group(2))
-        if gvk is None:
-            fail(
-                f"variable {name} is assigned unknown watched kind {match.group(2)}: "
-                f"add it to WATCHED_KINDS in scripts/manifest_contracts.py"
-            )
-        resolved.add(gvk)
+        fail(
+            f"{filename}: variable '{name}' is assigned '{rhs[:50]}' which this parser "
+            f"cannot resolve. Pass a &pkg.Type{{}} literal to the watch call, or teach "
+            f"watch_variable_types in scripts/manifest_contracts.py to resolve it."
+        )
     for match in UNSTRUCTURED_ASSIGN_RE.finditer(source):
         if match.group(1) != name:
             continue
@@ -270,7 +309,9 @@ def strip_go_source(source: str) -> str:
 
 def parse_watches(component_dir: str):
     """Return {(apiGroup, plural): set(call types)} for every kind the
-    controller-builder watches in the component's Go sources."""
+    controller-builder watches in the component's Go sources. Call sites with
+    an argument this parser does not recognize fail the check: a silently
+    skipped watch is an unchecked RBAC grant."""
     watches = {}
     controllers_dir = os.path.join(component_dir, "controllers")
     if not os.path.isdir(controllers_dir):
@@ -293,27 +334,38 @@ def parse_watches(component_dir: str):
             checked += 1
             with open(path, encoding="utf-8") as handle:
                 source = strip_go_source(handle.read())
-            for match in WATCH_CALL_BARE_RE.finditer(source):
-                if WATCH_CALL_RE.search(match.group(0)):
+            masked = mask_go_strings(source)
+            for match in WATCH_CALL_START_RE.finditer(masked):
+                call = match.group(1)
+                rest = masked[match.end():match.end() + 200].lstrip()
+                literal = WATCH_LITERAL_ARG_RE.match(rest)
+                if literal:
+                    gvk = WATCHED_KINDS.get(literal.group(1))
+                    if gvk is None:
+                        fail(
+                            f"{name}: unknown watched kind {literal.group(1)} in {call}(): "
+                            f"add it to WATCHED_KINDS in scripts/manifest_contracts.py"
+                        )
+                    watches.setdefault(gvk, set()).add(call)
                     continue
-                call, variable = match.group(1), match.group(2)
-                gvk = watch_variable_types(source, variable, name)
-                if gvk is None:
-                    fail(
-                        f"{name}: {call}() is passed the variable '{variable}' whose type "
-                        f"this parser cannot resolve. Pass the type literal, or teach "
-                        f"watch_variable_types in scripts/manifest_contracts.py to resolve it."
-                    )
-                watches.setdefault(gvk, set()).add(call)
-            for match in WATCH_CALL_RE.finditer(source):
-                call, go_type = match.group(1), match.group(2)
-                gvk = WATCHED_KINDS.get(go_type)
-                if gvk is None:
-                    fail(
-                        f"unknown watched kind {go_type} in {name}: add it to "
-                        f"WATCHED_KINDS in scripts/manifest_contracts.py"
-                    )
-                watches.setdefault(gvk, set()).add(call)
+                variable = WATCH_VARIABLE_ARG_RE.match(rest)
+                if variable:
+                    var_name = variable.group(1)
+                    gvk = watch_variable_types(source, masked, var_name, name)
+                    if gvk is None:
+                        fail(
+                            f"{name}: {call}() is passed the variable '{var_name}' which has "
+                            f"no assignment this parser can resolve. Pass a &pkg.Type{{}} "
+                            f"literal, or teach watch_variable_types to resolve it."
+                        )
+                    watches.setdefault(gvk, set()).add(call)
+                    continue
+                fail(
+                    f"{name}: {call}() is passed an argument of an unsupported form "
+                    f"('{rest[:50].strip()}'). Pass a &pkg.Type{{}} literal (directly or "
+                    f"through client.Object), or a variable assigned one, so the watch "
+                    f"cannot be silently skipped."
+                )
     if not checked:
         fail(f"{controllers_dir}: no non-test Go sources found")
     return watches
@@ -352,7 +404,7 @@ def manager_service_accounts(docs):
     return accounts
 
 
-def bound_role_rules(docs, accounts=None):
+def bound_role_rules(docs, accounts=None, cluster_wide_only=False):
     """Union of (apiGroup, resource) -> verbs over exactly the roles that
     reach the given ServiceAccounts (default: every rendered workload's): a
     role counts only when a binding whose subject is one of those accounts
@@ -362,7 +414,11 @@ def bound_role_rules(docs, accounts=None):
     A ClusterRole referenced through a *RoleBinding* is deliberately not
     counted: that grants access only within the binding's namespace, which
     cannot back a cluster-wide list/watch informer. Rules restricted by
-    `resourceNames` are excluded for the same reason."""
+    `resourceNames` are excluded for the same reason.
+
+    With cluster_wide_only=True, rules from namespaced Roles are excluded
+    entirely: controller-runtime informers list/watch across the whole
+    cluster, so a Role bound in one namespace authorizes them nowhere."""
     if accounts is None:
         accounts = workload_service_accounts(docs)
     wanted = {"ClusterRole": set(), "Role": set()}  # Role is namespaced
@@ -393,6 +449,8 @@ def bound_role_rules(docs, accounts=None):
             continue
         meta = doc.get("metadata") or {}
         if kind == "Role":
+            if cluster_wide_only:
+                continue  # a namespaced Role cannot back a cluster-wide informer
             if (meta.get("namespace") or "default", meta.get("name")) not in wanted["Role"]:
                 continue
         elif meta.get("name") not in wanted["ClusterRole"]:
@@ -416,8 +474,12 @@ def cmd_rbac_watch_coverage(args):
         docs.extend(load_docs(path))
     # Only grants that reach the *manager* count: a verb held by another
     # rendered workload's ServiceAccount (culler, proxy, ...) does not
-    # authorize the manager's informers.
-    rules = bound_role_rules(docs, accounts=manager_service_accounts(docs))
+    # authorize the manager's informers. And only cluster-wide grants count:
+    # controller-runtime informers list/watch across the whole cluster, so a
+    # namespaced Role authorizes them nowhere.
+    rules = bound_role_rules(
+        docs, accounts=manager_service_accounts(docs), cluster_wide_only=True
+    )
     if not rules:
         fail("no role bound to the manager's ServiceAccount found")
 
@@ -571,6 +633,27 @@ def cmd_webhook_contract(args):
     required_by_backend = {}  # workload index -> set(container ports)
     referenced_services = {}  # (ns, name) -> (svc doc, [backend indices])
 
+    # The webhook server is the container named `manager` (the kubebuilder
+    # convention, matching manager_containers()); ports and cert mounts on
+    # other containers of the selected workload prove nothing.
+    def manager_container(idx):
+        for container in workloads[idx][3].get("containers") or []:
+            if container.get("name") == "manager":
+                return container
+        return None
+
+    DEFAULT_WEBHOOK_CERT_DIR = "/tmp/k8s-webhook-server/serving-certs"
+
+    def manager_cert_dir(container):
+        args = container.get("args") or []
+        for arg in args:
+            if arg.startswith("--webhook-cert-dir="):
+                return arg.split("=", 1)[1]
+        for i, arg in enumerate(args):
+            if arg == "--webhook-cert-dir" and i + 1 < len(args):
+                return args[i + 1]
+        return DEFAULT_WEBHOOK_CERT_DIR
+
     # 1. Every webhook configuration's clientConfig service must resolve, its
     #    selector must match a rendered workload, and that backend must listen
     #    on the Service's targetPort (checking a port on an unrelated
@@ -610,19 +693,25 @@ def cmd_webhook_contract(args):
                     f"Service/{key[1]} exposes no port {service_port} for webhook {hook.get('name')}"
                 )
                 continue
-            listens = [
-                (idx, port.get("containerPort"))
-                for idx in backend_indices
-                for container in workloads[idx][3].get("containers") or []
-                for port in container.get("ports") or []
-                if (port.get("name") == str(target) or port.get("containerPort") == target)
-                and isinstance(port.get("containerPort"), int)
-                and port.get("protocol", "TCP") == "TCP"
-            ]
+            listens = []
+            for idx in backend_indices:
+                container = manager_container(idx)
+                if container is None:
+                    problems.append(
+                        f"Service/{key[1]} selects {where(workloads[idx][0])} which has no "
+                        f"container named manager to serve the webhook"
+                    )
+                    continue
+                for port in container.get("ports") or []:
+                    if (
+                        port.get("name") == str(target) or port.get("containerPort") == target
+                    ) and isinstance(port.get("containerPort"), int) \
+                            and port.get("protocol", "TCP") == "TCP":
+                        listens.append((idx, port["containerPort"]))
             if not listens:
                 problems.append(
-                    f"Service/{key[1]} targetPort {target} matches no container port on the "
-                    f"workload its selector selects"
+                    f"Service/{key[1]} targetPort {target} matches no manager container port "
+                    f"on the workload its selector selects"
                 )
             else:
                 for idx, port in listens:
@@ -630,26 +719,27 @@ def cmd_webhook_contract(args):
 
     # 2. Every Service referenced by a webhook must request a serving cert, and
     #    the manager container of each backend it selects must mount that exact
-    #    secret (RHOAIENG-84738). Follow the container's volumeMounts, not the
-    #    pod's volumes: a volume without a mount serves nobody. Each referenced
-    #    Service is validated on its own against its own backends: one
-    #    correctly annotated Service must not cover for another that lost its
-    #    annotation.
-    def backend_mounted_secrets(idx):
+    #    secret (RHOAIENG-84738) at the directory the manager is configured to
+    #    read it from (--webhook-cert-dir, default
+    #    /tmp/k8s-webhook-server/serving-certs): a secret mounted anywhere else
+    #    cannot be read by the webhook server. Follow the container's
+    #    volumeMounts, not the pod's volumes: a volume without a mount serves
+    #    nobody. Each referenced Service is validated on its own against its
+    #    own backends: one correctly annotated Service must not cover for
+    #    another that lost its annotation.
+    def backend_secret_mounts(idx):
+        """{secretName: mountPath} for the manager container of a backend."""
+        container = manager_container(idx)
+        if container is None:
+            return {}
         _, _, _, pod_spec = workloads[idx]
-        containers = pod_spec.get("containers") or []
-        container = next(
-            (c for c in containers if c.get("name") == "manager"),
-            containers[0] if containers else None,
-        )
         volumes_by_name = {v.get("name"): v for v in pod_spec.get("volumes") or []}
-        mounted = set()
-        if container:
-            for mount in container.get("volumeMounts") or []:
-                volume = volumes_by_name.get(mount.get("name")) or {}
-                secret = (volume.get("secret") or {}).get("secretName")
-                if secret:
-                    mounted.add(secret)
+        mounted = {}
+        for mount in container.get("volumeMounts") or []:
+            volume = volumes_by_name.get(mount.get("name")) or {}
+            secret = (volume.get("secret") or {}).get("secretName")
+            if secret:
+                mounted[secret] = mount.get("mountPath")
         return mounted
 
     for (svc_ns, svc_name), (svc, backend_indices) in sorted(referenced_services.items()):
@@ -662,7 +752,11 @@ def cmd_webhook_contract(args):
             )
             continue
         for idx in backend_indices:
-            mounted = backend_mounted_secrets(idx)
+            container = manager_container(idx)
+            if container is None:
+                continue  # already reported in section 1
+            mounted = backend_secret_mounts(idx)
+            cert_dir = manager_cert_dir(container)
             if not mounted:
                 problems.append(
                     f"backend {where(workloads[idx][0])} (selected by Service/{svc_name}) "
@@ -672,6 +766,12 @@ def cmd_webhook_contract(args):
                 problems.append(
                     f"serving-cert secret {secret_name} requested by Service/{svc_name} is not "
                     f"mounted by {where(workloads[idx][0])} (mounted: {sorted(mounted)})"
+                )
+            elif mounted[secret_name] != cert_dir:
+                problems.append(
+                    f"serving-cert secret {secret_name} is mounted at "
+                    f"{mounted[secret_name]} but the manager reads --webhook-cert-dir "
+                    f"{cert_dir}: the webhook server cannot read the certificate"
                 )
 
     # 3. A NetworkPolicy that selects a webhook backend must allow the webhook
