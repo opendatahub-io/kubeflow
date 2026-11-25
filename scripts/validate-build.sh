@@ -715,14 +715,18 @@ IMAGES
   # webhook Service endpoints yet ("connection refused" on the ClusterIP).
   # Retry the admission call itself; the reconcile assertion below stays
   # strict.
-  local attempt notebook_applied=false apply_out
+  local attempt notebook_applied=false apply_out err_out
+  err_out="$work/apply.stderr"
   for attempt in 1 2 3 4 5 6; do
+    # stdout only: it is parsed as JSON below. Warnings the API server prints
+    # on stderr must not end up in front of the JSON document.
     if apply_out="$(K -n kubeflow-sim-notebooks apply -o json -f \
-      "$work/components/odh-notebook-controller/config/samples/_v1_notebook.yaml" 2>&1)"; then
+      "$work/components/odh-notebook-controller/config/samples/_v1_notebook.yaml" 2>"$err_out")"; then
       echo "notebook.apps/notebook-sample-v1 created"
       notebook_applied=true
       break
     fi
+    apply_out="$(cat "$err_out")"
     echo "$apply_out" >&2
     if ! grep -q "failed calling webhook" <<<"$apply_out"; then
       bad "the Notebook sample failed to apply for a non-webhook reason"

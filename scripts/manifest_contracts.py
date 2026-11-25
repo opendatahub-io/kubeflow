@@ -231,6 +231,41 @@ def watch_variable_types(source: str, name: str, filename: str):
     return next(iter(resolved)) if resolved else None
 
 
+def strip_go_source(source: str) -> str:
+    """Remove comments so pattern scans see only live code: a commented-out
+    assignment (`// obj := &corev1.Pod{}`) must not count as a candidate type.
+    String literals are kept verbatim (a `//` inside one, e.g. a URL, is not
+    a comment) because the unstructured watch idiom is resolved through the
+    SetAPIVersion/SetKind call arguments."""
+    out = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        if c in ('"', "'", "`"):
+            quote = c
+            j = i + 1
+            while j < n:
+                if quote != "`" and source[j] == "\\":
+                    j += 2
+                    continue
+                if source[j] == quote:
+                    break
+                j += 1
+            out.append(source[i:min(j + 1, n)])
+            i = j + 1
+        elif c == "/" and nxt == "/":
+            j = source.find("\n", i)
+            i = n if j < 0 else j  # keep the newline itself
+        elif c == "/" and nxt == "*":
+            j = source.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def parse_watches(component_dir: str):
     """Return {(apiGroup, plural): set(call types)} for every kind the
     controller-builder watches in the component's Go sources."""
@@ -238,6 +273,8 @@ def parse_watches(component_dir: str):
     controllers_dir = os.path.join(component_dir, "controllers")
     if not os.path.isdir(controllers_dir):
         fail(f"{component_dir}: no controllers/ directory to parse")
+    if os.path.islink(controllers_dir):
+        fail(f"{controllers_dir}: refusing a symlinked controllers directory")
     checked = 0
     tree_root = os.path.realpath(controllers_dir)
     for root, _, files in os.walk(controllers_dir):
@@ -252,7 +289,8 @@ def parse_watches(component_dir: str):
             ):
                 fail(f"{name}: symlink escapes the controller tree; refusing to read it")
             checked += 1
-            source = open(path, encoding="utf-8").read()
+            with open(path, encoding="utf-8") as handle:
+                source = strip_go_source(handle.read())
             for match in WATCH_CALL_BARE_RE.finditer(source):
                 if WATCH_CALL_RE.search(match.group(0)):
                     continue
@@ -294,17 +332,17 @@ def workload_service_accounts(docs):
 
 
 def manager_service_accounts(docs):
-    """{(namespace, name)} for the controller manager workload only.
+    """{(namespace, name)} for ServiceAccounts of controller manager workloads.
 
-    Grants held by *other* rendered workloads (e.g. a culler or proxy) must
-    not satisfy the manager's watch coverage."""
-    workloads = [w for w in pod_specs(docs)]
-    if not workloads:
-        return set()
-    managers = [w for w in workloads if "manager" in (w[0].get("metadata") or {}).get("name", "")]
-    chosen = managers or [workloads[0]]
+    A manager workload is one running a container named `manager` (the
+    kubebuilder convention) — keyed on the container name, not the workload
+    name: the kf Deployment is notebook-controller-deployment. Grants held by
+    *other* rendered workloads (e.g. a culler or proxy) must not satisfy the
+    manager's watch coverage."""
     accounts = set()
-    for doc, pod_spec in chosen:
+    for doc, pod_spec in pod_specs(docs):
+        if not any(c.get("name") == "manager" for c in pod_spec.get("containers") or []):
+            continue
         meta = doc.get("metadata") or {}
         namespace = meta.get("namespace") or "default"
         sa = pod_spec.get("serviceAccountName") or pod_spec.get("serviceAccount") or "default"
@@ -526,10 +564,10 @@ def cmd_webhook_contract(args):
 
     problems = []
     # Container ports webhook traffic actually lands on (Service port ->
-    # targetPort -> backend container port), and the Services referenced by
-    # webhook configurations.
-    resolved_webhook_ports = set()
-    referenced_services = {}
+    # targetPort -> backend container port), tracked per backend workload so
+    # later checks evaluate the workload the Service actually selects.
+    required_by_backend = {}  # workload index -> set(container ports)
+    referenced_services = {}  # (ns, name) -> (svc doc, [backend indices])
 
     # 1. Every webhook configuration's clientConfig service must resolve, its
     #    selector must match a rendered workload, and that backend must listen
@@ -544,22 +582,22 @@ def cmd_webhook_contract(args):
             if svc is None:
                 problems.append(f"{where(doc)} webhook {hook.get('name')}: no Service {key}")
                 continue
-            referenced_services[key] = svc
             selector = (svc.get("spec") or {}).get("selector") or {}
             if not selector:
                 problems.append(
                     f"Service/{key[1]} has no selector; nothing routes the webhook traffic"
                 )
                 continue
-            backends = [
-                w for w in workloads
+            backend_indices = [
+                idx for idx, w in enumerate(workloads)
                 if w[1] == key[0] and all(w[2].get(k) == v for k, v in selector.items())
             ]
-            if not backends:
+            if not backend_indices:
                 problems.append(
                     f"Service/{key[1]} selector {selector} matches no rendered workload"
                 )
                 continue
+            referenced_services[key] = (svc, backend_indices)
             ports = svc.get("spec", {}).get("ports") or []
             target = next(
                 (p.get("targetPort") for p in ports if p.get("port") == service_port),
@@ -571,9 +609,9 @@ def cmd_webhook_contract(args):
                 )
                 continue
             listens = [
-                port.get("containerPort")
-                for _, _, _, pod_spec in backends
-                for container in pod_spec.get("containers") or []
+                (idx, port.get("containerPort"))
+                for idx in backend_indices
+                for container in workloads[idx][3].get("containers") or []
                 for port in container.get("ports") or []
                 if (port.get("name") == str(target) or port.get("containerPort") == target)
                 and isinstance(port.get("containerPort"), int)
@@ -584,32 +622,34 @@ def cmd_webhook_contract(args):
                     f"workload its selector selects"
                 )
             else:
-                resolved_webhook_ports.update(listens)
+                for idx, port in listens:
+                    required_by_backend.setdefault(idx, set()).add(port)
 
     # 2. Every Service referenced by a webhook must request a serving cert, and
-    #    the manager container must mount that exact secret (RHOAIENG-84738).
-    #    Follow the container's volumeMounts, not the pod's volumes: a volume
-    #    without a mount serves nobody. Each referenced Service is validated
-    #    on its own: one correctly annotated Service must not cover for
-    #    another that lost its annotation.
-    managers = [w for w in workloads if "manager" in (w[0].get("metadata") or {}).get("name", "")]
-    manager = managers[0] if managers else workloads[0]
-    doc, manager_ns, template_labels, pod_spec = manager
-    containers = pod_spec.get("containers") or []
-    manager_container = next(
-        (c for c in containers if c.get("name") == "manager"), containers[0] if containers else None
-    )
-    volumes_by_name = {v.get("name"): v for v in pod_spec.get("volumes") or []}
-    mounted_secrets = set()
-    if manager_container:
-        for mount in manager_container.get("volumeMounts") or []:
-            volume = volumes_by_name.get(mount.get("name")) or {}
-            secret = (volume.get("secret") or {}).get("secretName")
-            if secret:
-                mounted_secrets.add(secret)
-    if not mounted_secrets and referenced_services:
-        problems.append("manager container mounts no secret volumes at all")
-    for (svc_ns, svc_name), svc in sorted(referenced_services.items()):
+    #    the manager container of each backend it selects must mount that exact
+    #    secret (RHOAIENG-84738). Follow the container's volumeMounts, not the
+    #    pod's volumes: a volume without a mount serves nobody. Each referenced
+    #    Service is validated on its own against its own backends: one
+    #    correctly annotated Service must not cover for another that lost its
+    #    annotation.
+    def backend_mounted_secrets(idx):
+        _, _, _, pod_spec = workloads[idx]
+        containers = pod_spec.get("containers") or []
+        container = next(
+            (c for c in containers if c.get("name") == "manager"),
+            containers[0] if containers else None,
+        )
+        volumes_by_name = {v.get("name"): v for v in pod_spec.get("volumes") or []}
+        mounted = set()
+        if container:
+            for mount in container.get("volumeMounts") or []:
+                volume = volumes_by_name.get(mount.get("name")) or {}
+                secret = (volume.get("secret") or {}).get("secretName")
+                if secret:
+                    mounted.add(secret)
+        return mounted
+
+    for (svc_ns, svc_name), (svc, backend_indices) in sorted(referenced_services.items()):
         annotations = (svc.get("metadata") or {}).get("annotations") or {}
         secret_name = annotations.get("service.beta.openshift.io/serving-cert-secret-name")
         if not secret_name:
@@ -617,62 +657,85 @@ def cmd_webhook_contract(args):
                 f"Service/{svc_name} is referenced by a webhook but carries no "
                 f"serving-cert annotation"
             )
-        elif secret_name not in mounted_secrets:
-            problems.append(
-                f"serving-cert secret {secret_name} requested by Service/{svc_name} is not "
-                f"mounted by the manager container (mounted: {sorted(mounted_secrets)})"
-            )
+            continue
+        for idx in backend_indices:
+            mounted = backend_mounted_secrets(idx)
+            if not mounted:
+                problems.append(
+                    f"backend {where(workloads[idx][0])} (selected by Service/{svc_name}) "
+                    f"mounts no secret volumes at all"
+                )
+            elif secret_name not in mounted:
+                problems.append(
+                    f"serving-cert secret {secret_name} requested by Service/{svc_name} is not "
+                    f"mounted by {where(workloads[idx][0])} (mounted: {sorted(mounted)})"
+                )
 
-    # 3. A NetworkPolicy that selects the controller pod must allow the
-    #    webhook port (RHOAIENG-99636: default-deny NP blocked the webhook).
-    #    * The policy only applies in its own namespace.
-    #    * An empty podSelector selects every pod in that namespace;
-    #      matchExpressions are evaluated against the manager's labels.
+    # 3. A NetworkPolicy that selects a webhook backend must allow the webhook
+    #    port (RHOAIENG-99636: default-deny NP blocked the webhook).
+    #    * The policy only applies in its own namespace; an empty podSelector
+    #      selects every pod in it; matchExpressions are evaluated against the
+    #      backend's labels.
     #    * The port that must be allowed is the one the webhook Service
-    #      actually targets (resolved in section 1), not any port the manager
-    #      happens to declare.
+    #      actually targets on that backend (section 1), not any port the
+    #      manager happens to declare.
+    #    * Coverage is aggregated over *all* selecting policies before being
+    #      compared to the required ports: a default-deny policy alongside an
+    #      allow rule is a valid configuration, and every required port must
+    #      be covered by the combination.
     #    * A port rule with `from`/`to` peers cannot be relied on for
     #      kube-apiserver traffic (it originates outside any selectable pod
     #      network), so only unrestricted-source port rules count.
-    webhook_ports = resolved_webhook_ports
-    if not webhook_ports:
+    if not required_by_backend:
         # No service-based webhook resolved its backend port (section 1
-        # already reports that). Fall back to ports the manager declares for
-        # the webhook so the NetworkPolicy guard still applies.
-        for container in containers:
-            for port in container.get("ports") or []:
-                if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
-                    webhook_ports.add(port["containerPort"])
-        if not webhook_ports and not problems:
-            problems.append("manager container declares no port named webhook")
-    for doc2 in docs:
-        if doc2.get("kind") != "NetworkPolicy":
-            continue
-        spec = doc2.get("spec") or {}
-        if "Ingress" not in (spec.get("policyTypes") or ["Ingress"]):
-            continue
-        meta = doc2.get("metadata") or {}
-        policy_ns = meta.get("namespace") or "default"
-        if policy_ns != manager_ns:
-            continue  # a NetworkPolicy only governs its own namespace
-        if not selector_selects(spec.get("podSelector"), template_labels):
-            continue
-        allowed = False
-        for rule in spec.get("ingress") or []:
-            if not rule.get("ports"):
-                if not rule.get("from"):
-                    allowed = True  # fully unrestricted rule
-                    break
-                continue  # peer-restricted, port-unrestricted: not for the apiserver
-            for port in rule.get("ports") or []:
+        # already reports that). Fall back to ports declared for the webhook
+        # on manager workloads so the NetworkPolicy guard still applies.
+        for idx, (_, _, _, pod_spec) in enumerate(workloads):
+            if not any(c.get("name") == "manager" for c in pod_spec.get("containers") or []):
+                continue
+            for container in pod_spec.get("containers") or []:
+                for port in container.get("ports") or []:
+                    if port.get("name") == "webhook" and isinstance(port.get("containerPort"), int):
+                        required_by_backend.setdefault(idx, set()).add(port["containerPort"])
+        if not required_by_backend and not problems:
+            problems.append("no manager workload declares a port named webhook")
+    for idx, required in sorted(required_by_backend.items()):
+        backend_doc, backend_ns, backend_labels, _ = workloads[idx]
+        selecting_policies = []
+        for doc2 in docs:
+            if doc2.get("kind") != "NetworkPolicy":
+                continue
+            spec = doc2.get("spec") or {}
+            if "Ingress" not in (spec.get("policyTypes") or ["Ingress"]):
+                continue
+            meta = doc2.get("metadata") or {}
+            if (meta.get("namespace") or "default") != backend_ns:
+                continue  # a NetworkPolicy only governs its own namespace
+            if not selector_selects(spec.get("podSelector"), backend_labels):
+                continue
+            selecting_policies.append(doc2)
+        if not selecting_policies:
+            continue  # nothing isolates this backend; ingress is unrestricted
+        unrestricted = False
+        allowed_ports = set()
+        for doc2 in selecting_policies:
+            for rule in (doc2.get("spec") or {}).get("ingress") or []:
+                if not rule.get("ports"):
+                    if not rule.get("from"):
+                        unrestricted = True  # fully unrestricted rule
+                    continue  # peer-restricted, port-unrestricted
                 if rule.get("from"):
                     continue  # peer-restricted: cannot carry apiserver traffic
-                if str(port.get("port")) in {str(p) for p in webhook_ports} and port.get("protocol", "TCP") == "TCP":
-                    allowed = True
-        if not allowed and webhook_ports:
+                for port in rule.get("ports") or []:
+                    if port.get("protocol", "TCP") == "TCP":
+                        allowed_ports.add(str(port.get("port")))
+        if unrestricted:
+            continue
+        missing = {str(p) for p in required} - allowed_ports
+        if missing:
             problems.append(
-                f"{where(doc2)} selects the controller pod but allows no ingress on the "
-                f"webhook port(s) {sorted(webhook_ports)}"
+                f"NetworkPolicies selecting {where(backend_doc)} allow no ingress on the "
+                f"webhook port(s) {sorted(missing)} (allowed: {sorted(allowed_ports) or 'none'})"
             )
 
     if problems:
