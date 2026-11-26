@@ -1,0 +1,249 @@
+---
+name: Konflux build simulation
+
+# Simulates, at PR time, what the two Konflux pull-request PipelineRuns
+# (.tekton/odh-notebook-controller-pull-request.yaml and
+# .tekton/odh-kf-notebook-controller-pull-request.yaml) do to a change, plus
+# the packaging contracts their images must satisfy. See
+# docs/pr-build-validation.md for the full checklist and the Jira tickets
+# each check traces back to.
+#
+# The summary job is the only check that needs to be required: it fails
+# unless every validation either ran green or was explicitly skipped by the
+# gate (GitHub counts a skipped job as passing, so the gate must be honest).
+
+"on":
+  pull_request:
+  workflow_dispatch:
+
+# Only cancel on new commits; label edits and title edits re-evaluate the
+# skip gate without aborting an in-flight image build.
+concurrency:
+  group: konflux-sim-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
+
+permissions:
+  contents: read
+
+env:
+  # Not runner.temp: the runner context is not available in workflow-level
+  # env, and the flag-contract job must find the help captures at a
+  # predictable path.
+  SIM_BUILD_DIR: ${{ github.workspace }}/.kubeflow-sim
+
+jobs:
+  check-skip:
+    name: gate
+    runs-on: ubuntu-24.04
+    outputs:
+      should-skip: ${{ steps.gate.outputs.should-skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide whether this PR needs the simulation
+        id: gate
+        env:
+          # PR_TITLE is attacker-controlled text: it reaches bash through
+          # env, never through ${{ }} interpolation.
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ] && [[ "$PR_TITLE" == *"[skip konflux-sim]"* ]]; then
+            echo "should-skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "should-skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin "$BASE_SHA" --quiet
+          # Capture first, match second: grep -q closes the pipe early and
+          # pipefail would turn a SIGPIPE in git diff into "no relevant
+          # files changed".
+          changed="$(git diff --name-only "$BASE_SHA"...HEAD)" || exit 1
+          if grep -Eq '^(\.tekton/|components/|scripts/validate-build\.sh|scripts/manifest_contracts\.py|\.github/workflows/pr-build-validation\.yml|docs/pr-build-validation\.md)' <<<"$changed"; then
+            echo "should-skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "out of scope (no build inputs changed); skipping validations" >> "$GITHUB_STEP_SUMMARY"
+            echo "should-skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  static-contracts:
+    name: static contracts
+    needs: check-skip
+    if: needs.check-skip.outputs.should-skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          # The builder image version, not go.mod's: the Konflux build runs
+          # in ubi9/go-toolset with GOTOOLCHAIN=local.
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Dockerfile / PipelineRun / go-version contracts
+        run: ./scripts/validate-build.sh static
+
+  hermetic:
+    name: hermetic build (${{ matrix.target }})
+    needs: check-skip
+    if: needs.check-skip.outputs.should-skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [odh, kf]
+        include:
+          - target: odh
+            component: components/odh-notebook-controller
+          - target: kf
+            component: components/notebook-controller
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Offline module + build proof (GOPROXY=off)
+        run: ./scripts/validate-build.sh hermetic ${{ matrix.target }}
+
+  image-build:
+    name: image build (${{ matrix.target }})
+    needs: check-skip
+    if: needs.check-skip.outputs.should-skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [odh, kf]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the Konflux image and smoke its entrypoint
+        run: ./scripts/validate-build.sh image ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: help-${{ matrix.target }}
+          path: ${{ env.SIM_BUILD_DIR }}/${{ matrix.target }}-help.txt
+          if-no-files-found: error
+          retention-days: 5
+
+  manifest-contracts:
+    name: manifest contracts
+    needs: check-skip
+    if: needs.check-skip.outputs.should-skip != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Ensure PyYAML (fail closed if it cannot be installed)
+        run: python3 -c "import yaml" 2>/dev/null || python3 -m pip install --user --quiet pyyaml
+
+      - name: Render every overlay, kubeconform, contract checks
+        run: ./scripts/validate-build.sh manifests
+
+  flag-contract:
+    name: flag contract
+    needs: [check-skip, image-build, manifest-contracts]
+    if: needs.check-skip.outputs.should-skip != 'true' && needs.image-build.result == 'success' && needs.manifest-contracts.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: help-*
+          path: ${{ env.SIM_BUILD_DIR }}
+          # Without merge-multiple each artifact lands in its own
+          # subdirectory (help-odh/odh-help.txt); the flag-contract command
+          # expects $SIM_BUILD_DIR/<target>-help.txt.
+          merge-multiple: true
+
+      - name: Overlay flags vs /manager --help
+        run: |
+          ./scripts/validate-build.sh flag-contract odh
+          ./scripts/validate-build.sh flag-contract kf
+
+  kind-deploy:
+    name: kind deploy
+    needs: [check-skip, image-build, manifest-contracts]
+    if: needs.check-skip.outputs.should-skip != 'true' && needs.image-build.result == 'success' && needs.manifest-contracts.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Ensure PyYAML (fail closed if it cannot be installed)
+        run: python3 -c "import yaml" 2>/dev/null || python3 -m pip install --user --quiet pyyaml
+
+      - name: Deploy both PR images into Kind and assert reconcile evidence
+        run: ./scripts/validate-build.sh kind
+
+  summary:
+    name: summary
+    needs: [check-skip, static-contracts, hermetic, image-build, manifest-contracts, flag-contract, kind-deploy]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every validation ran green or was skipped by the gate
+        env:
+          GATE: ${{ needs.check-skip.result }}
+          SHOULD_SKIP: ${{ needs.check-skip.outputs.should-skip }}
+          STATIC: ${{ needs.static-contracts.result }}
+          HERMETIC: ${{ needs.hermetic.result }}
+          IMAGE: ${{ needs.image-build.result }}
+          MANIFESTS: ${{ needs.manifest-contracts.result }}
+          FLAGS: ${{ needs.flag-contract.result }}
+          KIND: ${{ needs.kind-deploy.result }}
+        run: |
+          set -euo pipefail
+          if [ "$GATE" != "success" ]; then
+            echo "❌ the skip gate itself failed; nothing was validated" >&2
+            exit 1
+          fi
+          for result in STATIC HERMETIC IMAGE MANIFESTS FLAGS KIND; do
+            if [ "$SHOULD_SKIP" = "true" ]; then
+              # A skipped job counts as passing in GitHub; only accept it
+              # when the gate explicitly decided to skip.
+              if [ "${!result}" != "skipped" ]; then
+                echo "❌ gate skipped the run but $result is '${!result}'" >&2
+                exit 1
+              fi
+            elif [ "${!result}" != "success" ]; then
+              echo "❌ $result is '${!result}'" >&2
+              exit 1
+            fi
+          done
+          if [ "$SHOULD_SKIP" = "true" ]; then
+            echo "⏭️  konflux-sim skipped: no build inputs changed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ konflux-sim: all validations passed" >> "$GITHUB_STEP_SUMMARY"
+          fi
